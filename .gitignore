@@ -1,0 +1,20 @@
+/build/
+/build-*/
+/.cache/
+/.qt/
+/.venv/
+*.user
+*.user.*
+*.autosave
+compile_commands.json
+*.moc
+Testing/
+.DS_Store
+
+# Local credentials and runtime data must never be committed.
+client_secret*.json
+google-oauth*.json
+*.token
+*.sqlite
+*.sqlite3
+*.db
