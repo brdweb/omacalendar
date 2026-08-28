@@ -46,6 +46,7 @@ class ProviderTest final : public QObject {
 };
 
 void ProviderTest::googleOAuthLoopbackConfiguration() {
+  QVERIFY(!google::defaultOAuthClientSecret().isEmpty());
   QTemporaryDir directory;
   QVERIFY(directory.isValid());
   Database database;

@@ -10,6 +10,7 @@
 #include <QUrl>
 
 #include "core/domain.h"
+#include "providers/google/googleoauthconfig.h"
 
 namespace omacalendar::google {
 namespace {
@@ -98,6 +99,9 @@ bool GoogleAuthManager::restoreClient(const QString& clientId, QString* errorMes
   m_clientId = normalizedClientId;
   m_clientSecret =
       m_secrets.lookup(normalizedClientId, QString::fromLatin1(kClientSecretKind));
+  if (m_clientSecret.isEmpty() && normalizedClientId == defaultOAuthClientId()) {
+    m_clientSecret = defaultOAuthClientSecret();
+  }
   return true;
 }
 

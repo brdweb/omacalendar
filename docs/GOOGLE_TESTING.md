@@ -1,15 +1,17 @@
 # Google Calendar credential test guide
 
-This guide is for the Phase 4 owner test. OmaCalendar now includes its official
-public desktop OAuth client ID, so ordinary users do not download or manage a
-credentials file. The resulting refresh token is stored by the desktop Secret
-Service (`secret-tool`) and is never written to the calendar database.
+This guide is for the Phase 4 owner test. OmaCalendar includes its official
+Google Desktop OAuth client credentials, so ordinary users do not download or
+manage a credentials file. Installed desktop applications are public OAuth
+clients, so the application key cannot be confidential; PKCE protects each
+authorization flow. The resulting refresh token is stored by the desktop
+Secret Service (`secret-tool`) and is never written to the calendar database.
 
 ## 1. Project configuration
 
 The project owner has configured Google Cloud project `omacalendar-506917`,
 enabled the Google Calendar API, and created the **OmaCalendar Linux Desktop**
-OAuth client. The app remains **External / Testing** for this checkpoint and
+OAuth client. The app is currently **External / In production** and
 requests only these scopes:
 
    - `https://www.googleapis.com/auth/calendar.events`
@@ -17,8 +19,8 @@ requests only these scopes:
 
 Google's current desktop-app setup is also described in its
 [Calendar quickstart](https://developers.google.com/workspace/calendar/api/quickstart/go).
-Testing-mode authorizations can expire after seven days, which is expected for
-this development checkpoint.
+Because the app is in production, owner refresh tokens are not subject to the
+seven-day lifetime imposed on external apps in Testing status.
 
 ## 2. Build and launch OmaCalendar
 

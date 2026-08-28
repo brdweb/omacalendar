@@ -233,7 +233,7 @@ void AppController::connectGoogle(const QString& displayName) {
   setError({});
   send(QStringLiteral("google.configureClient"),
        {{QStringLiteral("clientId"), google::defaultOAuthClientId()},
-        {QStringLiteral("clientSecret"), QString()}},
+        {QStringLiteral("clientSecret"), google::defaultOAuthClientSecret()}},
        [this, displayName](const QJsonValue&) {
          send(QStringLiteral("google.oauthStart"),
               {{QStringLiteral("displayName"), displayName.trimmed()}},
