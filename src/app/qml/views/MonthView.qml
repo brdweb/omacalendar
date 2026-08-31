@@ -169,6 +169,14 @@ Item {
                                              + Qt.formatDate(dayCell.dateValue,
                                                              "MMMM d")
                             font.pixelSize: Theme.microFontSize
+                            Keys.onReturnPressed: event => {
+                                overflowButton.clicked()
+                                event.accepted = true
+                            }
+                            Keys.onEnterPressed: event => {
+                                overflowButton.clicked()
+                                event.accepted = true
+                            }
                             onClicked: {
                                 root.activeOverflowPopup = overflowPopup
                                 overflowPopup.open()

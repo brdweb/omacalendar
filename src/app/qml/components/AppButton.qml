@@ -23,6 +23,14 @@ Button {
     ToolTip.visible: toolTipText.length > 0 && hovered
     ToolTip.text: toolTipText
     ToolTip.delay: 500
+    Keys.onReturnPressed: event => {
+        control.clicked()
+        event.accepted = true
+    }
+    Keys.onEnterPressed: event => {
+        control.clicked()
+        event.accepted = true
+    }
 
     contentItem: Item {
         implicitWidth: contentRow.implicitWidth
