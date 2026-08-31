@@ -27,6 +27,11 @@ jobs:
       - name: Check out source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
+      - name: Trust checkout and prepare package-test user
+        run: |
+          git config --global --add safe.directory "$PWD"
+          useradd --create-home --home-dir /tmp/omacalendar-package-test package-test
+
       - name: Check C++ formatting
         shell: bash
         run: |
@@ -36,12 +41,10 @@ jobs:
       - name: Validate shell scripts
         run: |
           bash -n packaging/arch/*.in packaging/aur/*.in packaging/release/*.sh
-          packaging/release/test-versioning.sh
+          runuser -u package-test -- packaging/release/test-versioning.sh
 
       - name: Validate native Arch package assembly
-        run: |
-          useradd --create-home --home-dir /tmp/omacalendar-package-test package-test
-          runuser -u package-test -- packaging/release/test-arch-package.sh
+        run: runuser -u package-test -- packaging/release/test-arch-package.sh
 
       - name: Validate desktop metadata
         run: desktop-file-validate packaging/org.omacalendar.OmaCalendar.desktop
