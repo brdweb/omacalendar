@@ -279,6 +279,13 @@ esac
            "addSubscription waited for Secret Service instead of returning");
   QCOMPARE(account.authStatus, QStringLiteral("credential_storage_pending"));
 
+  // This test exercises Secret Service scheduling, not feed networking. Pause the
+  // fixture account before the credential callback tries its automatic first refresh
+  // so no unrelated QNetworkAccessManager work remains in flight at process shutdown.
+  Account pausedAccount = database.account(account.id);
+  pausedAccount.enabled = false;
+  QVERIFY(database.upsertAccount(pausedAccount, &error));
+
   QTRY_COMPARE_WITH_TIMEOUT(database.account(account.id).authStatus,
                             QStringLiteral("connected"), 2000);
   QVERIFY(accountChanged.count() >= 2);
