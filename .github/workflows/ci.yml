@@ -41,10 +41,10 @@ jobs:
           packaging/release/test-versioning.sh
 
       - name: Validate desktop metadata
-        run: desktop-file-validate packaging/io.github.brdweb.omacalendar.desktop
+        run: desktop-file-validate packaging/org.omacalendar.OmaCalendar.desktop
 
       - name: Validate AppStream metadata
-        run: appstreamcli validate --no-net --strict packaging/io.github.brdweb.omacalendar.metainfo.xml
+        run: appstreamcli validate --no-net --strict packaging/org.omacalendar.OmaCalendar.metainfo.xml
 
   build:
     name: ${{ matrix.name }}
