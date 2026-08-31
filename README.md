@@ -1,10 +1,9 @@
 # OmaCalendar
 
-OmaCalendar is a local-first, keyboard-oriented calendar for Omarchy Linux. Its
-aim point is the speed and interaction density of Fantastical: a complete
-desktop calendar without tasks, booking services, natural-language entry, or an
-OmaCalendar cloud service. An optional Quickshell companion is developed and
-released independently.
+OmaCalendar is a local-first, keyboard-oriented calendar for Omarchy Linux. It
+provides fast, interaction-dense desktop calendar workflows without tasks,
+booking services, natural-language entry, or an OmaCalendar cloud service. An
+optional Quickshell companion is developed and released independently.
 
 > [!WARNING]
 > `1.0.0-alpha` is an unsupported evaluation prerelease. Automated suites
