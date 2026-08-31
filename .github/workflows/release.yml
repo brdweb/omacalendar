@@ -28,6 +28,9 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
+      - name: Trust the container checkout
+        run: git config --global --add safe.directory "$PWD"
+
       - name: Verify tag and release metadata
         env:
           GH_TOKEN: ${{ github.token }}
