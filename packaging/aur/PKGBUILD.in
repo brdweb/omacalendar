@@ -1,7 +1,8 @@
 # Maintainer: OmaCalendar contributors
 pkgname=omacalendar
-pkgver=@PROJECT_VERSION@
+pkgver=@ARCH_PKGVER@
 pkgrel=1
+_upstream_version=@UPSTREAM_VERSION@
 pkgdesc='Local-first calendar for Omarchy Linux'
 arch=('x86_64')
 url='https://github.com/brdweb/omacalendar'
@@ -18,27 +19,27 @@ depends=(
   'qt6-wayland'
 )
 makedepends=('cmake' 'ninja' 'pkgconf')
-source=("${pkgname}-${pkgver}.tar.gz::${url}/releases/download/v${pkgver}/omacalendar-${pkgver}-source.tar.gz")
+source=("${pkgname}-${_upstream_version}.tar.gz::${url}/releases/download/v${_upstream_version}/omacalendar-${_upstream_version}-source.tar.gz")
 sha256sums=('@SOURCE_SHA256@')
 
 build() {
-  cmake -S "${pkgname}-${pkgver}" -B build -G Ninja \
+  cmake -S "${pkgname}-${_upstream_version}" -B build -G Ninja \
     -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_INSTALL_PREFIX=/usr \
     -DOMACALENDAR_BUILD_TESTS=ON \
     -DOMACALENDAR_ENABLE_WERROR=ON \
-    -DOMACALENDAR_VERSION_SUFFIX=
+    -DOMACALENDAR_VERSION_SUFFIX=@VERSION_SUFFIX@
   cmake --build build --parallel
 }
 
 check() {
   QT_QPA_PLATFORM=offscreen ctest --test-dir build --output-on-failure
-  "${pkgname}-${pkgver}/packaging/release/smoke-daemon.sh" build
-  "${pkgname}-${pkgver}/packaging/release/check-qmllint.sh" build
+  "${pkgname}-${_upstream_version}/packaging/release/smoke-daemon.sh" build
+  "${pkgname}-${_upstream_version}/packaging/release/check-qmllint.sh" build
 }
 
 package() {
   DESTDIR="${pkgdir}" cmake --install build
-  install -Dm644 "${pkgname}-${pkgver}/LICENSE" \
+  install -Dm644 "${pkgname}-${_upstream_version}/LICENSE" \
     "${pkgdir}/usr/share/licenses/${pkgname}/LICENSE"
 }

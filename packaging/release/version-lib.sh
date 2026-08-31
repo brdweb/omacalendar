@@ -38,6 +38,42 @@ release_version_suffix() {
   printf '%s\n' "${version#"${base}"}"
 }
 
+arch_pkgver() {
+  if [[ $# -ne 1 ]] || ! validate_release_version "$1"; then
+    return 1
+  fi
+
+  local version=$1
+  local base
+  base=$(release_base_version "${version}")
+  if [[ ${version} == "${base}" ]]; then
+    printf '%s\n' "${base}"
+    return 0
+  fi
+
+  # Keep the SemVer-to-Arch mapping injective by limiting Arch prereleases to
+  # the supported release channels and, optionally, one numeric identifier.
+  # Arch treats a separator after the patch number as a newer version, so drop
+  # the remaining dot (for example, 1.0.0-beta.1 becomes 1.0.0beta1).
+  local prerelease=${version#*-}
+  if [[ ! ${prerelease} =~ ^(alpha|beta|rc)(\.(0|[1-9][0-9]*))?$ ]]; then
+    return 1
+  fi
+  local arch_prerelease=${prerelease//./}
+  printf '%s%s\n' "${base}" "${arch_prerelease}"
+}
+
+requires_public_release_gates() {
+  if [[ $# -ne 1 ]] || ! validate_release_version "$1"; then
+    return 1
+  fi
+  local version=$1
+
+  # The already-published 1.0.0-alpha record predates the expanded public
+  # release checklist. Every later stable or prerelease version must use it.
+  [[ ${version} != 1.0.0-alpha ]]
+}
+
 cmake_release_version() {
   local repository_root=$1
   local numeric_version

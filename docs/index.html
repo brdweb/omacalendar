@@ -4,6 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="description" content="OmaCalendar is a local-first calendar application for Omarchy Linux.">
+  <meta name="google-site-verification" content="qCLcZHFAv_Xc9Yug2nHbl6UhmMVBshAtDlts4H59Pkk">
   <title>OmaCalendar</title>
   <link rel="stylesheet" href="styles.css">
 </head>
@@ -19,8 +20,35 @@
       <p><strong>1.0.0-alpha is an unsupported evaluation prerelease.</strong> Use test calendars and keep independent backups while live-provider and stable current-Omarchy acceptance testing continues. Source code and progress are public on <a href="https://github.com/brdweb/omacalendar">GitHub</a>.</p>
     </section>
 
+    <section aria-labelledby="screenshots-heading">
+      <h2 id="screenshots-heading">Calendar views that stay out of the way</h2>
+      <p>Move between agenda, day, week, month, and year views; edit events without leaving the calendar; and keep the same cached data available to the independently released Omarchy widget.</p>
+      <figure class="hero-shot">
+        <img src="screenshots/desktop-month.png" alt="OmaCalendar month view showing synthetic events across three calendars">
+        <figcaption>Month view using the Tokyo Night Omarchy theme and synthetic release data.</figcaption>
+      </figure>
+      <div class="shot-grid">
+        <figure>
+          <img src="screenshots/desktop-week.png" alt="OmaCalendar week view showing overlapping synthetic events">
+          <figcaption>Overlapping events remain visible and actionable.</figcaption>
+        </figure>
+        <figure>
+          <img src="screenshots/desktop-agenda.png" alt="OmaCalendar scrolling agenda showing synthetic events">
+          <figcaption>Agenda begins at today and continues through the timeline.</figcaption>
+        </figure>
+      </div>
+      <p class="capture-note">Every screenshot is generated from an isolated profile containing only synthetic events—never a maintainer calendar or account.</p>
+    </section>
+
+    <section class="card">
+      <h2>Beta distribution</h2>
+      <p>The first beta will ship a checksummed, attested native Arch package in its GitHub release for current Omarchy on x86-64. It can be installed directly with <code>pacman -U</code>; no custom package repository is required.</p>
+      <p><a href="https://github.com/brdweb/omacalendar/releases">View releases and installation assets</a></p>
+    </section>
+
     <nav aria-label="Project links">
       <a href="https://github.com/brdweb/omacalendar">Source code</a>
+      <a href="https://github.com/brdweb/omacalendar/issues">Support and issues</a>
       <a href="privacy.html">Privacy policy</a>
       <a href="terms.html">Terms of use</a>
     </nav>

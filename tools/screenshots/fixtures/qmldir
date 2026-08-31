@@ -1,0 +1,4 @@
+module OmaCalendar
+singleton App 1.0 App.qml
+singleton Theme 1.0 Theme.qml
+singleton OmarchyTheme 1.0 OmarchyTheme.qml

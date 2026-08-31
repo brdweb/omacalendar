@@ -1,0 +1,80 @@
+name: Beta bug report
+description: Report a reproducible OmaCalendar application, daemon, or CLI defect.
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for testing OmaCalendar. Use synthetic names and redact logs before attaching them. Never include OAuth credentials, tokens, callback URLs, private server URLs, attendee addresses, raw personal ICS files, or screenshots of real calendar data.
+  - type: input
+    id: version
+    attributes:
+      label: OmaCalendar version
+      description: Paste the version from `omacalendarctl system.info` or the exact commit.
+      placeholder: 1.0.0-beta.1
+    validations:
+      required: true
+  - type: input
+    id: omarchy
+    attributes:
+      label: Omarchy and Qt versions
+      description: Include the current Omarchy version and Qt version if known.
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Affected area
+      options:
+        - Desktop application
+        - Background daemon or sync
+        - Command-line client
+        - Install, upgrade, or uninstall
+        - Google Calendar
+        - CalDAV
+        - Local calendar
+        - ICS subscription or import/export
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction steps
+      description: Give the smallest numbered reproduction using synthetic events and calendars.
+      placeholder: |
+        1. Open a synthetic local calendar.
+        2. Create ...
+        3. Observe ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: Include the exact redacted error and whether the UI recovered.
+    validations:
+      required: true
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Sanitized diagnostics
+      description: Review every line before pasting. Replace titles, names, addresses, IDs, ETags, and private URLs with placeholders.
+      render: shell
+  - type: checkboxes
+    id: safety
+    attributes:
+      label: Data-safety confirmation
+      options:
+        - label: I reviewed this report and its attachments and removed credentials, tokens, personal calendar content, attendee addresses, and private URLs.
+          required: true
+        - label: I can reproduce this with synthetic data, or I explained why that is not possible without attaching private data.
+          required: true

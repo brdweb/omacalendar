@@ -4,6 +4,32 @@ OmaCalendar `1.0.0-alpha` is an evaluation release for Omarchy Linux. Back up
 important calendar data before testing it, and do not make the alpha your only
 copy of an important device-only calendar.
 
+## Install the beta package from GitHub
+
+The `v1.0.0-beta.1` GitHub release provides a native package for current
+Omarchy on x86-64. In an empty directory, download and verify it before
+installation:
+
+```bash
+curl -LO https://github.com/brdweb/omacalendar/releases/download/v1.0.0-beta.1/omacalendar-1.0.0beta1-1-x86_64.pkg.tar.zst
+curl -LO https://github.com/brdweb/omacalendar/releases/download/v1.0.0-beta.1/SHA256SUMS
+grep ' omacalendar-1.0.0beta1-1-x86_64.pkg.tar.zst$' SHA256SUMS | sha256sum --check
+gh attestation verify ./omacalendar-1.0.0beta1-1-x86_64.pkg.tar.zst \
+  --repo brdweb/omacalendar
+gh attestation verify ./omacalendar-1.0.0beta1-1-x86_64.pkg.tar.zst \
+  --repo brdweb/omacalendar \
+  --predicate-type https://spdx.dev/Document/v2.3
+sudo pacman -U ./omacalendar-1.0.0beta1-1-x86_64.pkg.tar.zst
+systemctl --user daemon-reload
+systemctl --user enable --now omacalendard.socket
+systemctl --user try-restart omacalendard.service
+```
+
+The attestation commands require the optional GitHub CLI. This direct package
+does not configure an update repository. Repeat the download, verification,
+`pacman -U`, and user-service refresh steps for a newer release so an active
+daemon does not continue running the replaced binary.
+
 ## Install from source
 
 Install the build dependencies and compile the application:

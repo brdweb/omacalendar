@@ -1,0 +1,40 @@
+# Generated from the validated release staging tree. Do not publish this
+# recipe to the AUR; packaging/aur contains the source and binary AUR recipes.
+# Maintainer: OmaCalendar contributors
+pkgname=omacalendar
+pkgver=@ARCH_PKGVER@
+pkgrel=1
+pkgdesc='Local-first calendar for Omarchy Linux'
+arch=('x86_64')
+url='https://github.com/brdweb/omacalendar'
+license=('MIT')
+depends=(
+  'git'
+  'hicolor-icon-theme'
+  'libical'
+  'libsecret'
+  'python'
+  'qt6-base'
+  'qt6-declarative'
+  'qt6-networkauth'
+  'qt6-wayland'
+)
+options=(
+  '!debug'
+  '!purge'
+  '!strip'
+  '!zipman'
+  'docs'
+  'emptydirs'
+  'libtool'
+  'staticlibs'
+)
+source=('payload.tar')
+sha256sums=('@PAYLOAD_SHA256@')
+
+package() {
+  cp -a "${srcdir}/usr" "${pkgdir}/"
+  install -Dm644 "${pkgdir}/usr/share/doc/OmaCalendar/LICENSE" \
+    "${pkgdir}/usr/share/licenses/omacalendar/LICENSE"
+  chown -R 0:0 "${pkgdir}"
+}

@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Private security report
+    url: https://github.com/brdweb/omacalendar/security/advisories/new
+    about: Report vulnerabilities, exposed credentials, or private calendar-data issues privately.
+  - name: Support and troubleshooting guide
+    url: https://github.com/brdweb/omacalendar/blob/main/SUPPORT.md
+    about: Review current support boundaries and safe diagnostic guidance first.
