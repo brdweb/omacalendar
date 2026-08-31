@@ -1,0 +1,1268 @@
+#!/usr/bin/env python3
+"""Transactional OmaCalendar widget activation for Omarchy.
+
+The command deliberately has no implicit plugin source.  A caller must pass an
+absolute local path or the canonical OmaCalendar widget repository URL after
+the user has consented to installation.
+"""
+
+from __future__ import annotations
+
+import argparse
+import copy
+import fcntl
+import hashlib
+import json
+import os
+import re
+import shutil
+import stat
+import subprocess
+import sys
+import tempfile
+import uuid
+from contextlib import contextmanager
+from dataclasses import dataclass
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any, Iterator, NoReturn
+
+
+PLUGIN_ID = "org.omacalendar.widget"
+CLOCK_ID = "omarchy.clock"
+SHORTCUT = "SUPER + CTRL + ALT + D"
+PREVIOUS_SHORTCUT_COMMAND = "omarchy-shell shell toggle omarchy.clock"
+STATE_SCHEMA = 1
+MARKER_NAME = ".omacalendar-widgetctl.json"
+OFFICIAL_NETWORK_SOURCES = {
+    "https://github.com/brdweb/omacalendar-widget",
+    "https://github.com/brdweb/omacalendar-widget.git",
+}
+EXIT_USAGE = 2
+EXIT_VALIDATION = 3
+EXIT_ROLLED_BACK = 4
+EXIT_CONFLICT = 5
+
+
+class WidgetCtlError(Exception):
+    def __init__(self, code: str, message: str, exit_code: int = EXIT_VALIDATION):
+        super().__init__(message)
+        self.code = code
+        self.message = message
+        self.exit_code = exit_code
+
+
+class JsonArgumentParser(argparse.ArgumentParser):
+    def error(self, message: str) -> NoReturn:
+        raise WidgetCtlError("invalid_arguments", message, EXIT_USAGE)
+
+
+@dataclass(frozen=True)
+class InstallPaths:
+    home: Path
+    omarchy_path: Path
+    shell_config: Path
+    shell_defaults: Path
+    bindings: Path
+    plugins_dir: Path
+    plugin_target: Path
+    state_root: Path
+    current_state_dir: Path
+    state_file: Path
+
+
+@dataclass
+class CommandResult:
+    stdout: str
+    stderr: str
+
+
+class CommandRunner:
+    def __init__(self, paths: InstallPaths):
+        self._environment = os.environ.copy()
+        self._environment["HOME"] = str(paths.home)
+        self._environment["OMARCHY_PATH"] = str(paths.omarchy_path)
+
+    def run(self, argv: list[str], code: str, message: str) -> CommandResult:
+        try:
+            completed = subprocess.run(
+                argv,
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=20,
+                env=self._environment,
+            )
+        except FileNotFoundError as error:
+            raise WidgetCtlError(
+                "missing_dependency", f"Required command is unavailable: {argv[0]}"
+            ) from error
+        except subprocess.TimeoutExpired as error:
+            raise WidgetCtlError(code, f"{message}: command timed out") from error
+        if completed.returncode != 0:
+            detail = (completed.stderr or completed.stdout).strip()
+            if detail:
+                detail = detail[-1000:]
+                raise WidgetCtlError(code, f"{message}: {detail}")
+            raise WidgetCtlError(code, message)
+        return CommandResult(completed.stdout, completed.stderr)
+
+    def best_effort(self, argv: list[str]) -> str | None:
+        try:
+            completed = subprocess.run(
+                argv,
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=10,
+                env=self._environment,
+            )
+            if completed.returncode == 0:
+                return None
+            return (completed.stderr or completed.stdout).strip()[-500:]
+        except (OSError, subprocess.SubprocessError) as error:
+            return str(error)
+
+
+def utc_now() -> str:
+    return datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
+
+
+def digest(data: bytes) -> str:
+    return hashlib.sha256(data).hexdigest()
+
+
+def read_bytes(path: Path) -> bytes | None:
+    if not path.exists():
+        return None
+    if path.is_symlink():
+        raise WidgetCtlError(
+            "unsafe_config_path", f"Refusing to replace symbolic link: {path}"
+        )
+    if not path.is_file():
+        raise WidgetCtlError("invalid_config_path", f"Expected a file: {path}")
+    return path.read_bytes()
+
+
+def read_json_bytes(data: bytes, label: str) -> dict[str, Any]:
+    try:
+        value = json.loads(data.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise WidgetCtlError("invalid_json", f"{label} is not valid UTF-8 JSON") from error
+    if not isinstance(value, dict):
+        raise WidgetCtlError("invalid_json", f"{label} must contain a JSON object")
+    return value
+
+
+def json_bytes(value: Any) -> bytes:
+    return (json.dumps(value, indent=2, sort_keys=True, ensure_ascii=False) + "\n").encode(
+        "utf-8"
+    )
+
+
+def ensure_private_directory(path: Path) -> None:
+    if path.exists() and path.is_symlink():
+        raise WidgetCtlError("unsafe_state_path", f"Refusing symbolic-link directory: {path}")
+    path.mkdir(parents=True, exist_ok=True, mode=0o700)
+    if path.stat().st_uid != os.getuid():
+        raise WidgetCtlError("unsafe_state_path", f"Directory is not owned by this user: {path}")
+
+
+def atomic_write(path: Path, data: bytes, mode: int | None = None) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    existing_mode = None
+    if path.exists():
+        if path.is_symlink():
+            raise WidgetCtlError("unsafe_config_path", f"Refusing symbolic link: {path}")
+        existing_mode = stat.S_IMODE(path.stat().st_mode)
+    target_mode = mode if mode is not None else (existing_mode or 0o600)
+    descriptor, temporary_name = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
+    temporary = Path(temporary_name)
+    try:
+        os.fchmod(descriptor, target_mode)
+        with os.fdopen(descriptor, "wb") as handle:
+            handle.write(data)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, path)
+        directory_descriptor = os.open(path.parent, os.O_DIRECTORY)
+        try:
+            os.fsync(directory_descriptor)
+        finally:
+            os.close(directory_descriptor)
+    finally:
+        if temporary.exists():
+            temporary.unlink()
+
+
+def safe_unlink(path: Path) -> None:
+    try:
+        path.unlink()
+    except FileNotFoundError:
+        pass
+
+
+def file_mode(path: Path) -> int | None:
+    return stat.S_IMODE(path.stat().st_mode) if path.exists() else None
+
+
+def build_paths(args: argparse.Namespace) -> InstallPaths:
+    home = Path(args.home or os.environ.get("HOME", "")).expanduser()
+    if not home.is_absolute() or home == Path("/"):
+        raise WidgetCtlError("unsafe_home", "HOME must be a specific absolute directory")
+    home = home.resolve()
+    omarchy_path = Path(
+        args.omarchy_path or os.environ.get("OMARCHY_PATH", "/usr/share/omarchy")
+    ).expanduser()
+    if not omarchy_path.is_absolute():
+        raise WidgetCtlError("invalid_omarchy_path", "OMARCHY_PATH must be absolute")
+    omarchy_path = omarchy_path.resolve()
+
+    configured_state = os.environ.get("XDG_STATE_HOME", "")
+    if configured_state and Path(configured_state).is_absolute() and args.home is None:
+        state_base = Path(configured_state)
+    else:
+        state_base = home / ".local" / "state"
+    state_root = state_base / "omacalendar" / "widget-activation"
+    current = state_root / "current"
+    return InstallPaths(
+        home=home,
+        omarchy_path=omarchy_path,
+        shell_config=home / ".config" / "omarchy" / "shell.json",
+        shell_defaults=omarchy_path / "config" / "omarchy" / "shell.json",
+        bindings=home / ".config" / "hypr" / "bindings.lua",
+        plugins_dir=home / ".config" / "omarchy" / "plugins",
+        plugin_target=home / ".config" / "omarchy" / "plugins" / PLUGIN_ID,
+        state_root=state_root,
+        current_state_dir=current,
+        state_file=current / "state.json",
+    )
+
+
+@contextmanager
+def exclusive_lock(paths: InstallPaths) -> Iterator[None]:
+    ensure_private_directory(paths.state_root)
+    lock_path = paths.state_root / ".lock"
+    descriptor = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o600)
+    try:
+        fcntl.flock(descriptor, fcntl.LOCK_EX)
+        yield
+    finally:
+        fcntl.flock(descriptor, fcntl.LOCK_UN)
+        os.close(descriptor)
+
+
+def entry_id(entry: Any) -> str:
+    if isinstance(entry, str):
+        return entry
+    if isinstance(entry, dict):
+        return str(entry.get("id", ""))
+    return ""
+
+
+def ensure_shell_shape(document: dict[str, Any]) -> dict[str, Any]:
+    result = copy.deepcopy(document)
+    bar = result.setdefault("bar", {})
+    if not isinstance(bar, dict):
+        raise WidgetCtlError("invalid_shell_config", "shell.json bar must be an object")
+    layout = bar.setdefault("layout", {})
+    if not isinstance(layout, dict):
+        raise WidgetCtlError("invalid_shell_config", "shell.json bar.layout must be an object")
+    for section in ("left", "center", "right"):
+        entries = layout.setdefault(section, [])
+        if not isinstance(entries, list):
+            raise WidgetCtlError(
+                "invalid_shell_config", f"shell.json bar.layout.{section} must be an array"
+            )
+    plugins = result.setdefault("plugins", [])
+    if not isinstance(plugins, list):
+        raise WidgetCtlError("invalid_shell_config", "shell.json plugins must be an array")
+    return result
+
+
+def shell_source(paths: InstallPaths) -> tuple[bytes, bool, int | None]:
+    user_data = read_bytes(paths.shell_config)
+    if user_data is not None:
+        return user_data, True, file_mode(paths.shell_config)
+    defaults = read_bytes(paths.shell_defaults)
+    if defaults is None:
+        raise WidgetCtlError(
+            "missing_shell_defaults", f"Omarchy shell defaults not found: {paths.shell_defaults}"
+        )
+    return defaults, False, None
+
+
+def locate_layout_id(document: dict[str, Any], wanted: str) -> list[tuple[str, int, Any]]:
+    matches: list[tuple[str, int, Any]] = []
+    layout = document["bar"]["layout"]
+    for section in ("left", "center", "right"):
+        for index, item in enumerate(layout[section]):
+            if entry_id(item) == wanted:
+                matches.append((section, index, item))
+    return matches
+
+
+def prepare_shell_install(
+    document: dict[str, Any], activation_id: str
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    result = ensure_shell_shape(document)
+    if locate_layout_id(result, PLUGIN_ID) or any(
+        entry_id(item) == PLUGIN_ID for item in result["plugins"]
+    ):
+        raise WidgetCtlError(
+            "widget_already_configured",
+            "OmaCalendar already appears in shell.json without a matching activation journal",
+            EXIT_CONFLICT,
+        )
+
+    clocks = locate_layout_id(result, CLOCK_ID)
+    if len(clocks) != 1:
+        raise WidgetCtlError(
+            "clock_position_ambiguous" if clocks else "clock_not_found",
+            "Expected exactly one omarchy.clock entry to replace",
+            EXIT_CONFLICT,
+        )
+    section, index, original = clocks[0]
+    entries = result["bar"]["layout"][section]
+    before = entry_id(entries[index - 1]) if index > 0 else ""
+    after = entry_id(entries[index + 1]) if index + 1 < len(entries) else ""
+
+    if isinstance(original, dict):
+        replacement = copy.deepcopy(original)
+        replacement["id"] = PLUGIN_ID
+    else:
+        replacement = {"id": PLUGIN_ID}
+    replacement["omacalendarWidgetctl"] = activation_id
+    entries[index] = replacement
+
+    bar = result["bar"]
+    anchor_present = "centerAnchor" in bar
+    anchor_value = bar.get("centerAnchor")
+    bar["centerAnchor"] = PLUGIN_ID
+    metadata = {
+        "section": section,
+        "index": index,
+        "beforeId": before,
+        "afterId": after,
+        "originalEntry": original,
+        "anchorPresent": anchor_present,
+        "anchorValue": anchor_value,
+    }
+    return result, metadata
+
+
+def managed_shortcut_block(activation_id: str, prefix: bytes) -> bytes:
+    body = (
+        f"-- BEGIN OMACALENDAR WIDGETCTL {activation_id}\n"
+        "-- Managed by omacalendar-widgetctl; content outside this block is untouched.\n"
+        f'hl.unbind("{SHORTCUT}")\n'
+        f'o.bind("{SHORTCUT}", "Calendar", '
+        f'"omarchy-shell shell toggle {PLUGIN_ID}")\n'
+        f"-- END OMACALENDAR WIDGETCTL {activation_id}\n"
+    ).encode("utf-8")
+    separator = b"" if not prefix or prefix.endswith(b"\n\n") else b"\n"
+    return separator + body
+
+
+def validate_no_stale_shortcut(data: bytes) -> None:
+    if b"BEGIN OMACALENDAR WIDGETCTL" in data or b"END OMACALENDAR WIDGETCTL" in data:
+        raise WidgetCtlError(
+            "stale_shortcut_override",
+            "bindings.lua contains an unmanaged OmaCalendar widgetctl block",
+            EXIT_CONFLICT,
+        )
+
+
+def validate_local_source(source: str) -> Path:
+    candidate = Path(source).expanduser()
+    if not candidate.is_absolute():
+        raise WidgetCtlError(
+            "untrusted_source", "A local widget source must be an explicit absolute path"
+        )
+    resolved = candidate.resolve()
+    if not resolved.is_dir():
+        raise WidgetCtlError("source_unavailable", f"Widget source directory not found: {resolved}")
+    return resolved
+
+
+def normalized_network_source(source: str) -> str:
+    normalized = source.rstrip("/")
+    if normalized not in OFFICIAL_NETWORK_SOURCES:
+        raise WidgetCtlError(
+            "untrusted_source",
+            "Network installs are restricted to the official OmaCalendar widget repository",
+        )
+    return normalized
+
+
+def source_kind(source: str) -> tuple[str, str | Path]:
+    if "://" in source:
+        return "network", normalized_network_source(source)
+    return "local", validate_local_source(source)
+
+
+def reject_source_symlinks(source: Path) -> None:
+    for root, directories, files in os.walk(source, followlinks=False):
+        root_path = Path(root)
+        directories[:] = [name for name in directories if name != ".git"]
+        for name in [*directories, *files]:
+            item = root_path / name
+            if item.is_symlink():
+                raise WidgetCtlError(
+                    "unsafe_plugin_source", f"Plugin source contains a symbolic link: {item}"
+                )
+
+
+def copy_local_source(source: Path, destination: Path) -> None:
+    reject_source_symlinks(source)
+    ignored = shutil.ignore_patterns(".git", "build", ".cache", "*.qmlc", "*.jsc")
+    shutil.copytree(source, destination, symlinks=False, ignore=ignored)
+
+
+def clone_network_source(source: str, destination: Path, runner: CommandRunner) -> None:
+    runner.run(
+        ["git", "clone", "--depth", "1", "--", source, str(destination)],
+        "source_clone_failed",
+        "Could not clone the official widget repository",
+    )
+
+
+def validate_manifest(plugin_dir: Path) -> dict[str, Any]:
+    manifest_path = plugin_dir / "manifest.json"
+    manifest_data = read_bytes(manifest_path)
+    if manifest_data is None:
+        raise WidgetCtlError("invalid_plugin", "Widget source has no manifest.json")
+    manifest = read_json_bytes(manifest_data, str(manifest_path))
+    if manifest.get("schemaVersion") != 1:
+        raise WidgetCtlError("invalid_plugin", "Widget manifest schemaVersion must be 1")
+    if manifest.get("id") != PLUGIN_ID:
+        raise WidgetCtlError(
+            "wrong_plugin_id", f"Widget manifest id must be exactly {PLUGIN_ID}"
+        )
+    kinds = manifest.get("kinds")
+    entry_points = manifest.get("entryPoints")
+    if not isinstance(kinds, list) or "bar-widget" not in kinds:
+        raise WidgetCtlError("invalid_plugin", "Widget manifest must declare bar-widget")
+    if not isinstance(entry_points, dict) or not isinstance(
+        entry_points.get("barWidget"), str
+    ):
+        raise WidgetCtlError("invalid_plugin", "Widget manifest has no barWidget entry point")
+    entry_point = plugin_dir / entry_points["barWidget"]
+    try:
+        entry_point.resolve().relative_to(plugin_dir.resolve())
+    except ValueError as error:
+        raise WidgetCtlError("invalid_plugin", "Widget entry point escapes its source directory") from error
+    if not entry_point.is_file() or entry_point.is_symlink():
+        raise WidgetCtlError("invalid_plugin", "Widget bar entry point is missing or unsafe")
+    reject_source_symlinks(plugin_dir)
+    return manifest
+
+
+def parse_version(value: str) -> tuple[int, int, int]:
+    match = re.search(r"(\d+)\.(\d+)\.(\d+)", value)
+    if not match:
+        raise WidgetCtlError("unknown_omarchy_version", "Could not parse the Omarchy version")
+    return tuple(int(field) for field in match.groups())  # type: ignore[return-value]
+
+
+def validate_environment(
+    paths: InstallPaths, runner: CommandRunner, manifest: dict[str, Any], plugin_dir: Path
+) -> None:
+    version_result = runner.run(
+        ["omarchy", "version"], "omarchy_unavailable", "Could not read the Omarchy version"
+    )
+    installed = parse_version(version_result.stdout)
+    minimum_raw = (
+        manifest.get("compatibility", {}).get("minimumOmarchy", "4.0.0")
+        if isinstance(manifest.get("compatibility", {}), dict)
+        else "4.0.0"
+    )
+    minimum = parse_version(str(minimum_raw))
+    if installed < minimum:
+        raise WidgetCtlError(
+            "incompatible_omarchy",
+            f"OmaCalendar widget requires Omarchy {minimum_raw} or newer",
+        )
+    runner.run(
+        ["omarchy", "plugin", "validate", str(plugin_dir)],
+        "plugin_validation_failed",
+        "Omarchy rejected the widget plugin",
+    )
+    if not paths.shell_defaults.is_file():
+        raise WidgetCtlError(
+            "missing_shell_defaults", f"Omarchy shell defaults not found: {paths.shell_defaults}"
+        )
+    socket_unit = runner.run(
+        [
+            "systemctl",
+            "--user",
+            "show",
+            "--property=LoadState",
+            "--value",
+            "omacalendard.socket",
+        ],
+        "daemon_socket_unavailable",
+        "Could not inspect the OmaCalendar on-demand socket",
+    )
+    if socket_unit.stdout.strip() != "loaded":
+        raise WidgetCtlError(
+            "daemon_socket_unavailable",
+            "omacalendard.socket is not installed; install OmaCalendar before the widget",
+        )
+
+
+def enable_daemon_socket(runner: CommandRunner) -> None:
+    runner.run(
+        ["systemctl", "--user", "enable", "--now", "omacalendard.socket"],
+        "daemon_socket_activation_failed",
+        "Could not enable the OmaCalendar on-demand socket",
+    )
+
+
+def meaningful_config_errors(output: str) -> bool:
+    normalized = output.strip().lower()
+    return normalized not in {"", "ok", "no errors", "no config errors"}
+
+
+def refresh_and_validate_live(
+    paths: InstallPaths, runner: CommandRunner, expect_installed: bool
+) -> None:
+    runner.run(
+        ["omarchy-shell", "shell", "rescanPlugins"],
+        "shell_validation_failed",
+        "Omarchy shell could not rescan plugins",
+    )
+    runner.run(
+        ["omarchy-shell", "shell", "reloadConfig"],
+        "shell_validation_failed",
+        "Omarchy shell could not reload its configuration",
+    )
+    listing = runner.run(
+        ["omarchy", "plugin", "list", "--json"],
+        "shell_validation_failed",
+        "Could not inspect the running Omarchy plugin registry",
+    )
+    try:
+        plugins = json.loads(listing.stdout)
+    except json.JSONDecodeError as error:
+        raise WidgetCtlError(
+            "shell_validation_failed", "Omarchy returned an invalid plugin registry"
+        ) from error
+    matching = [item for item in plugins if isinstance(item, dict) and item.get("id") == PLUGIN_ID]
+    enabled = len(matching) == 1 and bool(matching[0].get("enabled"))
+    if expect_installed and not enabled:
+        raise WidgetCtlError(
+            "shell_validation_failed", "OmaCalendar was not enabled by the running shell"
+        )
+    if not expect_installed and matching:
+        raise WidgetCtlError(
+            "shell_validation_failed", "OmaCalendar remained loaded after restoration"
+        )
+
+    runner.run(
+        ["hyprctl", "reload"],
+        "hyprland_validation_failed",
+        "Hyprland rejected the configuration reload",
+    )
+    errors = runner.run(
+        ["hyprctl", "configerrors"],
+        "hyprland_validation_failed",
+        "Could not inspect Hyprland configuration errors",
+    )
+    if meaningful_config_errors(errors.stdout):
+        raise WidgetCtlError(
+            "hyprland_validation_failed",
+            f"Hyprland reported configuration errors: {errors.stdout.strip()[-1000:]}",
+        )
+
+
+def write_state(paths: InstallPaths, state: dict[str, Any]) -> None:
+    atomic_write(paths.state_file, json_bytes(state), 0o600)
+
+
+def load_state(paths: InstallPaths) -> dict[str, Any] | None:
+    data = read_bytes(paths.state_file)
+    if data is None:
+        return None
+    state = read_json_bytes(data, str(paths.state_file))
+    if state.get("schemaVersion") != STATE_SCHEMA or state.get("pluginId") != PLUGIN_ID:
+        raise WidgetCtlError(
+            "invalid_activation_state",
+            "The widget activation journal is incompatible or corrupt",
+            EXIT_CONFLICT,
+        )
+    return state
+
+
+def backup_preinstall_files(
+    paths: InstallPaths,
+    shell_data: bytes,
+    shell_existed: bool,
+    bindings_data: bytes,
+    bindings_existed: bool,
+) -> None:
+    ensure_private_directory(paths.current_state_dir)
+    if shell_existed:
+        atomic_write(paths.current_state_dir / "shell.before.json", shell_data, 0o600)
+    if bindings_existed:
+        atomic_write(paths.current_state_dir / "bindings.before.lua", bindings_data, 0o600)
+
+
+def restore_exact_file(
+    target: Path, backup: Path, existed: bool, mode: int | None
+) -> None:
+    if existed:
+        data = read_bytes(backup)
+        if data is None:
+            raise WidgetCtlError("missing_backup", f"Activation backup is missing: {backup}")
+        atomic_write(target, data, mode or 0o600)
+    else:
+        safe_unlink(target)
+
+
+def remove_owned_plugin(paths: InstallPaths, activation_id: str, allow_unmarked: bool) -> None:
+    target = paths.plugin_target
+    if not target.exists() and not target.is_symlink():
+        return
+    if target.is_symlink() or not target.is_dir():
+        raise WidgetCtlError(
+            "plugin_ownership_conflict", f"Refusing to remove unexpected plugin path: {target}", EXIT_CONFLICT
+        )
+    marker_data = read_bytes(target / MARKER_NAME)
+    marker_matches = False
+    if marker_data is not None:
+        try:
+            marker_matches = json.loads(marker_data).get("activationId") == activation_id
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            marker_matches = False
+    if not marker_matches and not allow_unmarked:
+        raise WidgetCtlError(
+            "plugin_ownership_conflict",
+            "OmaCalendar plugin ownership marker changed; the plugin directory was left untouched",
+            EXIT_CONFLICT,
+        )
+    shutil.rmtree(target)
+
+
+def cleanup_current_state(paths: InstallPaths) -> None:
+    if paths.current_state_dir.exists():
+        shutil.rmtree(paths.current_state_dir)
+
+
+def rollback_install(
+    paths: InstallPaths,
+    state: dict[str, Any],
+    runner: CommandRunner,
+    allow_unmarked_plugin: bool = True,
+) -> tuple[list[str], bool]:
+    warnings: list[str] = []
+    complete = True
+    rollback_actions = (
+        lambda: restore_exact_file(
+            paths.shell_config,
+            paths.current_state_dir / "shell.before.json",
+            bool(state["shell"]["existed"]),
+            state["shell"].get("mode"),
+        ),
+        lambda: restore_exact_file(
+            paths.bindings,
+            paths.current_state_dir / "bindings.before.lua",
+            bool(state["bindings"]["existed"]),
+            state["bindings"].get("mode"),
+        ),
+        lambda: remove_owned_plugin(
+            paths, str(state["activationId"]), allow_unmarked_plugin
+        ),
+    )
+    for action in rollback_actions:
+        try:
+            action()
+        except (OSError, WidgetCtlError) as error:
+            complete = False
+            message = error.message if isinstance(error, WidgetCtlError) else str(error)
+            warnings.append(f"rollback: {message}")
+    if complete:
+        try:
+            cleanup_current_state(paths)
+        except OSError as error:
+            complete = False
+            warnings.append(f"state cleanup: {error}")
+    else:
+        try:
+            state["phase"] = "rollback-incomplete"
+            write_state(paths, state)
+        except (OSError, WidgetCtlError) as error:
+            warnings.append(f"state update: {error}")
+
+    for command in (
+        ["omarchy-shell", "shell", "rescanPlugins"],
+        ["omarchy-shell", "shell", "reloadConfig"],
+        ["hyprctl", "reload"],
+    ):
+        warning = runner.best_effort(command)
+        if warning:
+            warnings.append(f"{' '.join(command)}: {warning}")
+    return warnings, complete
+
+
+def initial_result(command: str, dry_run: bool = False) -> dict[str, Any]:
+    return {
+        "ok": True,
+        "command": command,
+        "status": "unknown",
+        "changed": False,
+        "dryRun": dry_run,
+        "pluginId": PLUGIN_ID,
+        "actions": [],
+    }
+
+
+def stage_source(
+    source: str,
+    destination: Path,
+    runner: CommandRunner,
+) -> dict[str, Any]:
+    kind, resolved = source_kind(source)
+    if kind == "network":
+        clone_network_source(str(resolved), destination, runner)
+    else:
+        copy_local_source(Path(resolved), destination)
+    return validate_manifest(destination)
+
+
+def install(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
+    result = initial_result("install", args.dry_run)
+    paths = build_paths(args)
+    runner = CommandRunner(paths)
+    state = load_state(paths)
+    if state is not None:
+        if state.get("phase") == "active":
+            result.update(status="already_installed", source=state.get("source"))
+            return result, 0
+        raise WidgetCtlError(
+            "recovery_required",
+            "An interrupted activation journal exists; run omacalendar-widgetctl restore",
+            EXIT_CONFLICT,
+        )
+    if paths.plugin_target.exists() or paths.plugin_target.is_symlink():
+        raise WidgetCtlError(
+            "plugin_already_installed",
+            f"An unmanaged {PLUGIN_ID} plugin already exists",
+            EXIT_CONFLICT,
+        )
+
+    source = str(args.source or "")
+    if not source:
+        raise WidgetCtlError(
+            "source_required",
+            "Install requires --source with the trusted official URL or an absolute local path",
+            EXIT_USAGE,
+        )
+    # Validate trust before creating a staging directory.
+    source_kind(source)
+
+    temp_parent: Path | None = None
+    if args.dry_run:
+        temporary = tempfile.TemporaryDirectory(prefix="omacalendar-widget-dry-run-")
+        stage = Path(temporary.name) / "plugin"
+    else:
+        paths.plugins_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+        temp_parent = paths.plugins_dir
+        stage = temp_parent / f".omacalendar-stage-{uuid.uuid4()}"
+        temporary = None
+
+    try:
+        manifest = stage_source(source, stage, runner)
+        validate_environment(paths, runner, manifest, stage)
+
+        shell_data, shell_existed, shell_mode = shell_source(paths)
+        shell_document = read_json_bytes(shell_data, "Omarchy shell configuration")
+        activation_id = str(uuid.uuid4())
+        next_shell, shell_metadata = prepare_shell_install(shell_document, activation_id)
+        next_shell_data = json_bytes(next_shell)
+
+        current_bindings = read_bytes(paths.bindings)
+        bindings_existed = current_bindings is not None
+        bindings_data = current_bindings or b""
+        validate_no_stale_shortcut(bindings_data)
+        inserted_shortcut = managed_shortcut_block(activation_id, bindings_data)
+        next_bindings = bindings_data + inserted_shortcut
+
+        planned = [
+            "install validated plugin source",
+            "enable the OmaCalendar on-demand user socket",
+            f"replace {CLOCK_ID} with {PLUGIN_ID} at {shell_metadata['section']}:{shell_metadata['index']}",
+            f"set bar.centerAnchor to {PLUGIN_ID}",
+            f"remap {SHORTCUT} to the OmaCalendar widget",
+            "reload and validate Omarchy shell and Hyprland",
+        ]
+        result.update(
+            status="would_install" if args.dry_run else "prepared",
+            source=source,
+            actions=planned,
+            details={
+                "clockSection": shell_metadata["section"],
+                "clockIndex": shell_metadata["index"],
+                "previousCenterAnchor": shell_metadata["anchorValue"],
+                "shortcut": SHORTCUT,
+                "previousShortcutCommand": PREVIOUS_SHORTCUT_COMMAND,
+                "newShortcutCommand": f"omarchy-shell shell toggle {PLUGIN_ID}",
+                "shellConfigExisted": shell_existed,
+                "bindingsExisted": bindings_existed,
+            },
+        )
+        if args.dry_run:
+            return result, 0
+
+        state = {
+            "schemaVersion": STATE_SCHEMA,
+            "pluginId": PLUGIN_ID,
+            "activationId": activation_id,
+            "phase": "prepared",
+            "source": source,
+            "createdAt": utc_now(),
+            "shell": {
+                "existed": shell_existed,
+                "mode": shell_mode,
+                "beforeHash": digest(shell_data) if shell_existed else None,
+                "installedHash": None,
+                **shell_metadata,
+            },
+            "bindings": {
+                "existed": bindings_existed,
+                "mode": file_mode(paths.bindings),
+                "beforeHash": digest(bindings_data) if bindings_existed else None,
+                "installedHash": None,
+                "insertedText": inserted_shortcut.decode("utf-8"),
+            },
+            "plugin": {"target": str(paths.plugin_target), "installed": False},
+            "daemonSocket": {"unit": "omacalendard.socket", "enabled": False},
+        }
+        backup_preinstall_files(
+            paths, shell_data, shell_existed, bindings_data, bindings_existed
+        )
+        write_state(paths, state)
+
+        os.replace(stage, paths.plugin_target)
+        marker = {
+            "schemaVersion": 1,
+            "pluginId": PLUGIN_ID,
+            "activationId": activation_id,
+            "installedAt": utc_now(),
+            "source": source,
+        }
+        atomic_write(paths.plugin_target / MARKER_NAME, json_bytes(marker), 0o600)
+        state["plugin"]["installed"] = True
+        state["phase"] = "plugin-installed"
+        write_state(paths, state)
+
+        paths.shell_config.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        atomic_write(paths.shell_config, next_shell_data, shell_mode or 0o600)
+        paths.bindings.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        atomic_write(paths.bindings, next_bindings, file_mode(paths.bindings) or 0o600)
+        state["shell"]["installedHash"] = digest(next_shell_data)
+        state["bindings"]["installedHash"] = digest(next_bindings)
+        state["phase"] = "configured"
+        write_state(paths, state)
+
+        validate_environment(paths, runner, manifest, paths.plugin_target)
+        enable_daemon_socket(runner)
+        state["daemonSocket"]["enabled"] = True
+        write_state(paths, state)
+        refresh_and_validate_live(paths, runner, True)
+        state["phase"] = "active"
+        state["activatedAt"] = utc_now()
+        write_state(paths, state)
+        result.update(
+            status="installed",
+            changed=True,
+            backup=str(paths.current_state_dir),
+        )
+        return result, 0
+    except Exception as error:
+        if not args.dry_run and state is not None and state.get("activationId"):
+            warnings, rollback_complete = rollback_install(paths, state, runner)
+            if isinstance(error, WidgetCtlError):
+                result.update(
+                    ok=False,
+                    status="rolled_back" if rollback_complete else "rollback_incomplete",
+                    error={"code": error.code, "message": error.message},
+                    rollbackWarnings=warnings,
+                    rollbackComplete=rollback_complete,
+                )
+            else:
+                result.update(
+                    ok=False,
+                    status="rolled_back" if rollback_complete else "rollback_incomplete",
+                    error={"code": "activation_failed", "message": str(error)},
+                    rollbackWarnings=warnings,
+                    rollbackComplete=rollback_complete,
+                )
+            return result, EXIT_ROLLED_BACK if rollback_complete else EXIT_CONFLICT
+        raise
+    finally:
+        if stage.exists():
+            shutil.rmtree(stage)
+        if temporary is not None:
+            temporary.cleanup()
+
+
+def restore_shell_with_drift(
+    paths: InstallPaths, state: dict[str, Any], current_data: bytes
+) -> tuple[bytes | None, list[str]]:
+    shell_state = state["shell"]
+    installed_hash = shell_state.get("installedHash")
+    if installed_hash and digest(current_data) == installed_hash:
+        if shell_state["existed"]:
+            backup = read_bytes(paths.current_state_dir / "shell.before.json")
+            if backup is None:
+                raise WidgetCtlError("missing_backup", "The shell configuration backup is missing")
+            return backup, []
+        return None, []
+
+    document = ensure_shell_shape(read_json_bytes(current_data, "Omarchy shell configuration"))
+    warnings: list[str] = []
+    activation_id = str(state["activationId"])
+    plugin_matches = locate_layout_id(document, PLUGIN_ID)
+    if len(plugin_matches) > 1:
+        raise WidgetCtlError(
+            "restore_conflict", "Multiple OmaCalendar widget entries exist; no restore was attempted", EXIT_CONFLICT
+        )
+    if plugin_matches:
+        section, index, entry = plugin_matches[0]
+        if isinstance(entry, dict):
+            owner = entry.get("omacalendarWidgetctl")
+            if owner not in (None, activation_id):
+                raise WidgetCtlError(
+                    "restore_conflict", "The OmaCalendar layout entry belongs to another activation", EXIT_CONFLICT
+                )
+        document["bar"]["layout"][section].pop(index)
+    else:
+        warnings.append("The managed OmaCalendar layout entry was already absent")
+
+    if any(entry_id(item) == PLUGIN_ID for item in document["plugins"]):
+        raise WidgetCtlError(
+            "restore_conflict", "An unrelated OmaCalendar top-level plugin entry exists", EXIT_CONFLICT
+        )
+
+    clocks = locate_layout_id(document, CLOCK_ID)
+    if not clocks:
+        target_section = str(shell_state["section"])
+        target_entries = document["bar"]["layout"][target_section]
+        before_id = str(shell_state.get("beforeId", ""))
+        after_id = str(shell_state.get("afterId", ""))
+        before_index = next(
+            (i for i, item in enumerate(target_entries) if entry_id(item) == before_id), None
+        ) if before_id else None
+        after_index = next(
+            (i for i, item in enumerate(target_entries) if entry_id(item) == after_id), None
+        ) if after_id else None
+        if after_index is not None:
+            target_index = after_index
+        elif before_index is not None:
+            target_index = before_index + 1
+        else:
+            target_index = min(int(shell_state["index"]), len(target_entries))
+        target_entries.insert(target_index, copy.deepcopy(shell_state["originalEntry"]))
+    else:
+        warnings.append("An existing omarchy.clock entry was preserved")
+
+    bar = document["bar"]
+    if bar.get("centerAnchor") == PLUGIN_ID:
+        if shell_state.get("anchorPresent"):
+            bar["centerAnchor"] = shell_state.get("anchorValue")
+        else:
+            bar.pop("centerAnchor", None)
+    else:
+        warnings.append("A centerAnchor changed after activation and was preserved")
+    return json_bytes(document), warnings
+
+
+def restore_bindings_with_drift(
+    paths: InstallPaths, state: dict[str, Any], current_data: bytes
+) -> tuple[bytes | None, list[str]]:
+    bindings_state = state["bindings"]
+    installed_hash = bindings_state.get("installedHash")
+    if installed_hash and digest(current_data) == installed_hash:
+        if bindings_state["existed"]:
+            backup = read_bytes(paths.current_state_dir / "bindings.before.lua")
+            if backup is None:
+                raise WidgetCtlError("missing_backup", "The bindings configuration backup is missing")
+            return backup, []
+        return None, []
+
+    inserted = str(bindings_state.get("insertedText", "")).encode("utf-8")
+    occurrences = current_data.count(inserted) if inserted else 0
+    if occurrences != 1:
+        raise WidgetCtlError(
+            "restore_conflict",
+            "The managed OmaCalendar shortcut block changed; bindings.lua was left untouched",
+            EXIT_CONFLICT,
+        )
+    restored = current_data.replace(inserted, b"", 1)
+    if not bindings_state["existed"] and not restored.strip():
+        return None, []
+    return restored, []
+
+
+def write_or_remove(path: Path, data: bytes | None, mode: int | None) -> None:
+    if data is None:
+        safe_unlink(path)
+    else:
+        atomic_write(path, data, mode or 0o600)
+
+
+def restore_active(
+    paths: InstallPaths, state: dict[str, Any], runner: CommandRunner, dry_run: bool
+) -> tuple[dict[str, Any], int]:
+    result = initial_result("restore", dry_run)
+    shell_current = read_bytes(paths.shell_config)
+    if shell_current is None:
+        raise WidgetCtlError(
+            "restore_conflict", "The active shell configuration is missing", EXIT_CONFLICT
+        )
+    bindings_current = read_bytes(paths.bindings)
+    if bindings_current is None:
+        raise WidgetCtlError(
+            "restore_conflict", "The active bindings configuration is missing", EXIT_CONFLICT
+        )
+    next_shell, shell_warnings = restore_shell_with_drift(paths, state, shell_current)
+    next_bindings, binding_warnings = restore_bindings_with_drift(
+        paths, state, bindings_current
+    )
+    warnings = shell_warnings + binding_warnings
+
+    marker_data = read_bytes(paths.plugin_target / MARKER_NAME)
+    if marker_data is None:
+        raise WidgetCtlError(
+            "plugin_ownership_conflict",
+            "The OmaCalendar plugin ownership marker is missing",
+            EXIT_CONFLICT,
+        )
+    try:
+        marker = json.loads(marker_data)
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise WidgetCtlError(
+            "plugin_ownership_conflict", "The plugin ownership marker is corrupt", EXIT_CONFLICT
+        ) from error
+    if marker.get("activationId") != state.get("activationId"):
+        raise WidgetCtlError(
+            "plugin_ownership_conflict",
+            "The plugin ownership marker belongs to another activation",
+            EXIT_CONFLICT,
+        )
+
+    actions = [
+        f"remove the managed {PLUGIN_ID} shell entry and plugin directory",
+        f"restore {CLOCK_ID} to its prior position",
+        "restore the prior center anchor when it is still OmaCalendar-managed",
+        f"remove the managed {SHORTCUT} shortcut override",
+        "reload and validate Omarchy shell and Hyprland",
+    ]
+    result.update(
+        status="would_restore" if dry_run else "prepared",
+        actions=actions,
+        warnings=warnings,
+    )
+    if dry_run:
+        return result, 0
+
+    restore_token = str(uuid.uuid4())
+    quarantine = paths.plugins_dir / f".{PLUGIN_ID}.restore-{restore_token}"
+    if quarantine.exists():
+        raise WidgetCtlError("restore_conflict", f"Restore quarantine already exists: {quarantine}")
+    shell_before_mode = file_mode(paths.shell_config)
+    bindings_before_mode = file_mode(paths.bindings)
+    try:
+        os.replace(paths.plugin_target, quarantine)
+        write_or_remove(paths.shell_config, next_shell, state["shell"].get("mode"))
+        write_or_remove(paths.bindings, next_bindings, state["bindings"].get("mode"))
+        refresh_and_validate_live(paths, runner, False)
+    except Exception as error:
+        write_or_remove(paths.shell_config, shell_current, shell_before_mode)
+        write_or_remove(paths.bindings, bindings_current, bindings_before_mode)
+        if quarantine.exists() and not paths.plugin_target.exists():
+            os.replace(quarantine, paths.plugin_target)
+        runner.best_effort(["omarchy-shell", "shell", "rescanPlugins"])
+        runner.best_effort(["omarchy-shell", "shell", "reloadConfig"])
+        runner.best_effort(["hyprctl", "reload"])
+        if isinstance(error, WidgetCtlError):
+            result.update(
+                ok=False,
+                status="restore_rolled_back",
+                error={"code": error.code, "message": error.message},
+            )
+        else:
+            result.update(
+                ok=False,
+                status="restore_rolled_back",
+                error={"code": "restore_failed", "message": str(error)},
+            )
+        return result, EXIT_ROLLED_BACK
+
+    shutil.rmtree(quarantine)
+    cleanup_current_state(paths)
+    result.update(status="restored", changed=True)
+    return result, 0
+
+
+def restore(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
+    paths = build_paths(args)
+    runner = CommandRunner(paths)
+    state = load_state(paths)
+    if state is None:
+        result = initial_result("restore", args.dry_run)
+        result["status"] = "not_installed"
+        return result, 0
+    if state.get("phase") != "active":
+        result = initial_result("restore", args.dry_run)
+        result["actions"] = ["recover the interrupted widget activation"]
+        if args.dry_run:
+            result["status"] = "would_recover"
+            return result, 0
+        warnings, rollback_complete = rollback_install(paths, state, runner)
+        result.update(
+            ok=rollback_complete,
+            status="recovered" if rollback_complete else "recovery_incomplete",
+            changed=rollback_complete,
+            warnings=warnings,
+        )
+        return result, 0 if rollback_complete else EXIT_CONFLICT
+    return restore_active(paths, state, runner, args.dry_run)
+
+
+def status(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
+    paths = build_paths(args)
+    result = initial_result("status")
+    state = load_state(paths)
+    target_exists = paths.plugin_target.exists() or paths.plugin_target.is_symlink()
+    if state is None:
+        result.update(
+            status="unmanaged_plugin_present" if target_exists else "not_installed",
+            details={"managed": False, "pluginDirectoryPresent": target_exists},
+        )
+        return result, 0
+
+    details: dict[str, Any] = {
+        "managed": True,
+        "phase": state.get("phase"),
+        "source": state.get("source"),
+        "pluginDirectoryPresent": target_exists,
+    }
+    shell_data = read_bytes(paths.shell_config)
+    if shell_data is not None:
+        try:
+            shell = ensure_shell_shape(read_json_bytes(shell_data, "Omarchy shell configuration"))
+            details["widgetEntries"] = len(locate_layout_id(shell, PLUGIN_ID))
+            details["clockEntries"] = len(locate_layout_id(shell, CLOCK_ID))
+            details["centerAnchor"] = shell["bar"].get("centerAnchor")
+        except WidgetCtlError as error:
+            details["shellError"] = error.message
+    bindings_data = read_bytes(paths.bindings) or b""
+    details["shortcutManaged"] = (
+        f"BEGIN OMACALENDAR WIDGETCTL {state.get('activationId', '')}".encode("utf-8")
+        in bindings_data
+    )
+    healthy = (
+        state.get("phase") == "active"
+        and target_exists
+        and details.get("widgetEntries") == 1
+        and details.get("clockEntries") == 0
+        and details.get("centerAnchor") == PLUGIN_ID
+        and details["shortcutManaged"]
+    )
+    result.update(
+        status="installed" if healthy else "recovery_required",
+        details=details,
+    )
+    return result, 0
+
+
+def add_common_options(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--home", help=argparse.SUPPRESS)
+    parser.add_argument("--omarchy-path", help=argparse.SUPPRESS)
+    parser.add_argument("--pretty", action="store_true", help="Pretty-print status JSON")
+
+
+def make_parser() -> JsonArgumentParser:
+    parser = JsonArgumentParser(
+        prog="omacalendar-widgetctl",
+        description="Transactionally install or restore the OmaCalendar Omarchy widget",
+    )
+    subparsers = parser.add_subparsers(dest="command", required=True)
+
+    install_parser = subparsers.add_parser(
+        "install", help="Install the consented widget and replace omarchy.clock"
+    )
+    install_parser.add_argument(
+        "--source",
+        required=True,
+        help="Canonical official repository URL or absolute trusted local plugin path",
+    )
+    install_parser.add_argument(
+        "--dry-run", action="store_true", help="Validate and report without changing user config"
+    )
+    add_common_options(install_parser)
+
+    restore_parser = subparsers.add_parser(
+        "restore", help="Restore the clock, anchor, shortcut, and remove the managed plugin"
+    )
+    restore_parser.add_argument(
+        "--dry-run", action="store_true", help="Report the restore without changing user config"
+    )
+    add_common_options(restore_parser)
+
+    status_parser = subparsers.add_parser("status", help="Report widget activation state")
+    add_common_options(status_parser)
+    return parser
+
+
+def emit(payload: dict[str, Any], pretty: bool) -> None:
+    if pretty:
+        print(json.dumps(payload, indent=2, sort_keys=True, ensure_ascii=False))
+    else:
+        print(json.dumps(payload, separators=(",", ":"), sort_keys=True, ensure_ascii=False))
+
+
+def main(argv: list[str] | None = None) -> int:
+    arguments = argv if argv is not None else sys.argv[1:]
+    pretty = "--pretty" in arguments
+    try:
+        args = make_parser().parse_args(arguments)
+        paths = build_paths(args)
+        if args.command == "install" and not args.dry_run:
+            with exclusive_lock(paths):
+                payload, exit_code = install(args)
+        elif args.command == "restore" and not args.dry_run:
+            with exclusive_lock(paths):
+                payload, exit_code = restore(args)
+        elif args.command == "install":
+            payload, exit_code = install(args)
+        elif args.command == "restore":
+            payload, exit_code = restore(args)
+        else:
+            payload, exit_code = status(args)
+    except WidgetCtlError as error:
+        command = arguments[0] if arguments else "unknown"
+        payload = initial_result(command)
+        payload.update(
+            ok=False,
+            status="error",
+            error={"code": error.code, "message": error.message},
+        )
+        exit_code = error.exit_code
+    except Exception as error:  # Keep the AppController contract JSON-only.
+        command = arguments[0] if arguments else "unknown"
+        payload = initial_result(command)
+        payload.update(
+            ok=False,
+            status="error",
+            error={"code": "internal_error", "message": str(error)},
+        )
+        exit_code = 1
+    emit(payload, pretty)
+    return exit_code
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

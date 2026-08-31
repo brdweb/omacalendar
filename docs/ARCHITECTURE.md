@@ -18,21 +18,33 @@ The daemon exclusively owns:
 Only one daemon instance may own a data directory. SQLite and a user-only local
 socket provide the enforcement points.
 
+Packaged installations use a systemd user socket as the stable IPC endpoint.
+The socket exists independently of either client and starts `omacalendard` on
+the first connection. The daemon opens the local database and answers cached
+snapshot queries immediately; provider synchronization remains asynchronous.
+Consequently, the shell widget can display calendar data while the desktop
+application is closed.
+
 ### `omacalendar`
 
 The desktop application owns presentation and user interaction. It reads and
 writes through IPC and may keep disposable in-memory view models. It does not
 open the calendar database or read credentials.
 
-The application is the canonical settings UI for both itself and the future
-shell widget.
+The application is the canonical settings UI for both itself and the shell
+widget.
 
 ### Omarchy widget
 
-The future QML plugin is a thin cached-data client. It is deliberately unable
-to access remote provider credentials. Shell-only state such as bar placement
-remains in Omarchy's `shell.json`; calendar and widget behavior is configured
-through the desktop app and daemon.
+The QML plugin is a thin presentation client. It is deliberately unable to access
+remote provider credentials. Shell-only state such as bar placement remains in
+Omarchy's `shell.json`; calendar and widget behavior is configured through the
+desktop app and daemon.
+
+Both clients consume presentation DTOs and revisioned snapshots. Provider URLs,
+ETags, tokens, raw resources, and mutation payloads remain daemon-private. After
+a reconnect, a client compares its last observed revision with the daemon and
+refreshes the relevant snapshot when notifications may have been missed.
 
 ## Storage locations
 
@@ -74,26 +86,31 @@ the original IANA time zone identifiers used for display and round trips.
 
 ### Outbox operation
 
-Every local provider mutation is committed atomically with an outbox operation.
-The operation stores a stable idempotency key, expected remote revision, the
-canonical local payload, retry state, and redacted error metadata.
+Every remote-provider mutation is committed atomically with an outbox operation.
+Device-only mutations complete in the local transaction. A remote operation
+stores a stable client mutation ID, expected local and remote revisions,
+dependency and recurrence scope, guest-notification policy, retry/lease state,
+and redacted error metadata.
 
 ### Conflict
 
-A conflict records the local entity and both expected/observed remote
-revisions. The remote version is cached separately so the UI can offer an
-explicit resolution without destroying the local edit.
+A conflict briefly records the local entity and both expected/observed remote
+revisions. The remote version remains separate until background last-write-wins
+resolution commits one version without exposing a blocking UI workflow.
 
 ## Synchronization algorithm
 
 1. Pull remote incremental changes for a calendar.
 2. Apply clean remote changes transactionally.
 3. Detect remote revisions that conflict with pending local mutations.
-4. Mark conflicts without overwriting the local working version.
+4. Compare the local edit timestamp with the provider update timestamp and
+   automatically keep the newer version. Ties and missing timestamps prefer
+   the provider copy; a remote deletion is dated when it is observed.
 5. Dispatch ready outbox operations in stable order.
-6. Persist provider acknowledgement and remove/finish the operation in one
+6. Persist provider acknowledgement and finish the operation in one
    transaction.
-7. Broadcast compact entity-change notifications to connected clients.
+7. Advance the monotonic change revision and broadcast compact entity-change
+   notifications to connected clients.
 
 If the process loses connectivity after the remote service accepted a write,
 the next attempt first resolves the remote UID/revision before repeating a
@@ -101,7 +118,11 @@ create. Provider-specific idempotency mechanisms are used where available.
 
 ## Provider interface
 
-Provider adapters implement the same conceptual operations:
+Google, CalDAV, ICS subscriptions, and device-only calendars implement one
+daemon-facing `Provider` contract and are registered with one
+`SyncCoordinator`. The contract provides lifecycle, synchronization, status,
+capability, and change-notification surfaces. Remote adapters additionally
+implement the same conceptual operations:
 
 - authenticate or validate credentials;
 - discover calendars and capabilities;
@@ -111,8 +132,10 @@ Provider adapters implement the same conceptual operations:
 - classify errors into authentication, permission, conflict, retryable,
   throttled, unsupported, or terminal categories.
 
-The interface returns provider DTOs. Mapping between DTOs and the canonical
-domain is isolated in each adapter and covered by golden fixtures.
+Provider network DTOs never cross IPC. Mapping between those DTOs and the
+canonical domain is isolated in each adapter and covered by contract/fixture
+tests. The coordinator routes accounts by provider kind; IPC handlers do not
+select network clients or inspect provider-owned metadata.
 
 ## Threading
 
@@ -128,5 +151,5 @@ palette, type, spacing, radius, and control-state values into QML properties.
 Unknown or malformed tokens fall back independently so a partial theme cannot
 make the app unusable.
 
-The future widget consumes Omarchy's live QML theme singletons directly rather
+The widget consumes Omarchy's live QML theme singletons directly rather
 than re-parsing theme files.

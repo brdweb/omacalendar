@@ -157,6 +157,37 @@ class RecurrenceTest final : public QObject {
     QCOMPARE(result.occurrences.at(2).startUtc, utc(2026, 11, 2, 14));
   }
 
+  void matchesRangeExceptionWithEquivalentParameterForms() {
+    const QTimeZone newYork("America/New_York");
+    QVERIFY(newYork.isValid());
+    Event master =
+        timedEvent(QStringLiteral("range-identity"),
+                   QDateTime(QDate(2026, 8, 28), QTime(9, 0), newYork).toUTC());
+    master.uid = QStringLiteral("range-identity-series");
+    master.startTimeZone = QStringLiteral("America/New_York");
+    master.endTimeZone = master.startTimeZone;
+    master.recurrenceRule = QStringLiteral("FREQ=DAILY;COUNT=3");
+
+    Event range = master;
+    range.id = QStringLiteral("range-identity-exception");
+    range.recurrenceRule.clear();
+    range.recurrenceId =
+        QStringLiteral("RANGE=THISANDFUTURE;TZID=America/New_York:20260829T090000");
+    range.startUtc = utc(2026, 8, 29, 11);
+    range.endUtc = range.startUtc.addSecs(5400);
+
+    const RecurrenceExpansionResult result = RecurrenceExpander::expand(
+        {master, range}, utc(2026, 8, 28, 0), utc(2026, 9, 1, 0));
+
+    QCOMPARE(result.occurrences.size(), 3);
+    QCOMPARE(result.occurrences.at(0).startUtc, utc(2026, 8, 28, 13));
+    QCOMPARE(result.occurrences.at(1).startUtc, utc(2026, 8, 29, 11));
+    QCOMPARE(result.occurrences.at(2).startUtc, utc(2026, 8, 30, 11));
+    QCOMPARE(
+        (result.occurrences.at(1).endUtc - result.occurrences.at(1).startUtc).count(),
+        5400000);
+  }
+
   void expandsAllDayEventsWithExclusiveEndDates() {
     Event master;
     master.id = QStringLiteral("all-day");

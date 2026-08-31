@@ -48,9 +48,28 @@ QString readNestedHref(QXmlStreamReader& reader) {
   return href;
 }
 
+QStringList readNestedHrefs(QXmlStreamReader& reader) {
+  QStringList hrefs;
+  while (reader.readNextStartElement()) {
+    if (isElement(reader, kDavNamespace, QLatin1StringView("href"))) {
+      const QString href = reader.readElementText().trimmed();
+      if (!href.isEmpty()) {
+        hrefs.append(href);
+      }
+    } else {
+      reader.skipCurrentElement();
+    }
+  }
+  hrefs.removeDuplicates();
+  return hrefs;
+}
+
 struct PropertyValues {
   QString principalHref;
   QString calendarHomeSetHref;
+  QString scheduleInboxHref;
+  QString scheduleOutboxHref;
+  QStringList calendarUserAddresses;
   QString displayName;
   QString description;
   QString color;
@@ -62,6 +81,8 @@ struct PropertyValues {
   bool isCalendar = false;
   bool privilegesReported = false;
   bool canWrite = false;
+  bool canBind = false;
+  bool canUnbind = false;
 };
 
 void parseResourceType(QXmlStreamReader& reader, PropertyValues* properties) {
@@ -91,6 +112,16 @@ void parsePrivilegeSet(QXmlStreamReader& reader, PropertyValues* properties) {
            reader.name() == QLatin1StringView("all"))) {
         properties->canWrite = true;
       }
+      if (reader.namespaceUri() == kDavNamespace &&
+          (reader.name() == QLatin1StringView("bind") ||
+           reader.name() == QLatin1StringView("all"))) {
+        properties->canBind = true;
+      }
+      if (reader.namespaceUri() == kDavNamespace &&
+          (reader.name() == QLatin1StringView("unbind") ||
+           reader.name() == QLatin1StringView("all"))) {
+        properties->canUnbind = true;
+      }
     } else if (token == QXmlStreamReader::EndElement) {
       --depth;
     }
@@ -109,6 +140,15 @@ void parseProperties(QXmlStreamReader& reader, PropertyValues* properties) {
     } else if (isElement(reader, kCalDavNamespace,
                          QLatin1StringView("calendar-home-set"))) {
       properties->calendarHomeSetHref = readNestedHref(reader);
+    } else if (isElement(reader, kCalDavNamespace,
+                         QLatin1StringView("schedule-inbox-URL"))) {
+      properties->scheduleInboxHref = readNestedHref(reader);
+    } else if (isElement(reader, kCalDavNamespace,
+                         QLatin1StringView("schedule-outbox-URL"))) {
+      properties->scheduleOutboxHref = readNestedHref(reader);
+    } else if (isElement(reader, kCalDavNamespace,
+                         QLatin1StringView("calendar-user-address-set"))) {
+      properties->calendarUserAddresses = readNestedHrefs(reader);
     } else if (isElement(reader, kDavNamespace, QLatin1StringView("displayname"))) {
       properties->displayName = simpleText(reader);
     } else if (isElement(reader, kCalDavNamespace,
@@ -169,6 +209,15 @@ void mergeProperties(CalDavResponse* response, const PropertyValues& properties)
   if (!properties.calendarHomeSetHref.isEmpty()) {
     response->calendarHomeSetHref = properties.calendarHomeSetHref;
   }
+  if (!properties.scheduleInboxHref.isEmpty()) {
+    response->scheduleInboxHref = properties.scheduleInboxHref;
+  }
+  if (!properties.scheduleOutboxHref.isEmpty()) {
+    response->scheduleOutboxHref = properties.scheduleOutboxHref;
+  }
+  if (!properties.calendarUserAddresses.isEmpty()) {
+    response->calendarUserAddresses = properties.calendarUserAddresses;
+  }
   if (!properties.displayName.isNull()) {
     response->displayName = properties.displayName;
   }
@@ -195,6 +244,8 @@ void mergeProperties(CalDavResponse* response, const PropertyValues& properties)
   if (properties.privilegesReported) {
     response->privilegesReported = true;
     response->canWrite = response->canWrite || properties.canWrite;
+    response->canBind = response->canBind || properties.canBind;
+    response->canUnbind = response->canUnbind || properties.canUnbind;
   }
 }
 
@@ -330,6 +381,25 @@ QString CalDavXml::calendarHomeSetHref(const CalDavMultiStatusResult& result) {
   return {};
 }
 
+CalDavSchedulingCapabilities CalDavXml::schedulingCapabilities(
+    const CalDavMultiStatusResult& result) {
+  CalDavSchedulingCapabilities capabilities;
+  for (const CalDavResponse& response : result.responses) {
+    if (!response.isSuccess()) {
+      continue;
+    }
+    if (capabilities.inboxHref.isEmpty()) {
+      capabilities.inboxHref = response.scheduleInboxHref;
+    }
+    if (capabilities.outboxHref.isEmpty()) {
+      capabilities.outboxHref = response.scheduleOutboxHref;
+    }
+    capabilities.userAddresses.append(response.calendarUserAddresses);
+  }
+  capabilities.userAddresses.removeDuplicates();
+  return capabilities;
+}
+
 QList<CalDavCollection> CalDavXml::collections(const CalDavMultiStatusResult& result) {
   QList<CalDavCollection> output;
   for (const CalDavResponse& response : result.responses) {
@@ -338,7 +408,7 @@ QList<CalDavCollection> CalDavXml::collections(const CalDavMultiStatusResult& re
     }
     output.append({response.href, response.displayName, response.description,
                    response.color, response.ctag, response.syncToken,
-                   response.readOnly()});
+                   response.readOnly(), response.canBind, response.canUnbind});
   }
   return output;
 }

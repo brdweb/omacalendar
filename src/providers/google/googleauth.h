@@ -40,28 +40,50 @@ class GoogleAuthManager final : public QObject {
   void tokenChanged(const QString& accountId);
   void authorizationFailed(const QString& accountId, const QString& code,
                            const QString& message);
+  void clientConfigurationFinished(bool success, const QString& code,
+                                   const QString& message);
+  void forgetFinished(const QString& accountId, bool success, const QString& code,
+                      const QString& message);
 
  private:
   struct Session;
+  struct PendingAuthorization;
+  struct PendingForget;
 
   Session* createSession(const QString& accountId, bool interactive,
                          QString* errorMessage);
   [[nodiscard]] Session* activeSession(const QString& accountId,
                                        quint64 generation) const;
   void destroySession(const QString& accountId);
+  [[nodiscard]] PendingAuthorization* activePendingAuthorization(
+      const QString& accountId, quint64 generation) const;
+  void destroyPendingAuthorization(const QString& accountId);
+  bool queueAuthorization(const QString& accountId, bool interactive,
+                          QString* errorMessage);
+  void continuePendingAuthorization(const QString& accountId, quint64 generation);
+  void continuePendingAuthorizations();
   void fail(Session* session, const QString& code, const QString& message);
-  bool persistRefreshToken(Session* session, QString* errorMessage = nullptr);
+  void persistRefreshToken(Session* session);
+  void completePendingTokenNotifications(Session* session);
+  void cancelClientSecretOperation();
 
   QNetworkAccessManager m_network;
   // OAuth objects cancelled from inside one of their own signals must use
   // deleteLater(). Keep ownership here so they are still destroyed before the
   // member network manager if the application exits first.
   QObjectCleanupHandler m_retiredObjects;
-  SecretStore m_secrets;
+  AsyncSecretStore m_secrets;
   QHash<QString, Session*> m_sessions;
+  QHash<QString, PendingAuthorization*> m_pendingAuthorizations;
+  QHash<QString, PendingForget*> m_pendingForgets;
   QString m_clientId;
   QString m_clientSecret;
+  SecretStoreOperationId m_clientSecretOperation = kInvalidSecretStoreOperationId;
+  quint64 m_clientSecretGeneration = 0;
+  bool m_clientReady = false;
   quint64 m_nextSessionGeneration = 0;
+  quint64 m_nextAuthorizationGeneration = 0;
+  quint64 m_nextForgetGeneration = 0;
 };
 
 }  // namespace omacalendar::google

@@ -15,8 +15,11 @@ class ThemeBridge final : public QObject {
   Q_PROPERTY(QColor text READ text NOTIFY themeChanged)
   Q_PROPERTY(QColor mutedText READ mutedText NOTIFY themeChanged)
   Q_PROPERTY(QColor accent READ accent NOTIFY themeChanged)
+  Q_PROPERTY(QColor onAccent READ onAccent NOTIFY themeChanged)
   Q_PROPERTY(QColor danger READ danger NOTIFY themeChanged)
   Q_PROPERTY(QColor success READ success NOTIFY themeChanged)
+  Q_PROPERTY(QColor warning READ warning NOTIFY themeChanged)
+  Q_PROPERTY(QColor info READ info NOTIFY themeChanged)
   Q_PROPERTY(int baseFontSize READ baseFontSize NOTIFY themeChanged)
   Q_PROPERTY(QString sourceName READ sourceName NOTIFY themeChanged)
 
@@ -30,8 +33,11 @@ class ThemeBridge final : public QObject {
   [[nodiscard]] QColor text() const;
   [[nodiscard]] QColor mutedText() const;
   [[nodiscard]] QColor accent() const;
+  [[nodiscard]] QColor onAccent() const;
   [[nodiscard]] QColor danger() const;
   [[nodiscard]] QColor success() const;
+  [[nodiscard]] QColor warning() const;
+  [[nodiscard]] QColor info() const;
   [[nodiscard]] int baseFontSize() const;
   [[nodiscard]] QString sourceName() const;
 
@@ -52,8 +58,11 @@ class ThemeBridge final : public QObject {
   QColor m_text{QStringLiteral("#eef0f4")};
   QColor m_mutedText{QStringLiteral("#89909d")};
   QColor m_accent{QStringLiteral("#7aa2f7")};
+  QColor m_onAccent{QStringLiteral("#0b0d11")};
   QColor m_danger{QStringLiteral("#f7768e")};
   QColor m_success{QStringLiteral("#9ece6a")};
+  QColor m_warning{QStringLiteral("#e0af68")};
+  QColor m_info{QStringLiteral("#7dcfff")};
   int m_baseFontSize = 14;
   QString m_sourceName = QStringLiteral("fallback");
 };

@@ -1,0 +1,196 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  QT_VERSION: 6.8.*
+
+jobs:
+  source-quality:
+    name: Source and package metadata
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+
+      - name: Install validation tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes appstream clang-format desktop-file-utils
+
+      - name: Check C++ formatting
+        shell: bash
+        run: |
+          mapfile -t sources < <(git ls-files '*.cpp' '*.h')
+          clang-format --dry-run --Werror "${sources[@]}"
+
+      - name: Validate shell scripts
+        run: |
+          bash -n packaging/aur/*.in packaging/release/*.sh
+          packaging/release/test-versioning.sh
+
+      - name: Validate desktop metadata
+        run: desktop-file-validate packaging/io.github.brdweb.omacalendar.desktop
+
+      - name: Validate AppStream metadata
+        run: appstreamcli validate --no-net --strict packaging/io.github.brdweb.omacalendar.metainfo.xml
+
+  build:
+    name: ${{ matrix.name }}
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: GCC Debug
+            cc: gcc
+            cxx: g++
+            build_type: Debug
+          - name: Clang RelWithDebInfo
+            cc: clang
+            cxx: clang++
+            build_type: RelWithDebInfo
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes \
+            appstream desktop-file-utils libical-dev libsecret-tools \
+            ninja-build pkg-config zstd
+
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: ${{ env.QT_VERSION }}
+          modules: qtnetworkauth
+          cache: true
+
+      - name: Configure
+        env:
+          CC: ${{ matrix.cc }}
+          CXX: ${{ matrix.cxx }}
+        run: |
+          cmake -S . -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} \
+            -DCMAKE_INSTALL_PREFIX=/usr \
+            -DOMACALENDAR_ENABLE_WERROR=ON
+
+      - name: Build
+        run: cmake --build build --parallel
+
+      - name: Test
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: ctest --test-dir build --output-on-failure
+
+      - name: Smoke-test daemon restart
+        run: packaging/release/smoke-daemon.sh build
+
+      - name: Smoke-test desktop startup
+        run: packaging/release/smoke-app.sh build
+
+      - name: Lint QML
+        run: packaging/release/check-qmllint.sh build
+
+      - name: Validate staged installation
+        run: |
+          DESTDIR="$PWD/stage" cmake --install build
+          packaging/release/verify-install.sh "$PWD/stage"
+
+      - name: Verify package uninstall manifest
+        run: |
+          cp -a stage stage-uninstall
+          packaging/release/verify-uninstall.sh \
+            "$PWD/stage-uninstall" "$PWD/build/install_manifest.txt"
+
+  sanitizers:
+    name: ASan and UBSan
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes libical-dev libsecret-tools ninja-build pkg-config
+
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: ${{ env.QT_VERSION }}
+          modules: qtnetworkauth
+          cache: true
+
+      - name: Configure sanitizer build
+        env:
+          CC: clang
+          CXX: clang++
+        run: |
+          cmake -S . -B build-sanitized -G Ninja \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DOMACALENDAR_ENABLE_SANITIZERS=ON \
+            -DOMACALENDAR_ENABLE_WERROR=ON
+
+      - name: Build
+        run: cmake --build build-sanitized --parallel
+
+      - name: Test under sanitizers
+        env:
+          ASAN_OPTIONS: detect_leaks=1:strict_string_checks=1:halt_on_error=1
+          UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1
+          QT_QPA_PLATFORM: offscreen
+        run: ctest --test-dir build-sanitized --output-on-failure
+
+  arch-current:
+    name: Current Arch package baseline
+    runs-on: ubuntu-24.04
+    container: archlinux:base-devel
+    steps:
+      - name: Install current Arch dependencies
+        run: |
+          pacman -Syu --noconfirm --needed \
+            appstream cmake desktop-file-utils git libical libsecret ninja \
+            pkgconf qt6-base qt6-declarative qt6-networkauth systemd
+
+      - name: Check out source
+        uses: actions/checkout@v7
+
+      - name: Configure
+        run: |
+          cmake -S . -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX=/usr \
+            -DOMACALENDAR_ENABLE_WERROR=ON
+
+      - name: Build, test, and lint
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          cmake --build build --parallel
+          ctest --test-dir build --output-on-failure
+          packaging/release/smoke-daemon.sh build
+          packaging/release/smoke-app.sh build
+          packaging/release/check-qmllint.sh build
+
+      - name: Validate install and uninstall
+        run: |
+          DESTDIR="$PWD/stage" cmake --install build
+          packaging/release/verify-install.sh "$PWD/stage"
+          cp -a stage stage-uninstall
+          packaging/release/verify-uninstall.sh \
+            "$PWD/stage-uninstall" "$PWD/build/install_manifest.txt"

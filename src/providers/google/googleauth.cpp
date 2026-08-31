@@ -7,6 +7,7 @@
 #include <QOAuth2AuthorizationCodeFlow>
 #include <QOAuthHttpServerReplyHandler>
 #include <QPointer>
+#include <QTimer>
 #include <QUrl>
 
 #include "core/domain.h"
@@ -22,7 +23,11 @@ constexpr auto kRefreshTokenKind = "refresh-token";
 
 QString oauthErrorName(const QAbstractOAuth::Error error) {
   const QMetaEnum metaEnum = QMetaEnum::fromType<QAbstractOAuth::Error>();
+#if QT_VERSION >= QT_VERSION_CHECK(6, 9, 0)
+  const char* name = metaEnum.valueToKey(static_cast<quint64>(error));
+#else
   const char* name = metaEnum.valueToKey(static_cast<int>(error));
+#endif
   return name == nullptr ? QStringLiteral("oauth_error") : QString::fromLatin1(name);
 }
 
@@ -38,11 +43,39 @@ struct GoogleAuthManager::Session final {
   bool failureInProgress = false;
   bool refreshInFlight = false;
   bool refreshCompletionNotified = false;
+  bool grantObserved = false;
+  bool tokenNotificationPending = false;
+  bool authorizationNotificationPending = false;
+  QString persistedRefreshToken;
+  QString persistingRefreshToken;
+  SecretStoreOperationId persistOperation = kInvalidSecretStoreOperationId;
+  quint64 persistGeneration = 0;
+};
+
+struct GoogleAuthManager::PendingAuthorization final {
+  QString accountId;
+  quint64 generation = 0;
+  bool interactive = false;
+  bool lookupComplete = false;
+  QString refreshToken;
+  SecretStoreOperationId lookupOperation = kInvalidSecretStoreOperationId;
+};
+
+struct GoogleAuthManager::PendingForget final {
+  quint64 generation = 0;
+  SecretStoreOperationId operation = kInvalidSecretStoreOperationId;
 };
 
 GoogleAuthManager::GoogleAuthManager(QObject* parent) : QObject(parent) {}
 
 GoogleAuthManager::~GoogleAuthManager() {
+  ++m_clientSecretGeneration;
+  m_clientSecretOperation = kInvalidSecretStoreOperationId;
+  qDeleteAll(m_pendingAuthorizations);
+  m_pendingAuthorizations.clear();
+  qDeleteAll(m_pendingForgets);
+  m_pendingForgets.clear();
+  m_secrets.cancelAll();
   m_retiredObjects.clear();
   const auto sessions = m_sessions.values();
   m_sessions.clear();
@@ -75,13 +108,34 @@ bool GoogleAuthManager::configureClient(const QString& clientId,
     }
     return false;
   }
-  if (!clientSecret.isEmpty() &&
-      !m_secrets.store(normalizedClientId, QString::fromLatin1(kClientSecretKind),
-                       clientSecret, errorMessage)) {
-    return false;
-  }
+  cancelClientSecretOperation();
   m_clientId = normalizedClientId;
   m_clientSecret = clientSecret;
+  m_clientReady = true;
+  if (clientSecret.isEmpty()) {
+    const quint64 generation = m_clientSecretGeneration;
+    QTimer::singleShot(0, this, [this, generation]() {
+      if (generation == m_clientSecretGeneration) {
+        emit clientConfigurationFinished(true, {}, {});
+      }
+    });
+    continuePendingAuthorizations();
+    return true;
+  }
+
+  const quint64 generation = m_clientSecretGeneration;
+  m_clientSecretOperation =
+      m_secrets.storeAsync(normalizedClientId, QString::fromLatin1(kClientSecretKind),
+                           clientSecret, [this, generation](SecretStoreResult result) {
+                             if (generation != m_clientSecretGeneration) {
+                               return;
+                             }
+                             m_clientSecretOperation = kInvalidSecretStoreOperationId;
+                             emit clientConfigurationFinished(
+                                 result.success, result.errorCode,
+                                 result.success ? QString() : result.errorMessage);
+                           });
+  continuePendingAuthorizations();
   return true;
 }
 
@@ -93,15 +147,33 @@ bool GoogleAuthManager::restoreClient(const QString& clientId, QString* errorMes
     }
     return false;
   }
-  // Desktop/public clients may legitimately have no client secret. Treat an
-  // absent keyring item as an empty optional secret; token refresh will still
-  // surface an authentication error if this particular client requires one.
+  cancelClientSecretOperation();
+  // Desktop/public clients may legitimately have no client secret. An absent
+  // keyring item therefore resolves to the configured fallback (usually empty).
   m_clientId = normalizedClientId;
-  m_clientSecret =
-      m_secrets.lookup(normalizedClientId, QString::fromLatin1(kClientSecretKind));
-  if (m_clientSecret.isEmpty() && normalizedClientId == defaultOAuthClientId()) {
-    m_clientSecret = defaultOAuthClientSecret();
-  }
+  m_clientSecret = normalizedClientId == defaultOAuthClientId()
+                       ? defaultOAuthClientSecret()
+                       : QString();
+  m_clientReady = false;
+  const quint64 generation = m_clientSecretGeneration;
+  m_clientSecretOperation = m_secrets.lookupAsync(
+      normalizedClientId, QString::fromLatin1(kClientSecretKind),
+      [this, normalizedClientId, generation](SecretStoreResult result) {
+        if (generation != m_clientSecretGeneration ||
+            normalizedClientId != m_clientId) {
+          return;
+        }
+        m_clientSecretOperation = kInvalidSecretStoreOperationId;
+        if (result.success && !result.value.isEmpty()) {
+          m_clientSecret = result.value;
+        }
+        m_clientReady = true;
+        // Failure is intentionally non-fatal for public OAuth clients. Any
+        // client which really requires its missing shared key will be rejected
+        // by Google's token endpoint with a sanitized authentication error.
+        emit clientConfigurationFinished(true, {}, {});
+        continuePendingAuthorizations();
+      });
   return true;
 }
 
@@ -149,6 +221,7 @@ GoogleAuthManager::Session* GoogleAuthManager::createSession(const QString& acco
   session->flow->setPkceMethod(QOAuth2AuthorizationCodeFlow::PkceMethod::S256, 64);
   session->flow->setRequestedScopeTokens({
       QByteArrayLiteral("https://www.googleapis.com/auth/calendar.events"),
+      QByteArrayLiteral("https://www.googleapis.com/auth/calendar.calendars"),
       QByteArrayLiteral(
           "https://www.googleapis.com/auth/calendar.calendarlist.readonly"),
   });
@@ -214,24 +287,10 @@ GoogleAuthManager::Session* GoogleAuthManager::createSession(const QString& acco
             if (active == nullptr) {
               return;
             }
-            QString error;
-            if (!persistRefreshToken(active, &error)) {
-              fail(active, QStringLiteral("keyring_error"), error);
-              return;
-            }
-            const bool shouldEmitAuthorized = !active->completionEmitted;
-            if (shouldEmitAuthorized) {
-              active->completionEmitted = true;
-            }
-            if (active->refreshInFlight) {
-              active->refreshCompletionNotified = true;
-            }
-            emit tokenChanged(sessionAccountId);
-            // A tokenChanged observer may synchronously disconnect the account.
-            if (shouldEmitAuthorized &&
-                activeSession(sessionAccountId, sessionGeneration) != nullptr) {
-              emit authorized(sessionAccountId);
-            }
+            active->tokenNotificationPending = true;
+            active->authorizationNotificationPending =
+                active->authorizationNotificationPending || !active->completionEmitted;
+            persistRefreshToken(active);
           });
   connect(session->flow, &QAbstractOAuth::granted, this,
           [this, sessionAccountId, sessionGeneration]() {
@@ -239,32 +298,22 @@ GoogleAuthManager::Session* GoogleAuthManager::createSession(const QString& acco
             if (active == nullptr) {
               return;
             }
-            QString error;
-            if (!persistRefreshToken(active, &error)) {
-              fail(active, QStringLiteral("keyring_error"), error);
-              return;
-            }
             if (active->replyHandler != nullptr) {
               active->replyHandler->close();
             }
             // close() and its observers are allowed to cancel synchronously.
             active = activeSession(sessionAccountId, sessionGeneration);
-            const bool shouldNotifyRefresh =
-                active != nullptr && active->refreshInFlight &&
-                !active->refreshCompletionNotified && active->flow != nullptr &&
-                !active->flow->token().isEmpty();
-            if (active != nullptr) {
-              active->refreshInFlight = false;
-              active->refreshCompletionNotified = false;
+            if (active == nullptr) {
+              return;
             }
-            if (shouldNotifyRefresh) {
-              emit tokenChanged(sessionAccountId);
-              active = activeSession(sessionAccountId, sessionGeneration);
-            }
-            if (active != nullptr && !active->completionEmitted) {
-              active->completionEmitted = true;
-              emit authorized(sessionAccountId);
-            }
+            active->grantObserved = true;
+            active->tokenNotificationPending =
+                active->tokenNotificationPending ||
+                (active->refreshInFlight && !active->refreshCompletionNotified &&
+                 active->flow != nullptr && !active->flow->token().isEmpty());
+            active->authorizationNotificationPending =
+                active->authorizationNotificationPending || !active->completionEmitted;
+            persistRefreshToken(active);
           });
   connect(
       session->flow, &QAbstractOAuth::requestFailed, this,
@@ -306,47 +355,25 @@ GoogleAuthManager::Session* GoogleAuthManager::createSession(const QString& acco
 
 bool GoogleAuthManager::startAuthorization(const QString& accountId,
                                            QString* errorMessage) {
-  if (accountId.isEmpty()) {
-    if (errorMessage != nullptr) {
-      *errorMessage = QStringLiteral("Account ID is required");
-    }
-    return false;
-  }
-  Session* session = createSession(accountId, true, errorMessage);
-  if (session == nullptr) {
-    return false;
-  }
-  session->flow->grant();
-  return true;
+  return queueAuthorization(accountId, true, errorMessage);
 }
 
 bool GoogleAuthManager::restoreAuthorization(const QString& accountId,
                                              QString* errorMessage) {
-  QString lookupError;
-  const QString refreshToken =
-      m_secrets.lookup(accountId, QString::fromLatin1(kRefreshTokenKind), &lookupError);
-  if (refreshToken.isEmpty()) {
-    if (errorMessage != nullptr) {
-      *errorMessage = lookupError.isEmpty()
-                          ? QStringLiteral("Google account needs authorization")
-                          : lookupError;
-    }
-    return false;
+  if (PendingAuthorization* pending = m_pendingAuthorizations.value(accountId);
+      pending != nullptr && !pending->interactive) {
+    return true;
   }
-  Session* session = createSession(accountId, false, errorMessage);
-  if (session == nullptr) {
-    return false;
-  }
-  session->flow->setRefreshToken(refreshToken);
-  session->refreshInFlight = true;
-  session->refreshCompletionNotified = false;
-  session->flow->refreshTokens();
-  return true;
+  return queueAuthorization(accountId, false, errorMessage);
 }
 
 bool GoogleAuthManager::refresh(const QString& accountId, QString* errorMessage) {
   Session* session = m_sessions.value(accountId, nullptr);
   if (session == nullptr) {
+    if (PendingAuthorization* pending = m_pendingAuthorizations.value(accountId);
+        pending != nullptr && !pending->interactive) {
+      return true;
+    }
     return restoreAuthorization(accountId, errorMessage);
   }
   if (session->flow == nullptr || session->flow->refreshToken().isEmpty()) {
@@ -362,30 +389,175 @@ bool GoogleAuthManager::refresh(const QString& accountId, QString* errorMessage)
 }
 
 bool GoogleAuthManager::forget(const QString& accountId, QString* errorMessage) {
-  destroySession(accountId);
-  QString removalError;
-  if (!m_secrets.remove(accountId, QString::fromLatin1(kRefreshTokenKind),
-                        &removalError)) {
-    // Secret Service treats an absent item as a failure. Forgetting an account
-    // remains idempotent unless a concrete keyring error was reported.
-    if (!removalError.contains(QStringLiteral("exit code 1")) &&
-        !removalError.isEmpty()) {
-      if (errorMessage != nullptr) {
-        *errorMessage = removalError;
-      }
-      return false;
+  if (accountId.isEmpty()) {
+    if (errorMessage != nullptr) {
+      *errorMessage = QStringLiteral("Account ID is required");
     }
+    return false;
   }
+  if (m_pendingForgets.contains(accountId)) {
+    if (errorMessage != nullptr) {
+      *errorMessage =
+          QStringLiteral("Google account disconnect is already in progress");
+    }
+    return false;
+  }
+
+  cancel(accountId);
+  auto* pending = new PendingForget;
+  pending->generation = ++m_nextForgetGeneration;
+  const quint64 generation = pending->generation;
+  m_pendingForgets.insert(accountId, pending);
+  pending->operation = m_secrets.removeAsync(
+      accountId, QString::fromLatin1(kRefreshTokenKind),
+      [this, accountId, generation](SecretStoreResult result) {
+        PendingForget* active = m_pendingForgets.value(accountId, nullptr);
+        if (active == nullptr || active->generation != generation) {
+          return;
+        }
+        m_pendingForgets.remove(accountId);
+        delete active;
+        const bool success =
+            result.success || result.errorCode == QStringLiteral("not_found");
+        emit forgetFinished(accountId, success, success ? QString() : result.errorCode,
+                            success ? QString() : result.errorMessage);
+      });
   return true;
 }
 
-void GoogleAuthManager::cancel(const QString& accountId) { destroySession(accountId); }
+void GoogleAuthManager::cancel(const QString& accountId) {
+  destroyPendingAuthorization(accountId);
+  destroySession(accountId);
+}
+
+GoogleAuthManager::PendingAuthorization* GoogleAuthManager::activePendingAuthorization(
+    const QString& accountId, const quint64 generation) const {
+  PendingAuthorization* pending = m_pendingAuthorizations.value(accountId, nullptr);
+  return pending != nullptr && pending->generation == generation ? pending : nullptr;
+}
+
+void GoogleAuthManager::destroyPendingAuthorization(const QString& accountId) {
+  PendingAuthorization* pending = m_pendingAuthorizations.take(accountId);
+  if (pending == nullptr) {
+    return;
+  }
+  const SecretStoreOperationId operation = pending->lookupOperation;
+  pending->lookupOperation = kInvalidSecretStoreOperationId;
+  delete pending;
+  if (operation != kInvalidSecretStoreOperationId) {
+    m_secrets.cancel(operation);
+  }
+}
+
+bool GoogleAuthManager::queueAuthorization(const QString& accountId,
+                                           const bool interactive,
+                                           QString* errorMessage) {
+  if (accountId.isEmpty()) {
+    if (errorMessage != nullptr) {
+      *errorMessage = QStringLiteral("Account ID is required");
+    }
+    return false;
+  }
+  if (!isConfigured()) {
+    if (errorMessage != nullptr) {
+      *errorMessage = QStringLiteral("Google OAuth client is not configured");
+    }
+    return false;
+  }
+  if (m_pendingForgets.contains(accountId)) {
+    if (errorMessage != nullptr) {
+      *errorMessage = QStringLiteral("Google account disconnect is in progress");
+    }
+    return false;
+  }
+
+  destroyPendingAuthorization(accountId);
+  destroySession(accountId);
+  auto* pending = new PendingAuthorization;
+  pending->accountId = accountId;
+  pending->generation = ++m_nextAuthorizationGeneration;
+  pending->interactive = interactive;
+  pending->lookupComplete = interactive;
+  const quint64 generation = pending->generation;
+  m_pendingAuthorizations.insert(accountId, pending);
+  if (!interactive) {
+    pending->lookupOperation = m_secrets.lookupAsync(
+        accountId, QString::fromLatin1(kRefreshTokenKind),
+        [this, accountId, generation](SecretStoreResult result) {
+          PendingAuthorization* active =
+              activePendingAuthorization(accountId, generation);
+          if (active == nullptr) {
+            return;
+          }
+          active->lookupOperation = kInvalidSecretStoreOperationId;
+          if (!result.success || result.value.isEmpty()) {
+            m_pendingAuthorizations.remove(accountId);
+            delete active;
+            emit authorizationFailed(
+                accountId, QStringLiteral("authentication_required"),
+                result.errorMessage.isEmpty()
+                    ? QStringLiteral("Google account needs authorization")
+                    : result.errorMessage);
+            return;
+          }
+          active->refreshToken = result.value;
+          active->lookupComplete = true;
+          continuePendingAuthorization(accountId, generation);
+        });
+  }
+  continuePendingAuthorization(accountId, generation);
+  return true;
+}
+
+void GoogleAuthManager::continuePendingAuthorization(const QString& accountId,
+                                                     const quint64 generation) {
+  PendingAuthorization* pending = activePendingAuthorization(accountId, generation);
+  if (pending == nullptr || !pending->lookupComplete || !m_clientReady) {
+    return;
+  }
+  const bool interactive = pending->interactive;
+  const QString refreshToken = pending->refreshToken;
+  m_pendingAuthorizations.remove(accountId);
+  delete pending;
+
+  QString error;
+  Session* session = createSession(accountId, interactive, &error);
+  if (session == nullptr) {
+    emit authorizationFailed(
+        accountId, QStringLiteral("authorization_start_failed"),
+        error.isEmpty() ? QStringLiteral("Could not start Google authorization")
+                        : error);
+    return;
+  }
+  if (interactive) {
+    session->flow->grant();
+    return;
+  }
+  session->flow->setRefreshToken(refreshToken);
+  session->persistedRefreshToken = refreshToken;
+  session->refreshInFlight = true;
+  session->refreshCompletionNotified = false;
+  session->flow->refreshTokens();
+}
+
+void GoogleAuthManager::continuePendingAuthorizations() {
+  const QStringList accountIds = m_pendingAuthorizations.keys();
+  for (const QString& accountId : accountIds) {
+    PendingAuthorization* pending = m_pendingAuthorizations.value(accountId, nullptr);
+    if (pending != nullptr) {
+      continuePendingAuthorization(accountId, pending->generation);
+    }
+  }
+}
 
 void GoogleAuthManager::destroySession(const QString& accountId) {
   Session* session = m_sessions.take(accountId);
   if (session == nullptr) {
     return;
   }
+  const SecretStoreOperationId persistOperation = session->persistOperation;
+  session->persistOperation = kInvalidSecretStoreOperationId;
+  ++session->persistGeneration;
   if (session->replyHandler != nullptr) {
     session->replyHandler->close();
   }
@@ -401,6 +573,9 @@ void GoogleAuthManager::destroySession(const QString& accountId) {
     session->replyHandler->deleteLater();
   }
   delete session;
+  if (persistOperation != kInvalidSecretStoreOperationId) {
+    m_secrets.cancel(persistOperation);
+  }
 }
 
 void GoogleAuthManager::fail(Session* session, const QString& code,
@@ -424,13 +599,90 @@ void GoogleAuthManager::fail(Session* session, const QString& code,
   }
 }
 
-bool GoogleAuthManager::persistRefreshToken(Session* session, QString* errorMessage) {
+void GoogleAuthManager::persistRefreshToken(Session* session) {
   if (session == nullptr || session->flow == nullptr ||
       session->flow->refreshToken().isEmpty()) {
-    return true;
+    completePendingTokenNotifications(session);
+    return;
   }
-  return m_secrets.store(session->accountId, QString::fromLatin1(kRefreshTokenKind),
-                         session->flow->refreshToken(), errorMessage);
+  const QString refreshToken = session->flow->refreshToken();
+  if (session->persistedRefreshToken == refreshToken) {
+    completePendingTokenNotifications(session);
+    return;
+  }
+  if (session->persistOperation != kInvalidSecretStoreOperationId &&
+      session->persistingRefreshToken == refreshToken) {
+    return;
+  }
+
+  const SecretStoreOperationId previousOperation = session->persistOperation;
+  session->persistOperation = kInvalidSecretStoreOperationId;
+  const QString accountId = session->accountId;
+  const quint64 sessionGeneration = session->generation;
+  const quint64 persistGeneration = ++session->persistGeneration;
+  session->persistingRefreshToken = refreshToken;
+  if (previousOperation != kInvalidSecretStoreOperationId) {
+    m_secrets.cancel(previousOperation);
+  }
+  session->persistOperation = m_secrets.storeAsync(
+      accountId, QString::fromLatin1(kRefreshTokenKind), refreshToken,
+      [this, accountId, sessionGeneration, persistGeneration,
+       refreshToken](SecretStoreResult result) {
+        Session* active = activeSession(accountId, sessionGeneration);
+        if (active == nullptr || active->persistGeneration != persistGeneration) {
+          return;
+        }
+        active->persistOperation = kInvalidSecretStoreOperationId;
+        active->persistingRefreshToken.clear();
+        if (!result.success) {
+          fail(active, QStringLiteral("keyring_error"), result.errorMessage);
+          return;
+        }
+        active->persistedRefreshToken = refreshToken;
+        completePendingTokenNotifications(active);
+      });
+}
+
+void GoogleAuthManager::completePendingTokenNotifications(Session* session) {
+  if (session == nullptr ||
+      activeSession(session->accountId, session->generation) != session) {
+    return;
+  }
+  const QString accountId = session->accountId;
+  const quint64 generation = session->generation;
+  const bool notifyToken = session->tokenNotificationPending;
+  const bool notifyAuthorized =
+      session->authorizationNotificationPending && !session->completionEmitted;
+  session->tokenNotificationPending = false;
+  session->authorizationNotificationPending = false;
+  if (notifyToken && session->refreshInFlight) {
+    session->refreshCompletionNotified = true;
+  }
+  if (session->grantObserved) {
+    session->grantObserved = false;
+    session->refreshInFlight = false;
+    session->refreshCompletionNotified = false;
+  }
+  if (notifyAuthorized) {
+    session->completionEmitted = true;
+  }
+
+  if (notifyToken) {
+    emit tokenChanged(accountId);
+  }
+  session = activeSession(accountId, generation);
+  if (session != nullptr && notifyAuthorized) {
+    emit authorized(accountId);
+  }
+}
+
+void GoogleAuthManager::cancelClientSecretOperation() {
+  const SecretStoreOperationId operation = m_clientSecretOperation;
+  m_clientSecretOperation = kInvalidSecretStoreOperationId;
+  ++m_clientSecretGeneration;
+  if (operation != kInvalidSecretStoreOperationId) {
+    m_secrets.cancel(operation);
+  }
 }
 
 }  // namespace omacalendar::google

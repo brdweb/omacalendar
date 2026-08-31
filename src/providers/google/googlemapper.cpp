@@ -1,10 +1,12 @@
 #include "providers/google/googlemapper.h"
 
+#include <QCryptographicHash>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonValue>
 #include <QRegularExpression>
 #include <QTimeZone>
+#include <QUrl>
 
 namespace omacalendar::google {
 namespace {
@@ -34,7 +36,8 @@ QDateTime parseRfc3339(const QString& value, const QString& timeZone) {
   }
 
   if (!hasExplicitOffset(value)) {
-    const QTimeZone zone(timeZone.toUtf8());
+    const QTimeZone zone =
+        timeZone.isEmpty() ? QTimeZone(QTimeZone::UTC) : QTimeZone(timeZone.toUtf8());
     parsed = QDateTime(parsed.date(), parsed.time(),
                        zone.isValid() ? zone : QTimeZone(QTimeZone::UTC));
   }
@@ -65,6 +68,18 @@ QJsonObject sanitizedAttendee(const QJsonObject& attendee) {
       result.insert(name, attendee.value(name));
     }
   }
+  if (!result.contains(QStringLiteral("responseStatus"))) {
+    const QString partstat = stringValue(attendee, "partstat").toLower();
+    if (partstat == QStringLiteral("accepted") ||
+        partstat == QStringLiteral("tentative") ||
+        partstat == QStringLiteral("declined") ||
+        partstat == QStringLiteral("needsaction")) {
+      result.insert(QStringLiteral("responseStatus"),
+                    partstat == QStringLiteral("needsaction")
+                        ? QStringLiteral("needsAction")
+                        : partstat);
+    }
+  }
   return result;
 }
 
@@ -78,6 +93,93 @@ QJsonArray sanitizedAttendees(const QJsonArray& attendees) {
     if (!stringValue(attendee, "email").isEmpty()) {
       result.append(attendee);
     }
+  }
+  return result;
+}
+
+QString safeWebUrl(const QString& value, const bool requireHttps = false) {
+  const QUrl url(value);
+  const QString scheme = url.scheme().toLower();
+  const bool permittedScheme = scheme == QStringLiteral("https") ||
+                               (!requireHttps && scheme == QStringLiteral("http"));
+  return url.isValid() && permittedScheme && !url.host().isEmpty()
+             ? url.toString(QUrl::FullyEncoded)
+             : QString{};
+}
+
+QString detectedMeetingUrl(const QString& text) {
+  static const QRegularExpression urlExpression(
+      QStringLiteral("https://[^\\s<>\\\"']+"),
+      QRegularExpression::CaseInsensitiveOption);
+  auto match = urlExpression.globalMatch(text);
+  while (match.hasNext()) {
+    QString candidate = match.next().captured();
+    while (!candidate.isEmpty() &&
+           QStringLiteral(".,;:!?)]}").contains(candidate.back())) {
+      candidate.chop(1);
+    }
+    const QUrl url(candidate);
+    const QString host = url.host().toLower();
+    const bool knownProvider = host == QStringLiteral("meet.google.com") ||
+                               host == QStringLiteral("teams.microsoft.com") ||
+                               host == QStringLiteral("teams.live.com") ||
+                               host == QStringLiteral("meet.jit.si") ||
+                               host == QStringLiteral("whereby.com") ||
+                               host == QStringLiteral("zoom.us") ||
+                               host.endsWith(QStringLiteral(".zoom.us")) ||
+                               host == QStringLiteral("webex.com") ||
+                               host.endsWith(QStringLiteral(".webex.com"));
+    if (knownProvider) {
+      return safeWebUrl(candidate, true);
+    }
+  }
+  return {};
+}
+
+QString conferenceUrl(const QJsonObject& resource) {
+  const QString hangout = safeWebUrl(stringValue(resource, "hangoutLink"), true);
+  if (!hangout.isEmpty()) {
+    return hangout;
+  }
+  const QJsonArray entryPoints = resource.value(QStringLiteral("conferenceData"))
+                                     .toObject()
+                                     .value(QStringLiteral("entryPoints"))
+                                     .toArray();
+  QString fallback;
+  for (const QJsonValue& value : entryPoints) {
+    const QJsonObject entry = value.toObject();
+    const QString uri = safeWebUrl(stringValue(entry, "uri"), true);
+    if (uri.isEmpty()) {
+      continue;
+    }
+    if (stringValue(entry, "entryPointType") == QStringLiteral("video")) {
+      return uri;
+    }
+    if (fallback.isEmpty()) {
+      fallback = uri;
+    }
+  }
+  if (!fallback.isEmpty()) {
+    return fallback;
+  }
+  const QString locationMeeting = detectedMeetingUrl(stringValue(resource, "location"));
+  return locationMeeting.isEmpty()
+             ? detectedMeetingUrl(stringValue(resource, "description"))
+             : locationMeeting;
+}
+
+QJsonArray normalizedAttendees(const QJsonArray& attendees) {
+  QJsonArray result;
+  for (const QJsonValue& value : attendees) {
+    if (!value.isObject()) {
+      continue;
+    }
+    QJsonObject attendee = value.toObject();
+    const QString response = stringValue(attendee, "responseStatus");
+    if (!response.isEmpty()) {
+      attendee.insert(QStringLiteral("partstat"), response.toUpper());
+    }
+    result.append(attendee);
   }
   return result;
 }
@@ -132,6 +234,17 @@ QJsonObject dateTimeBody(const QDateTime& utc, const QString& timeZone) {
     }
   }
   return result;
+}
+
+QJsonObject floatingDateTimeBody(const QDateTime& wallTime) {
+  if (!wallTime.isValid()) {
+    return {};
+  }
+  // Floating Google date-times intentionally have neither a UTC offset nor a
+  // timeZone field. The mapper stores their wall-clock components in the UTC
+  // fields, so format those components directly instead of converting them.
+  return {{QStringLiteral("dateTime"),
+           wallTime.toUTC().toString(QStringLiteral("yyyy-MM-dd'T'HH:mm:ss.zzz"))}};
 }
 
 void copyProviderWriteFields(const QJsonObject& raw, QJsonObject* result) {
@@ -216,6 +329,34 @@ QString recurrenceInstanceId(const QJsonObject& originalStartTime) {
   return dateTime;
 }
 
+GoogleOccurrenceMutationTarget googleOccurrenceMutationTarget(const Event& event) {
+  if (event.recurrenceId.isEmpty()) {
+    return {};
+  }
+
+  const QJsonObject raw = parsedRawPayload(event);
+  const QString recurringEventId =
+      raw.value(QStringLiteral("recurringEventId")).toString();
+  const qsizetype syntheticSeparator = event.remoteId.indexOf(QLatin1Char('#'));
+  if (syntheticSeparator >= 0) {
+    const QString masterId = event.remoteId.left(syntheticSeparator);
+    return {GoogleOccurrenceMutationTargetKind::ResolveInstance,
+            masterId.isEmpty() ? recurringEventId : masterId};
+  }
+
+  if (!recurringEventId.isEmpty()) {
+    if (!event.remoteId.isEmpty() && event.remoteId != recurringEventId) {
+      return {GoogleOccurrenceMutationTargetKind::DirectInstance, event.remoteId};
+    }
+    return {GoogleOccurrenceMutationTargetKind::ResolveInstance, recurringEventId};
+  }
+
+  if (!event.remoteId.isEmpty()) {
+    return {GoogleOccurrenceMutationTargetKind::ResolveInstance, event.remoteId};
+  }
+  return {};
+}
+
 Calendar calendarFromGoogleJson(const QJsonObject& resource, const QString& accountId) {
   Calendar calendar;
   calendar.accountId = accountId;
@@ -240,13 +381,15 @@ Calendar calendarFromGoogleJson(const QJsonObject& resource, const QString& acco
   const bool hidden = resource.value(QStringLiteral("hidden")).toBool(false);
   // CalendarList defines an omitted `selected` field as false.
   const bool selected = resource.value(QStringLiteral("selected")).toBool(false);
+  const bool primary = resource.value(QStringLiteral("primary")).toBool(false);
   calendar.enabled = !deleted && !hidden && selected;
 
   calendar.capabilities = {
       {QStringLiteral("provider"), QStringLiteral("google")},
       {QStringLiteral("accessRole"), accessRole},
-      {QStringLiteral("primary"),
-       resource.value(QStringLiteral("primary")).toBool(false)},
+      {QStringLiteral("primary"), primary},
+      {QStringLiteral("canDeleteCalendar"),
+       accessRole == QStringLiteral("owner") && !primary && !deleted},
       {QStringLiteral("selected"), selected},
       {QStringLiteral("hidden"), hidden},
       {QStringLiteral("deleted"), deleted},
@@ -266,7 +409,8 @@ Calendar calendarFromGoogleJson(const QJsonObject& resource, const QString& acco
   return calendar;
 }
 
-Event eventFromGoogleJson(const QJsonObject& resource, const QString& calendarId) {
+Event eventFromGoogleJson(const QJsonObject& resource, const QString& calendarId,
+                          const QJsonArray& calendarDefaultReminders) {
   Event event;
   event.calendarId = calendarId;
   event.remoteId = stringValue(resource, "id");
@@ -275,6 +419,11 @@ Event eventFromGoogleJson(const QJsonObject& resource, const QString& calendarId
   event.summary = stringValue(resource, "summary");
   event.description = stringValue(resource, "description");
   event.location = stringValue(resource, "location");
+  event.url = safeWebUrl(resource.value(QStringLiteral("source"))
+                             .toObject()
+                             .value(QStringLiteral("url"))
+                             .toString());
+  event.conferenceUrl = conferenceUrl(resource);
 
   const QString recurringEventId = stringValue(resource, "recurringEventId");
   if (event.uid.isEmpty()) {
@@ -287,6 +436,7 @@ Event eventFromGoogleJson(const QJsonObject& resource, const QString& calendarId
   const QJsonObject end = resource.value(QStringLiteral("end")).toObject();
   event.allDay = start.contains(QStringLiteral("date"));
   if (event.allDay) {
+    event.timeKind = TimeKind::AllDay;
     event.startDate = QDate::fromString(stringValue(start, "date"), Qt::ISODate);
     event.endDate = QDate::fromString(stringValue(end, "date"), Qt::ISODate);
   } else {
@@ -297,6 +447,9 @@ Event eventFromGoogleJson(const QJsonObject& resource, const QString& calendarId
     }
     event.startUtc = parseRfc3339(stringValue(start, "dateTime"), event.startTimeZone);
     event.endUtc = parseRfc3339(stringValue(end, "dateTime"), event.endTimeZone);
+    const bool floating = event.startTimeZone.isEmpty() &&
+                          !hasExplicitOffset(stringValue(start, "dateTime"));
+    event.timeKind = floating ? TimeKind::Floating : TimeKind::Zoned;
   }
 
   event.status = stringValue(resource, "status");
@@ -307,16 +460,32 @@ Event eventFromGoogleJson(const QJsonObject& resource, const QString& calendarId
   if (event.transparency.isEmpty()) {
     event.transparency = QStringLiteral("opaque");
   }
+  event.visibility = stringValue(resource, "visibility");
+  if (event.visibility.isEmpty()) {
+    event.visibility = QStringLiteral("default");
+  }
   event.deleted = event.status == QStringLiteral("cancelled");
   event.recurrenceRule = joinedRecurrence(resource.value(QStringLiteral("recurrence")));
   event.recurrenceId = recurrenceInstanceId(
       resource.value(QStringLiteral("originalStartTime")).toObject());
   event.sequence = resource.value(QStringLiteral("sequence")).toInt(0);
   event.organizer = resource.value(QStringLiteral("organizer")).toObject();
-  event.attendees = resource.value(QStringLiteral("attendees")).toArray();
+  event.attendees =
+      normalizedAttendees(resource.value(QStringLiteral("attendees")).toArray());
 
   const QJsonObject reminders = resource.value(QStringLiteral("reminders")).toObject();
-  event.reminders = reminders.value(QStringLiteral("overrides")).toArray();
+  if (reminders.value(QStringLiteral("useDefault")).toBool(false)) {
+    for (const QJsonValue& value : calendarDefaultReminders) {
+      if (!value.isObject()) {
+        continue;
+      }
+      QJsonObject inherited = value.toObject();
+      inherited.insert(QStringLiteral("providerDefault"), true);
+      event.reminders.append(inherited);
+    }
+  } else {
+    event.reminders = reminders.value(QStringLiteral("overrides")).toArray();
+  }
   event.rawPayload =
       QString::fromUtf8(QJsonDocument(resource).toJson(QJsonDocument::Compact));
   event.rawFormat = QStringLiteral("google-json");
@@ -341,6 +510,22 @@ QJsonObject eventToGoogleJson(const Event& event) {
   result.insert(QStringLiteral("description"), event.description);
   result.insert(QStringLiteral("location"), event.location);
 
+  const QJsonObject rawSource = raw.value(QStringLiteral("source")).toObject();
+  const QString rawSourceUrl = safeWebUrl(stringValue(rawSource, "url"));
+  if (event.remoteId.isEmpty() || event.url != rawSourceUrl) {
+    if (event.url.isEmpty()) {
+      result.insert(QStringLiteral("source"), QJsonValue::Null);
+    } else {
+      const QString writableUrl = safeWebUrl(event.url);
+      if (!writableUrl.isEmpty()) {
+        QJsonObject source{{QStringLiteral("url"), writableUrl}};
+        const QString title = stringValue(rawSource, "title");
+        source.insert(QStringLiteral("title"), title.isEmpty() ? event.summary : title);
+        result.insert(QStringLiteral("source"), source);
+      }
+    }
+  }
+
   if (event.allDay) {
     if (event.startDate.isValid()) {
       result.insert(
@@ -353,11 +538,16 @@ QJsonObject eventToGoogleJson(const Event& event) {
           QJsonObject{{QStringLiteral("date"), endDate.toString(Qt::ISODate)}});
     }
   } else if (event.startUtc.isValid() && event.endUtc.isValid()) {
-    result.insert(QStringLiteral("start"),
-                  dateTimeBody(event.startUtc, event.startTimeZone));
-    const QString endTimeZone =
-        event.endTimeZone.isEmpty() ? event.startTimeZone : event.endTimeZone;
-    result.insert(QStringLiteral("end"), dateTimeBody(event.endUtc, endTimeZone));
+    if (event.timeKind == TimeKind::Floating) {
+      result.insert(QStringLiteral("start"), floatingDateTimeBody(event.startUtc));
+      result.insert(QStringLiteral("end"), floatingDateTimeBody(event.endUtc));
+    } else {
+      result.insert(QStringLiteral("start"),
+                    dateTimeBody(event.startUtc, event.startTimeZone));
+      const QString endTimeZone =
+          event.endTimeZone.isEmpty() ? event.startTimeZone : event.endTimeZone;
+      result.insert(QStringLiteral("end"), dateTimeBody(event.endUtc, endTimeZone));
+    }
   }
 
   const QString status = event.deleted ? QStringLiteral("cancelled") : event.status;
@@ -368,6 +558,12 @@ QJsonObject eventToGoogleJson(const Event& event) {
   if (event.transparency == QStringLiteral("opaque") ||
       event.transparency == QStringLiteral("transparent")) {
     result.insert(QStringLiteral("transparency"), event.transparency);
+  }
+  if (event.visibility == QStringLiteral("default") ||
+      event.visibility == QStringLiteral("public") ||
+      event.visibility == QStringLiteral("private") ||
+      event.visibility == QStringLiteral("confidential")) {
+    result.insert(QStringLiteral("visibility"), event.visibility);
   }
 
   const QJsonArray recurrence = recurrenceLines(event.recurrenceRule);
@@ -382,11 +578,23 @@ QJsonObject eventToGoogleJson(const Event& event) {
 
   const QJsonArray reminders = sanitizedReminderOverrides(event.reminders);
   QJsonObject reminderBody;
-  if (!reminders.isEmpty()) {
+  const QJsonObject rawReminders = raw.value(QStringLiteral("reminders")).toObject();
+  bool inheritedProviderDefaults =
+      !event.reminders.isEmpty() &&
+      rawReminders.value(QStringLiteral("useDefault")).toBool(false);
+  for (const QJsonValue& value : event.reminders) {
+    if (!value.isObject() ||
+        !value.toObject().value(QStringLiteral("providerDefault")).toBool(false)) {
+      inheritedProviderDefaults = false;
+      break;
+    }
+  }
+  if (inheritedProviderDefaults) {
+    reminderBody.insert(QStringLiteral("useDefault"), true);
+  } else if (!reminders.isEmpty()) {
     reminderBody.insert(QStringLiteral("useDefault"), false);
     reminderBody.insert(QStringLiteral("overrides"), reminders);
   } else {
-    const QJsonObject rawReminders = raw.value(QStringLiteral("reminders")).toObject();
     const bool useDefault =
         rawReminders.value(QStringLiteral("useDefault")).toBool(true);
     reminderBody.insert(QStringLiteral("useDefault"), useDefault);
@@ -397,6 +605,117 @@ QJsonObject eventToGoogleJson(const Event& event) {
   result.insert(QStringLiteral("reminders"), reminderBody);
 
   return result;
+}
+
+QString eventIdForClientMutation(const QString& clientMutationId) {
+  if (clientMutationId.isEmpty()) {
+    return {};
+  }
+  // Google event ids allow base32hex characters. A lowercase hex digest is a
+  // valid subset and avoids leaking the user-provided mutation id itself.
+  return QString::fromLatin1(QCryptographicHash::hash(clientMutationId.toUtf8(),
+                                                      QCryptographicHash::Sha256)
+                                 .toHex())
+      .left(32);
+}
+
+QJsonObject eventToGoogleCreateJson(const Event& event,
+                                    const QString& clientMutationId) {
+  QJsonObject payload = eventToGoogleJson(event);
+  const QString remoteId = eventIdForClientMutation(clientMutationId);
+  if (remoteId.isEmpty()) {
+    return payload;
+  }
+  payload.insert(QStringLiteral("id"), remoteId);
+  QJsonObject extended = payload.value(QStringLiteral("extendedProperties")).toObject();
+  QJsonObject privateProperties = extended.value(QStringLiteral("private")).toObject();
+  privateProperties.insert(QStringLiteral("omacalendarMutationId"), clientMutationId);
+  extended.insert(QStringLiteral("private"), privateProperties);
+  payload.insert(QStringLiteral("extendedProperties"), extended);
+  return payload;
+}
+
+bool googleEventHasMutationIdentity(const QJsonObject& resource,
+                                    const QString& clientMutationId) {
+  return !clientMutationId.isEmpty() &&
+         resource.value(QStringLiteral("extendedProperties"))
+                 .toObject()
+                 .value(QStringLiteral("private"))
+                 .toObject()
+                 .value(QStringLiteral("omacalendarMutationId"))
+                 .toString() == clientMutationId;
+}
+
+QJsonObject rsvpPatchForGoogleEvent(const Event& event) {
+  const QJsonObject raw = parsedRawPayload(event);
+  if (event.remoteId.isEmpty() || raw.isEmpty()) {
+    return {};
+  }
+
+  Event baseline = eventFromGoogleJson(raw, event.calendarId);
+  baseline.id = event.id;
+  QJsonObject beforeBody = eventToGoogleJson(baseline);
+  QJsonObject afterBody = eventToGoogleJson(event);
+  const QJsonArray beforeAttendees =
+      beforeBody.take(QStringLiteral("attendees")).toArray();
+  const QJsonArray afterAttendees =
+      afterBody.take(QStringLiteral("attendees")).toArray();
+  if (beforeBody != afterBody || beforeAttendees.size() != afterAttendees.size()) {
+    return {};
+  }
+
+  QJsonObject changed;
+  int changedCount = 0;
+  for (const QJsonValue& value : afterAttendees) {
+    const QJsonObject candidate = value.toObject();
+    const QString email = stringValue(candidate, "email");
+    auto matching = beforeAttendees.constBegin();
+    for (; matching != beforeAttendees.constEnd(); ++matching) {
+      if (stringValue(matching->toObject(), "email")
+              .compare(email, Qt::CaseInsensitive) == 0) {
+        break;
+      }
+    }
+    if (matching == beforeAttendees.constEnd()) {
+      return {};
+    }
+    const QJsonObject previous = matching->toObject();
+    if (previous == candidate) {
+      continue;
+    }
+    QJsonObject previousIdentity = previous;
+    QJsonObject candidateIdentity = candidate;
+    previousIdentity.remove(QStringLiteral("responseStatus"));
+    candidateIdentity.remove(QStringLiteral("responseStatus"));
+    if (previousIdentity != candidateIdentity) {
+      return {};
+    }
+    const QString nextResponse = stringValue(candidate, "responseStatus");
+    if (nextResponse != QStringLiteral("accepted") &&
+        nextResponse != QStringLiteral("tentative") &&
+        nextResponse != QStringLiteral("declined")) {
+      return {};
+    }
+    bool self = false;
+    for (const QJsonValue& rawValue :
+         raw.value(QStringLiteral("attendees")).toArray()) {
+      const QJsonObject rawAttendee = rawValue.toObject();
+      if (stringValue(rawAttendee, "email").compare(email, Qt::CaseInsensitive) == 0) {
+        self = rawAttendee.value(QStringLiteral("self")).toBool(false);
+        break;
+      }
+    }
+    if (!self) {
+      return {};
+    }
+    changed = candidate;
+    ++changedCount;
+  }
+  if (changedCount != 1) {
+    return {};
+  }
+  return {{QStringLiteral("attendees"), QJsonArray{changed}},
+          {QStringLiteral("attendeesOmitted"), true}};
 }
 
 }  // namespace omacalendar::google

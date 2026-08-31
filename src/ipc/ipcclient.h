@@ -14,6 +14,7 @@ class IpcClient final : public QObject {
 
  public:
   explicit IpcClient(QObject* parent = nullptr);
+  ~IpcClient() override;
 
   void connectTo(const QString& path);
   void disconnectFromServer();

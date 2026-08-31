@@ -1,0 +1,18 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=OmaCalendar
+GenericName=Calendar
+Comment=Local-first calendar for Omarchy
+Exec=omacalendar %U
+Icon=org.omacalendar.OmaCalendar
+Terminal=false
+Categories=Office;Calendar;
+Keywords=calendar;agenda;caldav;google;ics;
+MimeType=text/calendar;x-scheme-handler/omacalendar;
+StartupNotify=true
+Actions=NewEvent;
+
+[Desktop Action NewEvent]
+Name=New Event
+Exec=omacalendar omacalendar://create

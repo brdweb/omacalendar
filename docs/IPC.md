@@ -1,111 +1,176 @@
-# Local IPC protocol
+# Local IPC protocol 2.0
 
-## Transport
+## Transport and trust boundary
 
-The protocol uses UTF-8 JSON objects separated by a single newline over a
-user-only local socket at `$XDG_RUNTIME_DIR/omacalendar/daemon.sock`.
+OmaCalendar uses newline-delimited UTF-8 JSON on the user-only local socket
+`$XDG_RUNTIME_DIR/omacalendar/daemon.sock`. The runtime directory and socket are
+created with owner-only permissions. Both peers enforce a 1 MiB frame limit;
+large event collections are bounded and paginated.
 
-Clients and the server enforce a 1 MiB maximum frame size. Calendar event
-descriptions or bulk result sets that could exceed this limit are paginated.
+In packaged installations, `omacalendard.socket` owns this endpoint and passes
+its listening descriptor to `omacalendard`. Connecting to the socket therefore
+starts the daemon on demand even when the desktop application is closed. Socket
+activation only opens the local cache; remote provider sync is not required to
+serve the initial widget snapshot.
+
+The daemon is the trust boundary. Client DTOs never include credentials,
+provider endpoints, remote identifiers, ETags, sync tokens, retained provider
+payloads, or queued mutation payloads. Errors are sanitized before crossing
+IPC.
 
 ## Versioning
 
-The first protocol is `1.0`. Major-version differences are incompatible;
-minor additions are capability-gated. Every request includes `protocolMajor`.
-
-## Request
+Every request carries `protocolMajor: 2`. A different major is rejected with
+`protocol_mismatch`; minor additions are discovered through `system.info`.
 
 ```json
-{"id":"8aee...","protocolMajor":1,"method":"system.ping","params":{}}
+{"id":"8aee...","protocolMajor":2,"method":"system.health","params":{}}
 ```
 
-## Success response
+A successful response contains `result`; a failed response contains a stable
+error code, safe message, and retryability flag.
 
 ```json
-{"id":"8aee...","result":{"ok":true,"protocolMajor":1,"protocolMinor":0}}
+{"id":"8aee...","result":{"ok":true,"revision":42}}
 ```
-
-## Error response
 
 ```json
-{
-  "id":"8aee...",
-  "error":{
-    "code":"invalid_params",
-    "message":"start must be an ISO date-time",
-    "retryable":false
-  }
-}
+{"id":"8aee...","error":{"code":"invalid_params","message":"A bounded date range is required","retryable":false}}
 ```
 
-Error messages must not contain credentials or raw provider bodies.
+## Revisions and subscriptions
 
-## Notification
+Every durable change increments a monotonic database revision. Notifications
+are hints, not a source of truth:
 
 ```json
-{"event":"events.changed","data":{"calendarIds":["..."],"revision":42}}
+{"event":"events.changed","data":{"calendarIds":["..."],"revision":43}}
 ```
 
-Notifications are hints. A reconnecting client always re-queries current state
-and never assumes it received every notification.
+Clients call `system.subscribe` with their last observed `sinceRevision`. A
+`catchUpRequired` response makes the client re-query its presentation models.
+Clients also re-query after reconnect or daemon restart.
 
-## Phase 4 checkpoint method surface
+Subscription state belongs to one socket connection and is cleared when that
+connection closes. Before a successful subscription the socket receives only
+its request/protocol responses, not asynchronous domain notifications. Omitting
+`topics` subscribes to `*` for IPC 2.0 compatibility; an explicit list replaces
+the connection's prior list and may contain `*`, a family such as `events`, a
+family wildcard such as `events.*`, or an exact event such as
+`events.changed`.
+
+## Method surface
 
 ### System
 
-- `system.ping`
-- `system.info`
+- `system.ping`, `system.info`, `system.health`, `system.subscribe`
 
-### Accounts and authentication
+### Accounts
 
-- `accounts.list`
-- `accounts.createCalDav`
-- `accounts.remove`
-- `accounts.test`
-- `google.configureClient`
-- `google.oauthStart`
-- `google.oauthCancel`
-- `google.disconnect`
+- `accounts.list`, `accounts.update`, `accounts.reauthorize`,
+  `accounts.disconnect`, `accounts.remove`, `accounts.test`
+- `accounts.addGoogle` (`google.oauthStart` remains a development alias)
+- `accounts.addCalDav` (`accounts.createCalDav` is a development alias)
+- `accounts.addIcs`
+- `google.configureClient`, `google.oauthStart`, `google.oauthCancel`,
+  `google.disconnect`
 
-### Calendars and settings
+### Calendars and calendar sets
 
-- `calendars.list`
-- `calendars.upsert` (development/diagnostic use)
-- `settings.get`
-- `settings.set`
+- `calendars.list`, `calendars.updatePreferences`
+- `calendars.upsert` for writable device-only calendars
+- `calendars.remove` for confirmed custom device-only calendars and owned,
+  non-primary Google calendars; built-in, primary, shared, and read-only
+  calendars are protected
+- `calendarSets.list`, `calendarSets.upsert`, `calendarSets.remove`,
+  `calendarSets.activate`
+- `settings.get`, `settings.set`
 
-### Events
+### Events and invitations
 
-- `events.list`
-- `events.get`
-- `events.create`
-- `events.update`
-- `events.remove`
-- `events.search`
+- `events.list`, `events.get`, `events.search`
+- `events.create`, `events.update`, `events.remove`, `events.move`,
+  `events.respond`, `events.undo`
+- `invitations.list`, `invitations.markSeen`
 
-`events.list` always requires a bounded start/end interval and supports a
-bounded `limit` plus integer `offset`.
+Durable `events.create`, `events.update`, `events.remove`, `events.move`, and
+`events.respond` requests use `clientMutationId`, `expectedLocalRevision`,
+`recurrenceScope`, and `guestNotificationPolicy`. Existing-event writes also
+carry `eventRef {eventId, recurrenceId?}`. Guest-affecting writes reject an
+omitted notification policy. `events.undo` instead consumes the returned
+`undoToken` with a new `clientMutationId`.
 
-### Synchronization
+`events.create` accepts only `recurrenceScope: "series"`. Its editable draft
+must not contain `recurrenceId`: occurrence identities are provider/daemon-owned
+references, not fields a client may invent while creating an event.
 
-- `sync.all`
-- `sync.account`
-- `sync.status`
-- `outbox.list`
-- `outbox.retry`
+For recurring events, `recurrenceScope` is `series`, `occurrence`, or `future`.
+An occurrence update, remove, move, or RSVP supplies the occurrence identity in
+`eventRef.recurrenceId`; an editable draft cannot replace that identity.
+`events.move` supports `series` and `occurrence`, but rejects `future` because a
+cross-calendar this-and-future move cannot be represented safely across the
+supported providers. Other `future` mutations are exposed only when the target
+calendar advertises proven `thisAndFuture` support.
 
-## Planned additive surface
+Recurrence references may be returned in ISO-8601 form, RFC 5545 basic form,
+all-day date form, or with `TZID`, `VALUE=DATE`, and
+`RANGE=THISANDFUTURE` parameters. The daemon compares equivalent spellings
+canonically while preserving the distinction between all-day, floating, and
+zoned time. Clients should round-trip the `recurrenceId` from a presentation DTO
+instead of synthesizing one from the displayed start time. `events.get` accepts
+an optional `recurrenceId` (directly or in `eventRef`) and returns the detached
+or generated occurrence rather than the series master.
 
-The post-checkpoint app/widget work adds these methods without changing
-protocol major version 1:
+`events.list` requires a bounded start/end interval and supports bounded
+pagination. The interval and `calendarIds` scope are applied before `offset`
+and `limit`; `total` is the size of that filtered result. `events.search`
+similarly applies its text, date, calendar, account, and invitation-state
+filters before pagination.
 
-- `system.subscribe`
-- `calendarSets.list`, `calendarSets.upsert`, `calendarSets.remove`
-- `conflicts.list`
-- `conflicts.resolve`
+A same-account move preserves the canonical event identity. A cross-account or
+cross-provider move durably creates the destination first; deletion of the
+source depends on destination acknowledgment, so a destination failure cannot
+silently discard the source event.
+
+### Conflicts and durable operations
+
+- `conflicts.list`, `conflicts.resolve`
+- `operations.list`, `operations.retry`, `operations.discard`
+- `outbox.list`, `outbox.retry` are compatibility aliases for diagnostics
+
+Conflict strategies are `keep_remote`, `keep_local`, and `merge`. A merge must
+contain a complete, validated editable event draft. Keeping local after remote
+deletion recreates the event with a new provider identity.
+
+### Reminders
+
+- `reminders.list`, `reminders.snooze`, `reminders.dismiss`
+
+### Synchronization and ICS
+
+- `sync.all`, `sync.account`, `sync.calendar`, `sync.status`
+- `ics.refresh`, `ics.status`
+- `import.preview`, `import.commit`
+- `export.create`, `export.run`
+
+Import accepts bounded inline content, base64 content, or an absolute regular
+local path. Duplicate policies are `skip`, `copy`, and `replace`. Export scope
+is one event, a bounded date range, a calendar set, or an entire local
+calendar.
+
+### Widget
+
+- `widget.snapshot`
+
+The widget receives a compact presentation-only snapshot and uses revision
+subscriptions for missed-change recovery. Recurring snapshot entries include
+the authoritative `recurrenceId`; `occurrenceStart` is retained only as a
+compatibility display/identity fallback for older widget builds. Widget
+mutations send the authoritative value as `eventRef.recurrenceId`. The widget
+never opens the database or contacts providers directly.
 
 ## Capability negotiation
 
-`system.info` returns server, schema, and protocol versions plus method and
-provider capabilities. A client disables unavailable UI rather than invoking
-unknown methods.
+`system.info` returns protocol/schema versions, the callable method list, and
+provider capabilities. App and widget disable unsupported controls and explain
+the limitation instead of invoking an unavailable or unsafe operation.

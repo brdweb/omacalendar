@@ -1,0 +1,13 @@
+[Unit]
+Description=OmaCalendar on-demand local IPC socket
+Documentation=https://github.com/brdweb/omacalendar
+
+[Socket]
+ListenStream=%t/omacalendar/daemon.sock
+FileDescriptorName=omacalendar
+DirectoryMode=0700
+SocketMode=0600
+RemoveOnStop=true
+
+[Install]
+WantedBy=sockets.target

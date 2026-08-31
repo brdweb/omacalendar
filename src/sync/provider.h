@@ -5,6 +5,7 @@
 #include <QList>
 #include <QObject>
 #include <QString>
+#include <QStringList>
 #include <QtTypes>
 #include <functional>
 #include <utility>
@@ -157,6 +158,12 @@ struct PullChangesPayload {
   QString nextSyncToken;
 };
 
+struct RangeSyncRequest {
+  QString calendarId;
+  QDateTime startUtc;
+  QDateTime endUtc;
+};
+
 struct FetchEventRequest {
   Account account;
   Calendar calendar;
@@ -206,49 +213,55 @@ using FetchEventCallback = std::function<void(ProviderResult<Event>)>;
 using MutationCallback = std::function<void(ProviderResult<MutationPayload>)>;
 using RemoveEventCallback = std::function<void(ProviderResult<RemoveEventPayload>)>;
 
-// Network-backed provider contract shared by the Google and CalDAV adapters.
-//
-// Every accepted operation is asynchronous: it returns before invoking its
-// callback, never runs a nested event loop, and invokes the callback exactly
-// once in this object's thread. Cancellation also completes the callback once,
-// with ProviderErrorKind::Cancelled. A callback is never invoked after this
-// provider has been destroyed.
+// Daemon-facing contract shared by every calendar source. Remote protocol
+// implementations retain the operation DTOs above internally, while the
+// SyncCoordinator depends on this lifecycle/synchronization surface. This
+// keeps provider selection and status routing out of IPC handlers and gives
+// device-only and read-only subscription calendars the same observable
+// behavior as writable network providers.
 class Provider : public QObject {
   Q_OBJECT
 
  public:
-  explicit Provider(QString providerId, QObject* parent = nullptr)
-      : QObject(parent), m_providerId(std::move(providerId)) {}
+  Provider(QString providerId, ProviderKind providerKind, QObject* parent = nullptr)
+      : QObject(parent),
+        m_providerId(std::move(providerId)),
+        m_providerKind(providerKind) {}
   ~Provider() override = default;
 
   Provider(const Provider&) = delete;
   Provider& operator=(const Provider&) = delete;
 
   [[nodiscard]] const QString& id() const noexcept { return m_providerId; }
-  [[nodiscard]] virtual ProviderKind kind() const noexcept = 0;
+  [[nodiscard]] ProviderKind kind() const noexcept { return m_providerKind; }
   [[nodiscard]] virtual ProviderCapabilities capabilities() const = 0;
 
-  [[nodiscard]] virtual ProviderOperationId discoverAccount(
-      const AccountDiscoveryRequest& request, AccountDiscoveryCallback callback) = 0;
-  [[nodiscard]] virtual ProviderOperationId discoverCalendars(
-      const CalendarDiscoveryRequest& request, CalendarDiscoveryCallback callback) = 0;
-  [[nodiscard]] virtual ProviderOperationId pullChanges(
-      const PullChangesRequest& request, PullChangesCallback callback) = 0;
-  [[nodiscard]] virtual ProviderOperationId fetchEvent(const FetchEventRequest& request,
-                                                       FetchEventCallback callback) = 0;
-  [[nodiscard]] virtual ProviderOperationId createEvent(
-      const CreateEventRequest& request, MutationCallback callback) = 0;
-  [[nodiscard]] virtual ProviderOperationId updateEvent(
-      const UpdateEventRequest& request, MutationCallback callback) = 0;
-  [[nodiscard]] virtual ProviderOperationId removeEvent(
-      const RemoveEventRequest& request, RemoveEventCallback callback) = 0;
+  virtual void start() {}
+  virtual void syncAll() = 0;
+  virtual void syncAccount(const QString& accountId) = 0;
+  // Queue a bounded historical/future hydration. Implementations must return
+  // without waiting for network I/O and mark durable coverage only after the
+  // complete provider response has been committed.
+  virtual bool syncRange(const RangeSyncRequest& request,
+                         QString* errorMessage = nullptr) {
+    Q_UNUSED(request)
+    if (errorMessage != nullptr) {
+      *errorMessage = QStringLiteral("This provider does not support range sync");
+    }
+    return false;
+  }
+  [[nodiscard]] virtual QJsonObject status(const QString& accountId = {}) const = 0;
 
-  // cancel() is idempotent. Unknown and already-completed ids are ignored.
-  virtual void cancel(ProviderOperationId operationId) = 0;
-  virtual void cancelAll() = 0;
+ signals:
+  void accountChanged(const QString& accountId);
+  void calendarsChanged(const QString& accountId);
+  void eventsChanged(const QStringList& calendarIds);
+  void syncStatusChanged(const QString& accountId, const QJsonObject& status);
+  void operationStateChanged();
 
  private:
   QString m_providerId;
+  ProviderKind m_providerKind = ProviderKind::Unknown;
 };
 
 }  // namespace omacalendar

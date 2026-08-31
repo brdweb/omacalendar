@@ -4,6 +4,8 @@
 #include <QFile>
 #include <QRegularExpression>
 #include <QStandardPaths>
+#include <algorithm>
+#include <cmath>
 
 namespace omacalendar {
 namespace {
@@ -36,6 +38,28 @@ QString stateHome() {
   return QDir::home().filePath(QStringLiteral(".local/state"));
 }
 
+double relativeLuminance(const QColor& color) {
+  const auto channel = [](const double value) {
+    return value <= 0.04045 ? value / 12.92 : std::pow((value + 0.055) / 1.055, 2.4);
+  };
+  return 0.2126 * channel(color.redF()) + 0.7152 * channel(color.greenF()) +
+         0.0722 * channel(color.blueF());
+}
+
+double contrastRatio(const QColor& first, const QColor& second) {
+  const double firstLuminance = relativeLuminance(first);
+  const double secondLuminance = relativeLuminance(second);
+  const double lighter = std::max(firstLuminance, secondLuminance);
+  const double darker = std::min(firstLuminance, secondLuminance);
+  return (lighter + 0.05) / (darker + 0.05);
+}
+
+QColor bestContrast(const QColor& background, const QColor& first,
+                    const QColor& second) {
+  return contrastRatio(background, first) >= contrastRatio(background, second) ? first
+                                                                               : second;
+}
+
 }  // namespace
 
 ThemeBridge::ThemeBridge(QObject* parent) : QObject(parent) {
@@ -52,8 +76,11 @@ QColor ThemeBridge::surfaceAlt() const { return m_surfaceAlt; }
 QColor ThemeBridge::text() const { return m_text; }
 QColor ThemeBridge::mutedText() const { return m_mutedText; }
 QColor ThemeBridge::accent() const { return m_accent; }
+QColor ThemeBridge::onAccent() const { return m_onAccent; }
 QColor ThemeBridge::danger() const { return m_danger; }
 QColor ThemeBridge::success() const { return m_success; }
+QColor ThemeBridge::warning() const { return m_warning; }
+QColor ThemeBridge::info() const { return m_info; }
 int ThemeBridge::baseFontSize() const { return m_baseFontSize; }
 QString ThemeBridge::sourceName() const { return m_sourceName; }
 
@@ -65,8 +92,14 @@ void ThemeBridge::watch(const QString& path) {
 }
 
 void ThemeBridge::reload() {
+  const QString configuredThemeDirectory =
+      qEnvironmentVariable("OMACALENDAR_OMARCHY_THEME_DIR");
+  const QString currentDirectory =
+      QDir(stateHome()).filePath(QStringLiteral("omarchy/current"));
   const QString themeDirectory =
-      QDir(stateHome()).filePath(QStringLiteral("omarchy/current/theme"));
+      configuredThemeDirectory.isEmpty()
+          ? QDir(currentDirectory).filePath(QStringLiteral("theme"))
+          : configuredThemeDirectory;
   const QString colorsPath =
       QDir(themeDirectory).filePath(QStringLiteral("colors.toml"));
   const QString themeShellPath =
@@ -87,6 +120,9 @@ void ThemeBridge::reload() {
     m_accent = colorValue(colors, QStringLiteral("accent"), m_accent);
     m_danger = colorValue(colors, QStringLiteral("red"), m_danger);
     m_success = colorValue(colors, QStringLiteral("green"), m_success);
+    m_warning = colorValue(colors, QStringLiteral("yellow"), m_warning);
+    m_info = colorValue(colors, QStringLiteral("cyan"), m_info);
+    m_onAccent = bestContrast(m_accent, m_darkBackground, m_text);
     m_sourceName = QStringLiteral("Omarchy");
   } else {
     m_sourceName = QStringLiteral("fallback");
@@ -101,6 +137,17 @@ void ThemeBridge::reload() {
     m_baseFontSize = qBound(10, fontMatch.captured(1).toInt(), 28);
   }
 
+  const QStringList watchedFiles = m_watcher.files();
+  if (!watchedFiles.isEmpty()) {
+    m_watcher.removePaths(watchedFiles);
+  }
+  const QStringList watchedDirectories = m_watcher.directories();
+  if (!watchedDirectories.isEmpty()) {
+    m_watcher.removePaths(watchedDirectories);
+  }
+  if (configuredThemeDirectory.isEmpty()) {
+    watch(currentDirectory);
+  }
   watch(themeDirectory);
   watch(colorsPath);
   watch(themeShellPath);

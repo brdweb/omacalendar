@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>org.omacalendar.OmaCalendar</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>MIT</project_license>
+  <name>OmaCalendar</name>
+  <summary>A local-first calendar for Omarchy</summary>
+  <description>
+    <p>
+      OmaCalendar is a keyboard-friendly calendar application for Omarchy Linux.
+      A local daemon owns synchronization and storage so cached calendars remain
+      available when network providers are offline.
+    </p>
+    <p>
+      The planned 1.0 release supports local calendars, Google Calendar, generic
+      CalDAV, and read-only iCalendar subscriptions.
+    </p>
+  </description>
+  <developer id="org.omacalendar">
+    <name>OmaCalendar contributors</name>
+  </developer>
+  <url type="homepage">https://github.com/brdweb/omacalendar</url>
+  <url type="bugtracker">https://github.com/brdweb/omacalendar/issues</url>
+  <url type="vcs-browser">https://github.com/brdweb/omacalendar</url>
+  <launchable type="desktop-id">org.omacalendar.OmaCalendar.desktop</launchable>
+  <provides>
+    <binary>omacalendar</binary>
+    <binary>omacalendard</binary>
+    <binary>omacalendarctl</binary>
+    <mediatype>text/calendar</mediatype>
+  </provides>
+  <recommends>
+    <control>keyboard</control>
+    <control>pointing</control>
+  </recommends>
+  <content_rating type="oars-1.1" />
+  <releases>
+    <release version="1.0.0-alpha" date="2026-08-30" type="development">
+      <description>
+        <p>Unsupported evaluation prerelease for test calendars; stable provider and owner-acceptance gates remain open.</p>
+      </description>
+    </release>
+  </releases>
+</component>

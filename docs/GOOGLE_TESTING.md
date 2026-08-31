@@ -1,26 +1,36 @@
 # Google Calendar credential test guide
 
-This guide is for the Phase 4 owner test. OmaCalendar includes its official
-Google Desktop OAuth client credentials, so ordinary users do not download or
-manage a credentials file. Installed desktop applications are public OAuth
-clients, so the application key cannot be confidential; PKCE protects each
-authorization flow. The resulting refresh token is stored by the desktop
-Secret Service (`secret-tool`) and is never written to the calendar database.
+This guide is for the pre-release owner test. Source builds do not contain an
+OAuth credential. Paste the client ID from a Google Desktop OAuth client in a
+test project, or provide `OMACALENDAR_GOOGLE_CLIENT_ID` and the optional
+`OMACALENDAR_GOOGLE_CLIENT_SECRET` in the app environment. Installed desktop
+applications are public OAuth clients, but keeping deployment configuration
+out of source prevents accidental reuse and makes secret scanning meaningful.
+PKCE protects each authorization flow. The resulting refresh token is stored
+by the desktop Secret Service (`secret-tool`) and is never written to the
+calendar database.
 
 ## 1. Project configuration
 
-The project owner has configured Google Cloud project `omacalendar-506917`,
-enabled the Google Calendar API, and created the **OmaCalendar Linux Desktop**
-OAuth client. The app is currently **External / In production** and
-requests only these scopes:
+In a disposable Google Cloud project, enable the Google Calendar API and
+create a **Desktop app** OAuth client. Configure the consent screen for the
+accounts in the acceptance test. OmaCalendar requests only these scopes:
 
-   - `https://www.googleapis.com/auth/calendar.events`
-   - `https://www.googleapis.com/auth/calendar.calendarlist.readonly`
+- `https://www.googleapis.com/auth/calendar.events`
+- `https://www.googleapis.com/auth/calendar.calendars`
+- `https://www.googleapis.com/auth/calendar.calendarlist.readonly`
+
+The `calendar.calendars` scope permits creating, updating, and deleting
+secondary calendars. After this scope is added to an existing installation,
+each previously connected Google account must complete **Reauthorize** once.
 
 Google's current desktop-app setup is also described in its
 [Calendar quickstart](https://developers.google.com/workspace/calendar/api/quickstart/go).
-Because the app is in production, owner refresh tokens are not subject to the
-seven-day lifetime imposed on external apps in Testing status.
+Google may limit refresh-token lifetime while an external consent screen is in
+Testing status, so account for that during a long-running acceptance pass.
+Add every acceptance-test Google account under **Google Auth Platform →
+Audience → Test users**. The unverified-app warning is expected while the app
+is in Testing; it does not indicate that the loopback callback failed.
 
 ## 2. Build and launch OmaCalendar
 
@@ -42,17 +52,49 @@ instead.
 
 1. Open **Accounts & settings**.
 2. Under **Google Calendar**, optionally enter an account label.
-3. Select **Connect Google**.
+3. Paste the Desktop OAuth **client ID** shown in Google Cloud, then select
+   **Continue with Google in browser**. If the app was launched with deployment
+   credentials in its environment, the client-ID field is already configured.
 4. Complete consent in the system browser. The callback uses a random
    `127.0.0.1` loopback port, PKCE-S256, and a per-request state value.
 5. Return to OmaCalendar. The account should change from `authorizing` to
    `connected`; its selected calendars and events should then appear.
 
+If an existing account says **Reauthorization required**, expand that account
+and use **Reauthorize**, then complete the browser flow again. A successful
+browser callback is only the first half of authorization: OmaCalendar must also
+exchange the authorization code and save the refresh token before the account
+changes to `connected`.
+
 The implementation follows Google's recommended
 [OAuth flow for installed desktop apps](https://developers.google.com/identity/protocols/oauth2/native-app).
 Do not paste the browser callback URL anywhere; the app handles it locally.
 
-## 4. Test matrix
+## 4. Remove the unverified-app warning for a public release
+
+The repository provides the public pages needed for Google's OAuth review:
+
+- application home: `https://brdweb.github.io/omacalendar/`
+- privacy policy: `https://brdweb.github.io/omacalendar/privacy.html`
+- terms of use: `https://brdweb.github.io/omacalendar/terms.html`
+
+Before submitting, publish those pages, verify ownership of the authorized
+domain in Google Search Console, and make the product name, support email,
+homepage, privacy-policy URL, and requested scopes match the application.
+Add all three scopes above under **Google Auth Platform → Data Access** before
+testing the updated consent flow.
+Because the Calendar scopes are sensitive, prepare a short screen-recording
+that shows the complete browser consent flow and how each requested permission
+is used. In Google Auth Platform, change the External app from Testing to In
+production, open **Verification Center**, select **Prepare for verification**,
+provide the scope justifications and video, and submit it for Google review.
+
+The project owner must perform the Cloud Console submission from the account
+that owns the OAuth project. Google, not the application build, removes the
+warning after approval. Keep the app in Testing with explicitly listed test
+users until the public-facing pages and consent-screen details are live.
+
+## 5. Test matrix
 
 Use a disposable calendar if possible. For each check, allow a sync cycle or
 press **Sync now**.
@@ -71,7 +113,7 @@ press **Sync now**.
 | Restart | Close the app and daemon, then relaunch | No consent prompt; refresh token is loaded from the keyring |
 | Disconnect | Remove the account from settings | Refresh token and local cached account data are removed |
 
-## 5. Safe diagnostics
+## 6. Safe diagnostics
 
 The generic CLI can inspect status without displaying credentials:
 
@@ -96,7 +138,7 @@ $XDG_RUNTIME_DIR/omacalendar/daemon.sock
 Keyring items are labeled `OmaCalendar client-secret` and
 `OmaCalendar refresh-token`.
 
-## 6. What to report
+## 7. What to report
 
 Report the failed matrix row, local/remote calendar type, approximate event
 shape (timed, all-day, recurring, or exception), and the redacted status/error

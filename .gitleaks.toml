@@ -1,0 +1,8 @@
+title = "OmaCalendar secret scanning"
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Historical commit that bundled a public Google installed-app OAuth credential; current sources no longer contain it"
+commits = ["2414615f6f510a29abd356e4180ead6c1f73ad56"]

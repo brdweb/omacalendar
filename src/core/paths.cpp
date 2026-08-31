@@ -3,6 +3,7 @@
 #include <unistd.h>
 
 #include <QDir>
+#include <QFile>
 #include <QFileInfo>
 #include <QStandardPaths>
 
@@ -51,6 +52,15 @@ bool ensureDirectories(QString* errorMessage) {
     if (!dir.mkpath(directory)) {
       if (errorMessage != nullptr) {
         *errorMessage = QStringLiteral("Could not create %1").arg(directory);
+      }
+      return false;
+    }
+    if (!QFile::setPermissions(directory, QFileDevice::ReadOwner |
+                                              QFileDevice::WriteOwner |
+                                              QFileDevice::ExeOwner)) {
+      if (errorMessage != nullptr) {
+        *errorMessage =
+            QStringLiteral("Could not restrict permissions on %1").arg(directory);
       }
       return false;
     }

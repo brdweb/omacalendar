@@ -83,78 +83,69 @@ QString occurrenceKey(const Event& event) {
              : QString();
 }
 
-QDate basicDate(const QString& value) {
-  QDate result = QDate::fromString(value, Qt::ISODate);
-  if (!result.isValid() && value.size() == 8) {
-    result = QDate::fromString(value, QStringLiteral("yyyyMMdd"));
+QString recurrenceKey(const Event& exception, const Event& master) {
+  const TimeKind timeKind = master.allDay ? TimeKind::AllDay : master.timeKind;
+  const QString canonical = canonicalRecurrenceIdentity(
+      exception.recurrenceId, master.allDay, timeKind, master.startTimeZone);
+  if (canonical.startsWith(QStringLiteral("D:"))) {
+    return canonical;
   }
-  return result;
-}
-
-QDateTime basicDateTime(const QString& value, const QString& timeZone) {
-  QDateTime result = QDateTime::fromString(value, Qt::ISODateWithMs);
-  if (!result.isValid()) {
-    result = QDateTime::fromString(value, Qt::ISODate);
+  if (canonical.startsWith(QStringLiteral("Z:"))) {
+    const QDateTime dateTime = dateTimeFromIso(canonical.sliced(2));
+    return dateTime.isValid()
+               ? QStringLiteral("T:") + QString::number(dateTime.toMSecsSinceEpoch())
+               : QString();
   }
-  if (result.isValid()) {
-    if (result.timeSpec() == Qt::LocalTime && !timeZone.isEmpty()) {
-      const QTimeZone zone(timeZone.toUtf8());
-      if (zone.isValid()) {
-        result = QDateTime(result.date(), result.time(), zone);
-      }
-    }
-    return result.toUTC();
-  }
-
-  const bool utc = value.endsWith(QLatin1Char('Z'), Qt::CaseInsensitive);
-  const QString format = utc ? QStringLiteral("yyyyMMdd'T'HHmmss'Z'")
-                             : QStringLiteral("yyyyMMdd'T'HHmmss");
-  result = QDateTime::fromString(value, format);
-  if (!result.isValid()) {
+  if (!canonical.startsWith(QStringLiteral("F:")) ||
+      canonical.startsWith(QStringLiteral("F:offset:"))) {
     return {};
   }
-  if (utc) {
-    result = QDateTime(result.date(), result.time(), QTimeZone::UTC);
-  } else {
-    const QTimeZone zone(timeZone.toUtf8());
-    result = QDateTime(result.date(), result.time(),
-                       zone.isValid() ? zone : QTimeZone::systemTimeZone());
+  const QDateTime wall = QDateTime::fromString(canonical.sliced(2), Qt::ISODateWithMs);
+  if (!wall.isValid()) {
+    return {};
   }
-  return result.toUTC();
+  const QDateTime local(wall.date(), wall.time(), QTimeZone::systemTimeZone());
+  return QStringLiteral("T:") + QString::number(local.toMSecsSinceEpoch());
 }
 
-QString recurrenceKey(const Event& exception, const Event& master) {
-  QString value = exception.recurrenceId.trimmed();
-  QString timeZone = master.startTimeZone;
-  if (value.startsWith(QStringLiteral("RECURRENCE-ID"), Qt::CaseInsensitive)) {
-    const qsizetype separator = value.indexOf(QLatin1Char(':'));
-    if (separator < 0) {
-      return {};
-    }
-    const QString parameters = value.left(separator);
-    const qsizetype zoneStart =
-        parameters.indexOf(QStringLiteral("TZID="), 0, Qt::CaseInsensitive);
-    if (zoneStart >= 0) {
-      timeZone = parameters.sliced(zoneStart + 5).section(QLatin1Char(';'), 0, 0);
-    }
-    value = value.sliced(separator + 1);
-  } else if (value.startsWith(QStringLiteral("TZID="), Qt::CaseInsensitive)) {
-    const qsizetype separator = value.indexOf(QLatin1Char(':'));
-    if (separator < 0) {
-      return {};
-    }
-    timeZone = value.sliced(5, separator - 5);
-    value = value.sliced(separator + 1);
-  }
+bool isThisAndFuture(const Event& exception) {
+  const QString parameters = exception.recurrenceId.section(QLatin1Char(':'), 0, 0);
+  return parameters.contains(QStringLiteral("RANGE=THISANDFUTURE"),
+                             Qt::CaseInsensitive);
+}
 
-  const QDate date = basicDate(value);
-  if (date.isValid() && (master.allDay || value.size() <= 10)) {
-    return QStringLiteral("D:") + date.toString(Qt::ISODate);
+Event applyRangeException(const Event& range, const QString& anchorKey,
+                          const Event& occurrence) {
+  Event replacement = range;
+  replacement.recurrenceId = occurrence.recurrenceId;
+  if (range.allDay && occurrence.allDay && anchorKey.startsWith(QStringLiteral("D:"))) {
+    const QDate anchor = QDate::fromString(anchorKey.sliced(2), Qt::ISODate);
+    if (anchor.isValid() && range.startDate.isValid()) {
+      const qint64 offset = anchor.daysTo(occurrence.startDate);
+      const qint64 duration =
+          range.endDate.isValid()
+              ? qMax<qint64>(1, range.startDate.daysTo(range.endDate))
+              : 1;
+      replacement.startDate = range.startDate.addDays(offset);
+      replacement.endDate = replacement.startDate.addDays(duration);
+    }
+    return replacement;
   }
-  const QDateTime dateTime = basicDateTime(value, timeZone);
-  return dateTime.isValid()
-             ? QStringLiteral("T:") + QString::number(dateTime.toMSecsSinceEpoch())
-             : QString();
+  if (!range.allDay && !occurrence.allDay &&
+      anchorKey.startsWith(QStringLiteral("T:"))) {
+    bool ok = false;
+    const qint64 anchorMilliseconds = anchorKey.sliced(2).toLongLong(&ok);
+    if (ok && range.startUtc.isValid()) {
+      const QDateTime anchor =
+          QDateTime::fromMSecsSinceEpoch(anchorMilliseconds, QTimeZone::UTC);
+      const qint64 offset = anchor.msecsTo(occurrence.startUtc);
+      const qint64 duration =
+          range.endUtc.isValid() ? range.startUtc.msecsTo(range.endUtc) : 0;
+      replacement.startUtc = range.startUtc.addMSecs(offset);
+      replacement.endUtc = replacement.startUtc.addMSecs(qMax<qint64>(0, duration));
+    }
+  }
+  return replacement;
 }
 
 QString googleRecurringParentId(const Event& event) {
@@ -502,11 +493,17 @@ RecurrenceExpansionResult RecurrenceExpander::expand(
     result.truncated = result.truncated || masterTruncated;
 
     QHash<QString, qsizetype> exceptionsByKey;
+    QList<QPair<QString, qsizetype>> rangeExceptions;
     for (const qsizetype index : matchingExceptions) {
       const QString key = recurrenceKey(events.at(index), master);
       if (key.isEmpty()) {
         result.warnings.append(
             QStringLiteral("recurrence_id_invalid:%1").arg(events.at(index).id));
+        continue;
+      }
+      if (isThisAndFuture(events.at(index))) {
+        rangeExceptions.append({key, index});
+        consumedExceptions.insert(index);
         continue;
       }
       const auto current = exceptionsByKey.constFind(key);
@@ -515,11 +512,35 @@ RecurrenceExpansionResult RecurrenceExpander::expand(
         exceptionsByKey.insert(key, index);
       }
     }
+    std::sort(
+        rangeExceptions.begin(), rangeExceptions.end(),
+        [](const auto& left, const auto& right) { return left.first < right.first; });
 
     for (Event& occurrence : generated) {
       const QString key = occurrenceKey(occurrence);
       const auto exception = exceptionsByKey.constFind(key);
       if (exception == exceptionsByKey.cend()) {
+        qsizetype rangeIndex = -1;
+        QString rangeAnchor;
+        for (const auto& candidate : rangeExceptions) {
+          if (candidate.first > key) {
+            break;
+          }
+          rangeAnchor = candidate.first;
+          rangeIndex = candidate.second;
+        }
+        if (rangeIndex >= 0) {
+          const Event replacement =
+              applyRangeException(events.at(rangeIndex), rangeAnchor, occurrence);
+          if (!isCancelled(replacement) && overlaps(replacement, startUtc, endUtc)) {
+            if (result.occurrences.size() < limit) {
+              result.occurrences.append(replacement);
+            } else {
+              result.truncated = true;
+            }
+          }
+          continue;
+        }
         if (result.occurrences.size() < limit) {
           result.occurrences.append(std::move(occurrence));
         } else {

@@ -3,6 +3,8 @@
 /.cache/
 /.qt/
 /.venv/
+__pycache__/
+*.py[cod]
 *.user
 *.user.*
 *.autosave

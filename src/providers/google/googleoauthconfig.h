@@ -1,20 +1,20 @@
 #pragma once
 
 #include <QString>
+#include <QtGlobal>
 
 namespace omacalendar::google {
 
-// Installed desktop clients are public OAuth clients: distributed binaries
-// cannot keep application credentials confidential. Google requires the
-// generated desktop key for token exchange, while PKCE protects each user's
-// authorization code. User refresh tokens remain in Secret Service.
+// OAuth application credentials are deployment configuration, never source
+// material. Official packages can inject them into the launch environment;
+// development builds can instead use the desktop-credentials JSON picker.
+// User refresh tokens and any optional client secret remain in Secret Service.
 inline QString defaultOAuthClientId() {
-  return QStringLiteral(
-      "1099196962170-nd1issemjdkai0c1ag1fel7lflrioqdr.apps.googleusercontent.com");
+  return qEnvironmentVariable("OMACALENDAR_GOOGLE_CLIENT_ID").trimmed();
 }
 
 inline QString defaultOAuthClientSecret() {
-  return QStringLiteral("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");
+  return qEnvironmentVariable("OMACALENDAR_GOOGLE_CLIENT_SECRET");
 }
 
 }  // namespace omacalendar::google

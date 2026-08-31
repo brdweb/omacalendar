@@ -24,10 +24,12 @@ class DomainTest final : public QObject {
              OutboxOperation::Create);
     QCOMPARE(outboxOperationFromString(QStringLiteral("update")),
              OutboxOperation::Update);
+    QCOMPARE(outboxOperationFromString(QStringLiteral("move")), OutboxOperation::Move);
     QCOMPARE(outboxOperationFromString(QStringLiteral("remove")),
              OutboxOperation::Remove);
     QCOMPARE(outboxOperationFromString(QStringLiteral("other")),
              OutboxOperation::Create);
+    QCOMPARE(outboxOperationToString(OutboxOperation::Move), QStringLiteral("move"));
 
     QCOMPARE(outboxStateFromString(QStringLiteral("pending")), OutboxState::Pending);
     QCOMPARE(outboxStateFromString(QStringLiteral("sending")), OutboxState::Sending);
@@ -47,6 +49,52 @@ class DomainTest final : public QObject {
     QCOMPARE(dateTimeFromIso(QString{}), QDateTime());
   }
 
+  void recurrenceIdentityCanonicalization() {
+    const QString zoned = QStringLiteral("TZID=America/New_York:20260904T090000");
+    const QString utc = QStringLiteral("2026-09-04T13:00:00.000Z");
+    QVERIFY(recurrenceIdentityEqual(zoned, utc, false, TimeKind::Zoned,
+                                    QStringLiteral("America/New_York")));
+    QVERIFY(recurrenceIdentityEqual(
+        QStringLiteral("RANGE=THISANDFUTURE;TZID=America/New_York:20260904T090000"),
+        zoned, false, TimeKind::Zoned, QStringLiteral("America/New_York")));
+    QVERIFY(recurrenceIdentityEqual(
+        QStringLiteral("20260904T090000"), QStringLiteral("2026-09-04T09:00:00"), false,
+        TimeKind::Zoned, QStringLiteral("America/New_York")));
+    QVERIFY(!recurrenceIdentityEqual(
+        QStringLiteral("TZID=America/Los_Angeles:20260904T090000"), utc, false,
+        TimeKind::Zoned, QStringLiteral("America/New_York")));
+
+    QVERIFY(recurrenceIdentityEqual(QStringLiteral("20260904"),
+                                    QStringLiteral("2026-09-04"), true,
+                                    TimeKind::AllDay));
+    QVERIFY(recurrenceIdentityEqual(QStringLiteral("VALUE=DATE:20260904"),
+                                    QStringLiteral("2026-09-04"), true,
+                                    TimeKind::AllDay));
+    QVERIFY(recurrenceIdentityEqual(
+        QStringLiteral("VALUE=DATE;TZID=America/New_York:20260904"),
+        QStringLiteral("2026-09-04"), true, TimeKind::AllDay));
+    QVERIFY(!recurrenceIdentityEqual(QStringLiteral("20260904"),
+                                     QStringLiteral("20260905"), true,
+                                     TimeKind::AllDay));
+
+    QVERIFY(recurrenceIdentityEqual(QStringLiteral("20260904T090000"),
+                                    QStringLiteral("2026-09-04T09:00:00.000"), false,
+                                    TimeKind::Floating));
+    QVERIFY(!recurrenceIdentityEqual(QStringLiteral("20260904T090000"),
+                                     QStringLiteral("2026-09-04T09:00:00.000Z"), false,
+                                     TimeKind::Floating));
+
+    Event left;
+    Event right;
+    left.recurrenceId = QStringLiteral("20260904");
+    right.recurrenceId = QStringLiteral("2026-09-04");
+    left.allDay = right.allDay = true;
+    left.timeKind = right.timeKind = TimeKind::AllDay;
+    QVERIFY(recurrenceIdentityEqual(left, right));
+    right.allDay = false;
+    QVERIFY(!recurrenceIdentityEqual(left, right));
+  }
+
   void jsonRoundTrip() {
     Account inAccount;
     inAccount.id = "acc-1";
@@ -64,7 +112,9 @@ class DomainTest final : public QObject {
     QCOMPARE(outAccount.provider, inAccount.provider);
     QCOMPARE(outAccount.displayName, inAccount.displayName);
     QCOMPARE(outAccount.principal, inAccount.principal);
-    QCOMPARE(outAccount.endpoint, inAccount.endpoint);
+    // Presentation DTOs must never disclose provider endpoints.
+    QVERIFY(!toJson(inAccount).contains(QStringLiteral("endpoint")));
+    QVERIFY(outAccount.endpoint.isEmpty());
     QCOMPARE(outAccount.enabled, inAccount.enabled);
     QCOMPARE(outAccount.authStatus, inAccount.authStatus);
 
@@ -88,10 +138,31 @@ class DomainTest final : public QObject {
     QCOMPARE(outCalendar.timeZone, inCalendar.timeZone);
     QCOMPARE(outCalendar.readOnly, inCalendar.readOnly);
     QCOMPARE(outCalendar.enabled, inCalendar.enabled);
-    QCOMPARE(outCalendar.etag, inCalendar.etag);
-    QCOMPARE(outCalendar.syncToken, inCalendar.syncToken);
-    QCOMPARE(outCalendar.capabilities, inCalendar.capabilities);
+    // Provider resource identities and validators stay daemon-private.
+    const QJsonObject calendarDto = toJson(inCalendar);
+    QVERIFY(!calendarDto.contains(QStringLiteral("remoteId")));
+    QVERIFY(!calendarDto.contains(QStringLiteral("href")));
+    QVERIFY(!calendarDto.contains(QStringLiteral("etag")));
+    QVERIFY(!calendarDto.contains(QStringLiteral("syncToken")));
+    QVERIFY(outCalendar.etag.isEmpty());
+    QVERIFY(outCalendar.syncToken.isEmpty());
+    QJsonObject expectedCapabilities = inCalendar.capabilities;
+    expectedCapabilities.insert(QStringLiteral("canDeleteCalendar"), false);
+    QCOMPARE(outCalendar.capabilities, expectedCapabilities);
     QCOMPARE(outCalendar.lastSyncAt, inCalendar.lastSyncAt);
+
+    Calendar ownedSecondary = inCalendar;
+    ownedSecondary.capabilities = {
+        {QStringLiteral("provider"), QStringLiteral("google")},
+        {QStringLiteral("accessRole"), QStringLiteral("owner")},
+        {QStringLiteral("primary"), false},
+    };
+    QVERIFY(canDeleteCalendar(ownedSecondary));
+    QVERIFY(toJson(ownedSecondary)
+                .value(QStringLiteral("capabilities"))
+                .toObject()
+                .value(QStringLiteral("canDeleteCalendar"))
+                .toBool());
 
     Event inEvent;
     inEvent.id = "ev-1";
@@ -118,7 +189,18 @@ class DomainTest final : public QObject {
     inEvent.createdAt = QDateTime::currentDateTimeUtc();
     inEvent.updatedAt = inEvent.createdAt;
 
-    const Event outEvent = eventFromJson(toJson(inEvent));
+    inEvent.remoteId = QStringLiteral("provider-event-id");
+    inEvent.uid = QStringLiteral("private-uid");
+    inEvent.etag = QStringLiteral("private-etag");
+    inEvent.rawPayload = QStringLiteral("provider payload");
+    inEvent.rawFormat = QStringLiteral("json");
+
+    const QJsonObject eventDto = toJson(inEvent);
+    QVERIFY(!eventDto.contains(QStringLiteral("remoteId")));
+    QVERIFY(!eventDto.contains(QStringLiteral("uid")));
+    QVERIFY(!eventDto.contains(QStringLiteral("etag")));
+    QVERIFY(!eventDto.contains(QStringLiteral("rawPayload")));
+    const Event outEvent = eventFromJson(toStorageJson(inEvent));
     QCOMPARE(outEvent.id, inEvent.id);
     QCOMPARE(outEvent.calendarId, inEvent.calendarId);
     QCOMPARE(outEvent.summary, inEvent.summary);
@@ -130,6 +212,10 @@ class DomainTest final : public QObject {
     QCOMPARE(outEvent.organizer, inEvent.organizer);
     QCOMPARE(outEvent.attendees, inEvent.attendees);
     QCOMPARE(outEvent.reminders, inEvent.reminders);
+    QCOMPARE(outEvent.remoteId, inEvent.remoteId);
+    QCOMPARE(outEvent.uid, inEvent.uid);
+    QCOMPARE(outEvent.etag, inEvent.etag);
+    QCOMPARE(outEvent.rawPayload, inEvent.rawPayload);
     QCOMPARE(outEvent.dirty, inEvent.dirty);
     QCOMPARE(outEvent.deleted, inEvent.deleted);
     QCOMPARE(outEvent.createdAt, inEvent.createdAt);

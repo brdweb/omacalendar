@@ -13,9 +13,14 @@ IpcClient::IpcClient(QObject* parent) : QObject(parent) {
   m_reconnectTimer.setSingleShot(true);
   m_reconnectTimer.setInterval(1000);
   connect(&m_reconnectTimer, &QTimer::timeout, this, [this]() { connectTo(m_path); });
-  connect(&m_socket, &QLocalSocket::connected, this,
-          [this]() { emit connectedChanged(); });
+  connect(&m_socket, &QLocalSocket::connected, this, [this]() {
+    m_reconnectTimer.stop();
+    emit connectedChanged();
+  });
   connect(&m_socket, &QLocalSocket::disconnected, this, [this]() {
+    // A frame can be truncated when the peer disappears. Never carry those
+    // bytes into a later connection, where they would prefix its first frame.
+    m_buffer.clear();
     emit connectedChanged();
     scheduleReconnect();
   });
@@ -24,12 +29,26 @@ IpcClient::IpcClient(QObject* parent) : QObject(parent) {
           [this](QLocalSocket::LocalSocketError) { scheduleReconnect(); });
 }
 
+IpcClient::~IpcClient() {
+  // QLocalSocket::~QLocalSocket() disconnects an active socket and may emit
+  // disconnected. Member fields declared after m_socket have already been
+  // destroyed by then, so no socket callback may retain this IpcClient as its
+  // context during member teardown.
+  m_autoReconnect = false;
+  m_disconnectRequested = true;
+  m_reconnectTimer.stop();
+  QObject::disconnect(&m_socket, nullptr, this, nullptr);
+  m_socket.abort();
+}
+
 void IpcClient::connectTo(const QString& path) {
   if (path.isEmpty()) {
     return;
   }
   m_path = path;
   m_disconnectRequested = false;
+  m_reconnectTimer.stop();
+  m_buffer.clear();
   if (m_socket.state() != QLocalSocket::UnconnectedState) {
     m_socket.abort();
   }
@@ -39,6 +58,7 @@ void IpcClient::connectTo(const QString& path) {
 void IpcClient::disconnectFromServer() {
   m_disconnectRequested = true;
   m_reconnectTimer.stop();
+  m_buffer.clear();
   m_socket.disconnectFromServer();
 }
 

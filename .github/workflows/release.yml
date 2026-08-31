@@ -1,0 +1,184 @@
+name: Release candidate
+
+on:
+  push:
+    tags:
+      - 'v[0-9]*.[0-9]*.[0-9]*'
+
+permissions:
+  contents: write
+  id-token: write
+  attestations: write
+
+jobs:
+  build-release-candidate:
+    name: Build, attest, and draft release
+    runs-on: ubuntu-24.04
+    container: archlinux:base-devel
+    steps:
+      - name: Install current Arch dependencies
+        run: |
+          pacman -Syu --noconfirm --needed \
+            appstream cmake desktop-file-utils git github-cli libical libsecret \
+            ninja pkgconf qt6-base qt6-declarative qt6-networkauth systemd zstd
+
+      - name: Check out tagged source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify tag and release metadata
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag_object=$(git rev-parse "${GITHUB_REF_NAME}^{tag}")
+          verified=$(gh api \
+            "repos/${GITHUB_REPOSITORY}/git/tags/${tag_object}" \
+            --jq '.verification.verified')
+          if [[ ${verified} != true ]]; then
+            echo "GitHub did not verify the annotated tag signature" >&2
+            exit 1
+          fi
+
+      - name: Verify candidate tree and release metadata
+        env:
+          OMACALENDAR_GITHUB_VERIFIED_TAG: '1'
+        run: packaging/release/verify-release.sh "${GITHUB_REF_NAME}"
+
+      - name: Resolve version
+        id: version
+        shell: bash
+        run: |
+          release_version=${GITHUB_REF_NAME#v}
+          numeric_version=${release_version%%-*}
+          version_suffix=${release_version#"${numeric_version}"}
+          is_prerelease=false
+          if [[ -n ${version_suffix} ]]; then
+            is_prerelease=true
+          fi
+          {
+            echo "value=${release_version}"
+            echo "suffix=${version_suffix}"
+            echo "is_prerelease=${is_prerelease}"
+          } >>"${GITHUB_OUTPUT}"
+
+      - name: Configure release
+        env:
+          CC: gcc
+          CXX: g++
+        run: |
+          cmake -S . -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX=/usr \
+            -DOMACALENDAR_ENABLE_WERROR=ON \
+            -DOMACALENDAR_VERSION_SUFFIX=${{ steps.version.outputs.suffix }}
+
+      - name: Build, test, and lint
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          cmake --build build --parallel
+          ctest --test-dir build --output-on-failure
+          packaging/release/smoke-daemon.sh build \
+            "${{ steps.version.outputs.value }}"
+          packaging/release/smoke-app.sh build
+          packaging/release/check-qmllint.sh build
+
+      - name: Stage and validate installation
+        run: |
+          mkdir -p artifacts stage
+          DESTDIR="$PWD/stage" cmake --install build
+          packaging/release/verify-install.sh "$PWD/stage"
+          packaging/release/smoke-daemon.sh "$PWD/stage/usr/bin" \
+            "${{ steps.version.outputs.value }}"
+          packaging/release/smoke-app.sh "$PWD/stage/usr/bin"
+          cp -a stage stage-uninstall
+          packaging/release/verify-uninstall.sh \
+            "$PWD/stage-uninstall" "$PWD/build/install_manifest.txt"
+
+      - name: Create binary and source archives
+        env:
+          RELEASE_VERSION: ${{ steps.version.outputs.value }}
+        run: |
+          tar --zstd -cf "artifacts/omacalendar-${RELEASE_VERSION}-linux-x86_64.tar.zst" -C stage .
+          git archive --format=tar.gz \
+            --prefix="omacalendar-${RELEASE_VERSION}/" \
+            --output="artifacts/omacalendar-${RELEASE_VERSION}-source.tar.gz" \
+            "${GITHUB_SHA}"
+          pacman -Q >"artifacts/omacalendar-${RELEASE_VERSION}-arch-packages.txt"
+
+      - name: Generate SPDX SBOM
+        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0
+        with:
+          path: stage
+          format: spdx-json
+          output-file: artifacts/omacalendar-${{ steps.version.outputs.value }}.spdx.json
+          artifact-name: omacalendar-${{ steps.version.outputs.value }}-sbom.spdx.json
+          upload-artifact: false
+          upload-release-assets: false
+
+      - name: Render stable AUR recipes
+        if: ${{ steps.version.outputs.is_prerelease == 'false' }}
+        env:
+          RELEASE_VERSION: ${{ steps.version.outputs.value }}
+        shell: bash
+        run: |
+          source_sha=$(sha256sum "artifacts/omacalendar-${RELEASE_VERSION}-source.tar.gz" | cut -d' ' -f1)
+          binary_sha=$(sha256sum "artifacts/omacalendar-${RELEASE_VERSION}-linux-x86_64.tar.zst" | cut -d' ' -f1)
+          packaging/release/render-aur.sh \
+            "${RELEASE_VERSION}" "${source_sha}" "${binary_sha}" aur-rendered
+          cp aur-rendered/source/PKGBUILD artifacts/PKGBUILD
+          cp aur-rendered/binary/PKGBUILD artifacts/PKGBUILD-bin
+
+      - name: Write release checksums
+        run: |
+          cd artifacts
+          mapfile -t assets < <(find . -maxdepth 1 -type f ! -name SHA256SUMS \
+            -printf '%f\n' | LC_ALL=C sort)
+          sha256sum "${assets[@]}" >SHA256SUMS
+          sha256sum --check SHA256SUMS
+
+      - name: Attest archive provenance
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4
+        with:
+          subject-path: |
+            artifacts/omacalendar-${{ steps.version.outputs.value }}-linux-x86_64.tar.zst
+            artifacts/omacalendar-${{ steps.version.outputs.value }}-source.tar.gz
+
+      - name: Attest binary SBOM
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4
+        with:
+          subject-path: artifacts/omacalendar-${{ steps.version.outputs.value }}-linux-x86_64.tar.zst
+          sbom-path: artifacts/omacalendar-${{ steps.version.outputs.value }}.spdx.json
+
+      - name: Upload candidate artifacts
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: omacalendar-${{ steps.version.outputs.value }}-release-candidate
+          path: artifacts/
+          if-no-files-found: error
+
+      - name: Create draft GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_VERSION: ${{ steps.version.outputs.value }}
+        run: |
+          existing_state=$(gh release view "${GITHUB_REF_NAME}" --json isDraft --jq .isDraft 2>/dev/null || echo missing)
+          if [[ ${existing_state} == true ]]; then
+            gh release upload "${GITHUB_REF_NAME}" artifacts/* --clobber
+            if [[ ${RELEASE_VERSION} == *-* ]]; then
+              gh release edit "${GITHUB_REF_NAME}" --prerelease
+            fi
+          elif [[ ${existing_state} == false ]]; then
+            echo "refusing to replace assets on an already published release" >&2
+            exit 1
+          else
+            release_flags=(--draft --generate-notes --verify-tag)
+            if [[ ${RELEASE_VERSION} == *-* ]]; then
+              release_flags+=(--prerelease)
+            fi
+            gh release create "${GITHUB_REF_NAME}" artifacts/* \
+              "${release_flags[@]}" \
+              --title "OmaCalendar ${RELEASE_VERSION}"
+          fi

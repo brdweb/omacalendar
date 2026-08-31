@@ -3,6 +3,7 @@
 #include <QByteArray>
 #include <QList>
 #include <QString>
+#include <QStringList>
 
 namespace omacalendar::caldav {
 
@@ -24,6 +25,9 @@ struct CalDavResponse {
 
   QString principalHref;
   QString calendarHomeSetHref;
+  QString scheduleInboxHref;
+  QString scheduleOutboxHref;
+  QStringList calendarUserAddresses;
 
   QString displayName;
   QString description;
@@ -37,6 +41,8 @@ struct CalDavResponse {
   bool isCalendar = false;
   bool privilegesReported = false;
   bool canWrite = false;
+  bool canBind = false;
+  bool canUnbind = false;
 
   [[nodiscard]] bool isSuccess() const;
   [[nodiscard]] bool readOnly() const;
@@ -58,6 +64,8 @@ struct CalDavCollection {
   QString ctag;
   QString syncToken;
   bool readOnly = false;
+  bool canBind = false;
+  bool canUnbind = false;
 };
 
 struct CalDavResource {
@@ -69,6 +77,18 @@ struct CalDavResource {
   [[nodiscard]] bool deleted() const { return statusCode == 404 || statusCode == 410; }
 };
 
+struct CalDavSchedulingCapabilities {
+  QString inboxHref;
+  QString outboxHref;
+  QStringList userAddresses;
+
+  // An address plus an advertised scheduling outbox proves that the account
+  // can originate iTIP scheduling messages. Mere attendee data does not.
+  [[nodiscard]] bool canSend() const {
+    return !outboxHref.isEmpty() && !userAddresses.isEmpty();
+  }
+};
+
 class CalDavXml final {
  public:
   // Namespace prefixes are deliberately ignored; elements are identified by
@@ -77,6 +97,8 @@ class CalDavXml final {
 
   [[nodiscard]] static QString principalHref(const CalDavMultiStatusResult& result);
   [[nodiscard]] static QString calendarHomeSetHref(
+      const CalDavMultiStatusResult& result);
+  [[nodiscard]] static CalDavSchedulingCapabilities schedulingCapabilities(
       const CalDavMultiStatusResult& result);
   [[nodiscard]] static QList<CalDavCollection> collections(
       const CalDavMultiStatusResult& result);
