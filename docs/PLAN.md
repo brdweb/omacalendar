@@ -345,14 +345,14 @@ These are widget-project criteria and do not gate an app release:
 
 Exit criteria:
 
-- [ ] All CI and release jobs are green from a clean checkout.
+- [x] All CI and release jobs are green from a clean checkout.
 - [x] Installed artifacts and systemd paths validate for `/usr` packages.
 - [ ] Source/binary AUR packages build in clean chroots.
-- [ ] Close the historical Google installed-app OAuth credential incident at
+- [x] Close the historical Google installed-app OAuth credential incident at
   commit `2414615`: confirm revocation or rotation and document the repository
   history hygiene decision before any public push. This historical gate does
   not assert a current-working-tree leak.
-- [ ] Clean uninstall leaves no executable/configuration integration behind;
+- [x] Clean uninstall leaves no executable/configuration integration behind;
   optional user data removal is documented and deliberate.
 - [x] The app compatibility table identifies the exact app, IPC, and schema
   versions; widget compatibility remains capability- and protocol-based.
