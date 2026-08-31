@@ -93,16 +93,16 @@ declare -a EXTERNAL_APPROVAL_LABELS=(
   "Maintainer approval to create the signed app tag"
 )
 
-if [[ ${release_version} == *-beta* ]]; then
+if requires_public_release_gates "${release_version}"; then
   PRETAG_GATE_LABELS+=(
     "Current-Omarchy owner acceptance on the exact runtime"
-    "Alpha-to-beta upgrade, backup/restore, and uninstall"
-    "Privacy-safe screenshots and public beta documentation"
-    "Prerelease Arch package and future AUR recipes pass clean validation"
+    "Prior-release upgrade, backup/restore, and uninstall"
+    "Privacy-safe screenshots and public release documentation"
+    "Arch package and future AUR recipes pass clean validation"
   )
   EXTERNAL_APPROVAL_LABELS+=(
     "Google OAuth branding and sensitive-scope verification approved"
-    "Maintainer approval of beta acceptance and public limitations"
+    "Maintainer approval of public release acceptance and limitations"
   )
 fi
 

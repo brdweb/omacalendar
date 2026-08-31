@@ -17,7 +17,8 @@ mkdir -p \
   "${temporary_root}/stage/usr/bin" \
   "${temporary_root}/stage/usr/share/doc/OmaCalendar" \
   "${temporary_root}/first" \
-  "${temporary_root}/second"
+  "${temporary_root}/second" \
+  "${temporary_root}/symlink-output"
 printf '#!/usr/bin/env bash\nprintf "OmaCalendar fixture\\n"\n' \
   >"${temporary_root}/stage/usr/bin/omacalendar"
 chmod 0755 "${temporary_root}/stage/usr/bin/omacalendar"
@@ -26,12 +27,32 @@ printf 'fixture license\n' \
 ln -s omacalendar "${temporary_root}/stage/usr/bin/omacalendar-fixture-link"
 
 export SOURCE_DATE_EPOCH=1700000000
+package_filename=omacalendar-1.0.0beta1-1-x86_64.pkg.tar.zst
+dangling_target="${temporary_root}/dangling-package-target"
+dangling_package="${temporary_root}/symlink-output/${package_filename}"
+symlink_error="${temporary_root}/dangling-symlink-error"
+ln -s "${dangling_target}" "${dangling_package}"
+if "${repository_root}/packaging/release/build-arch-package.sh" \
+  1.0.0-beta.1 "${temporary_root}/stage" \
+  "${temporary_root}/symlink-output" > /dev/null 2>"${symlink_error}"; then
+  echo "native package assembly accepted a dangling output symlink" >&2
+  exit 1
+fi
+if [[ -e ${dangling_target} ]]; then
+  echo "native package assembly wrote through a dangling output symlink" >&2
+  exit 1
+fi
+if ! grep -Fq 'refusing to overwrite existing native package:' \
+  "${symlink_error}"; then
+  echo "native package assembly did not reject the dangling output symlink early" >&2
+  exit 1
+fi
+
 "${repository_root}/packaging/release/build-arch-package.sh" \
   1.0.0-beta.1 "${temporary_root}/stage" "${temporary_root}/first" >/dev/null
 "${repository_root}/packaging/release/build-arch-package.sh" \
   1.0.0-beta.1 "${temporary_root}/stage" "${temporary_root}/second" >/dev/null
 
-package_filename=omacalendar-1.0.0beta1-1-x86_64.pkg.tar.zst
 first_package="${temporary_root}/first/${package_filename}"
 second_package="${temporary_root}/second/${package_filename}"
 if [[ ! -f ${first_package} || ! -f ${second_package} ]]; then

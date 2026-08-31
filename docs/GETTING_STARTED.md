@@ -16,14 +16,19 @@ curl -LO https://github.com/brdweb/omacalendar/releases/download/v1.0.0-beta.1/S
 grep ' omacalendar-1.0.0beta1-1-x86_64.pkg.tar.zst$' SHA256SUMS | sha256sum --check
 gh attestation verify ./omacalendar-1.0.0beta1-1-x86_64.pkg.tar.zst \
   --repo brdweb/omacalendar
+gh attestation verify ./omacalendar-1.0.0beta1-1-x86_64.pkg.tar.zst \
+  --repo brdweb/omacalendar \
+  --predicate-type https://spdx.dev/Document/v2.3
 sudo pacman -U ./omacalendar-1.0.0beta1-1-x86_64.pkg.tar.zst
 systemctl --user daemon-reload
 systemctl --user enable --now omacalendard.socket
+systemctl --user try-restart omacalendard.service
 ```
 
-The provenance command requires the optional GitHub CLI. This direct package
+The attestation commands require the optional GitHub CLI. This direct package
 does not configure an update repository. Repeat the download, verification,
-and `pacman -U` steps for a newer release.
+`pacman -U`, and user-service refresh steps for a newer release so an active
+daemon does not continue running the replaced binary.
 
 ## Install from source
 

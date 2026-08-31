@@ -5,7 +5,10 @@ The optional `org.omacalendar.widget` Quickshell plugin has an independent
 version, qualification gate, tag, artifact set, and publication schedule in its
 own repository. Automation creates draft app releases only; publication remains
 an explicit maintainer action. Semantic prereleases such as `1.0.0-beta.1` are
-supported; build metadata is not used in tags or artifact names.
+supported; build metadata is not used in tags or artifact names. Native Arch
+packaging accepts stable releases and the `alpha`, `beta`, or `rc` channels,
+optionally followed by one numeric identifier such as `.1`; this keeps the
+SemVer-to-Arch package version mapping unambiguous.
 
 ## 1. Select and record the qualification gate
 
@@ -109,7 +112,13 @@ and verify the package before installing it:
 sha256sum --check SHA256SUMS
 gh attestation verify ./omacalendar-1.0.0beta1-1-x86_64.pkg.tar.zst \
   --repo brdweb/omacalendar
+gh attestation verify ./omacalendar-1.0.0beta1-1-x86_64.pkg.tar.zst \
+  --repo brdweb/omacalendar \
+  --predicate-type https://spdx.dev/Document/v2.3
 sudo pacman -U ./omacalendar-1.0.0beta1-1-x86_64.pkg.tar.zst
+systemctl --user daemon-reload
+systemctl --user enable --now omacalendard.socket
+systemctl --user try-restart omacalendard.service
 ```
 
 Verify socket activation, launch, reported version, desktop entry, provider

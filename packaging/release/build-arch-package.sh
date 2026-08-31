@@ -43,7 +43,7 @@ fi
 package_version=$(arch_pkgver "${release_version}")
 package_filename="omacalendar-${package_version}-1-x86_64.pkg.tar.zst"
 package_path="${output_directory}/${package_filename}"
-if [[ -e ${package_path} ]]; then
+if [[ -e ${package_path} || -L ${package_path} ]]; then
   echo "refusing to overwrite existing native package: ${package_path}" >&2
   exit 1
 fi

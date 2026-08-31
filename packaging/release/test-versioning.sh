@@ -20,6 +20,17 @@ for version in v1.0.0 01.0.0 1.00.0 1.0.00 1.0 1.0.0- 1.0.0-alpha..1 \
   fi
 done
 
+if requires_public_release_gates 1.0.0-alpha; then
+  echo "the already-published 1.0.0-alpha unexpectedly requires the expanded release gates" >&2
+  exit 1
+fi
+for version in 1.0.0-alpha.2 1.0.0-beta.1 1.0.0-rc.1 1.0.0; do
+  if ! requires_public_release_gates "${version}"; then
+    echo "future public release did not require the expanded gates: ${version}" >&2
+    exit 1
+  fi
+done
+
 configured_version=$(cmake_release_version "${repository_root}")
 "${repository_root}/packaging/release/verify-release-metadata.sh" \
   "${configured_version}"
@@ -61,13 +72,37 @@ checksum=$(printf '0%.0s' {1..64})
 "${repository_root}/packaging/release/render-aur.sh" \
   1.0.0-beta.1 "${checksum}" "${checksum}" "${temporary_root}/beta-aur"
 
-if [[ $(arch_pkgver 1.0.0) != 1.0.0 ]] || \
-  [[ $(arch_pkgver 1.0.0-alpha) != 1.0.0alpha ]] || \
-  [[ $(arch_pkgver 1.0.0-beta.1) != 1.0.0beta1 ]] || \
-  [[ $(arch_pkgver 1.0.0-1) != 1.0.0pre1 ]]; then
-  echo "semantic versions were not converted to canonical Arch pkgver values" >&2
-  exit 1
-fi
+while read -r version expected_package_version; do
+  if ! actual_package_version=$(arch_pkgver "${version}"); then
+    echo "supported Arch release version was rejected: ${version}" >&2
+    exit 1
+  fi
+  if [[ ${actual_package_version} != "${expected_package_version}" ]]; then
+    echo "${version} became ${actual_package_version}, expected ${expected_package_version}" >&2
+    exit 1
+  fi
+done <<'SUPPORTED_ARCH_VERSIONS'
+1.0.0 1.0.0
+1.0.0-alpha 1.0.0alpha
+1.0.0-alpha.0 1.0.0alpha0
+1.0.0-beta 1.0.0beta
+1.0.0-beta.1 1.0.0beta1
+1.0.0-rc 1.0.0rc
+1.0.0-rc.12 1.0.0rc12
+SUPPORTED_ARCH_VERSIONS
+
+for version in \
+  1.0.0-rc-1 \
+  1.0.0-beta1 \
+  1.0.0-preview \
+  1.0.0-alpha-1 \
+  1.0.0-beta.1.2 \
+  1.0.0-1; do
+  if arch_pkgver "${version}" >/dev/null; then
+    echo "unsupported or colliding Arch release version was accepted: ${version}" >&2
+    exit 1
+  fi
+done
 
 for package_kind in source binary; do
   stable_pkgbuild="${temporary_root}/stable-aur/${package_kind}/PKGBUILD"

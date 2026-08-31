@@ -162,13 +162,18 @@ curl -LO https://github.com/brdweb/omacalendar/releases/download/v1.0.0-beta.1/S
 grep ' omacalendar-1.0.0beta1-1-x86_64.pkg.tar.zst$' SHA256SUMS | sha256sum --check
 gh attestation verify ./omacalendar-1.0.0beta1-1-x86_64.pkg.tar.zst \
   --repo brdweb/omacalendar
+gh attestation verify ./omacalendar-1.0.0beta1-1-x86_64.pkg.tar.zst \
+  --repo brdweb/omacalendar \
+  --predicate-type https://spdx.dev/Document/v2.3
 sudo pacman -U ./omacalendar-1.0.0beta1-1-x86_64.pkg.tar.zst
 systemctl --user daemon-reload
 systemctl --user enable --now omacalendard.socket
+systemctl --user try-restart omacalendard.service
 ```
 
-The `gh attestation verify` step uses the optional GitHub CLI to verify build
-provenance; the exact `SHA256SUMS` entry must pass regardless. GitHub release
+The `gh attestation verify` steps use the optional GitHub CLI to verify build
+provenance and the SPDX SBOM attestation; the exact `SHA256SUMS` entry must pass
+regardless. GitHub release
 packages do not add a pacman repository or automatic update channel. Install a
 newer release package explicitly when one is published. The source and binary
 AUR recipes remain prepared for publication when new AUR account registration
