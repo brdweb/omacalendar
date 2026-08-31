@@ -51,8 +51,10 @@ appstreamcli validate --no-net \
 if command -v systemd-analyze >/dev/null; then
   systemd-analyze security --offline=yes \
     "${staged_root}/usr/lib/systemd/user/omacalendard.service" >/dev/null
+  # Parse the user units against the staged search path without asking for a
+  # live user manager. Release containers intentionally have no login session.
   verify_output="$(SYSTEMD_UNIT_PATH="${staged_root}/usr/lib/systemd/user:" \
-    systemd-analyze --user verify omacalendard.socket omacalendard.service 2>&1 || true)"
+    systemd-analyze verify omacalendard.socket omacalendard.service 2>&1 || true)"
   unexpected_output="$(printf '%s\n' "${verify_output}" | \
     sed '\|omacalendard.service: Command /usr/bin/omacalendard is not executable: No such file or directory|d' | \
     sed '/^[[:space:]]*$/d')"
