@@ -60,10 +60,13 @@ jobs:
           if [[ -n ${version_suffix} ]]; then
             is_prerelease=true
           fi
+          source packaging/release/version-lib.sh
+          arch_pkgver=$(arch_pkgver "${release_version}")
           {
             echo "value=${release_version}"
             echo "suffix=${version_suffix}"
             echo "is_prerelease=${is_prerelease}"
+            echo "arch_pkgver=${arch_pkgver}"
           } >>"${GITHUB_OUTPUT}"
 
       - name: Configure release
@@ -111,6 +114,26 @@ jobs:
             "${GITHUB_SHA}"
           pacman -Q >"artifacts/omacalendar-${RELEASE_VERSION}-arch-packages.txt"
 
+      - name: Build and validate native Arch package
+        env:
+          RELEASE_VERSION: ${{ steps.version.outputs.value }}
+        run: |
+          package_user=omacalendar-package-builder
+          package_home=/tmp/omacalendar-package-builder
+          package_output=/tmp/omacalendar-native-package
+          useradd --system --create-home --home-dir "${package_home}" "${package_user}"
+          install -d -o "${package_user}" -g "${package_user}" "${package_output}"
+          source_date_epoch=$(git show -s --format=%ct "${GITHUB_SHA}")
+          runuser -u "${package_user}" -- env \
+            SOURCE_DATE_EPOCH="${source_date_epoch}" \
+            packaging/release/build-arch-package.sh \
+              "${RELEASE_VERSION}" "$PWD/stage" "${package_output}"
+          package_path="${package_output}/omacalendar-${{ steps.version.outputs.arch_pkgver }}-1-x86_64.pkg.tar.zst"
+          packaging/release/verify-arch-package.sh \
+            "${RELEASE_VERSION}" "$PWD/stage" "${package_path}" \
+            "${source_date_epoch}"
+          cp "${package_path}" artifacts/
+
       - name: Generate SPDX SBOM
         uses: anchore/sbom-action@3ad7283483fc7af8ff2b4ea19663c2d5ca935e26 # v0.24.2
         with:
@@ -121,8 +144,7 @@ jobs:
           upload-artifact: false
           upload-release-assets: false
 
-      - name: Render stable AUR recipes
-        if: ${{ steps.version.outputs.is_prerelease == 'false' }}
+      - name: Render AUR recipes
         env:
           RELEASE_VERSION: ${{ steps.version.outputs.value }}
         shell: bash
@@ -148,11 +170,14 @@ jobs:
           subject-path: |
             artifacts/omacalendar-${{ steps.version.outputs.value }}-linux-x86_64.tar.zst
             artifacts/omacalendar-${{ steps.version.outputs.value }}-source.tar.gz
+            artifacts/omacalendar-${{ steps.version.outputs.arch_pkgver }}-1-x86_64.pkg.tar.zst
 
       - name: Attest binary SBOM
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4
         with:
-          subject-path: artifacts/omacalendar-${{ steps.version.outputs.value }}-linux-x86_64.tar.zst
+          subject-path: |
+            artifacts/omacalendar-${{ steps.version.outputs.value }}-linux-x86_64.tar.zst
+            artifacts/omacalendar-${{ steps.version.outputs.arch_pkgver }}-1-x86_64.pkg.tar.zst
           sbom-path: artifacts/omacalendar-${{ steps.version.outputs.value }}.spdx.json
 
       - name: Upload candidate artifacts

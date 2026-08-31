@@ -38,6 +38,30 @@ release_version_suffix() {
   printf '%s\n' "${version#"${base}"}"
 }
 
+arch_pkgver() {
+  if [[ $# -ne 1 ]] || ! validate_release_version "$1"; then
+    return 1
+  fi
+
+  local version=$1
+  local base
+  base=$(release_base_version "${version}")
+  if [[ ${version} == "${base}" ]]; then
+    printf '%s\n' "${base}"
+    return 0
+  fi
+
+  # Arch treats a separator after the patch number as a newer version. Remove
+  # SemVer prerelease separators so beta packages sort before the matching
+  # stable release (for example, 1.0.0-beta.1 becomes 1.0.0beta1).
+  local prerelease=${version#*-}
+  local arch_prerelease=${prerelease//[.-]/}
+  if [[ -z ${arch_prerelease} || ${arch_prerelease} =~ ^[0-9] ]]; then
+    arch_prerelease="pre${arch_prerelease}"
+  fi
+  printf '%s%s\n' "${base}" "${arch_prerelease}"
+}
+
 cmake_release_version() {
   local repository_root=$1
   local numeric_version

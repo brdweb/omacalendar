@@ -76,7 +76,7 @@ trim_whitespace() {
   printf '%s' "${value}"
 }
 
-declare -ar PRETAG_GATE_LABELS=(
+declare -a PRETAG_GATE_LABELS=(
   "Exact app version metadata and prerelease tooling"
   "Clean GCC and Clang builds with full automated matrix"
   "ASan/UBSan matrix, including IPC framing/reconnect regressions"
@@ -86,12 +86,25 @@ declare -ar PRETAG_GATE_LABELS=(
   "Secret scan and dependency review"
   "No unresolved critical or high defect"
 )
-declare -ar EXTERNAL_APPROVAL_LABELS=(
+declare -a EXTERNAL_APPROVAL_LABELS=(
   "Historical Google installed-app OAuth credential revoked or rotated"
   "Repository-history hygiene decision recorded"
   "App repository committed, clean, pushed, and green in clean-checkout CI"
   "Maintainer approval to create the signed app tag"
 )
+
+if [[ ${release_version} == *-beta* ]]; then
+  PRETAG_GATE_LABELS+=(
+    "Current-Omarchy owner acceptance on the exact runtime"
+    "Alpha-to-beta upgrade, backup/restore, and uninstall"
+    "Privacy-safe screenshots and public beta documentation"
+    "Prerelease Arch package and future AUR recipes pass clean validation"
+  )
+  EXTERNAL_APPROVAL_LABELS+=(
+    "Google OAuth branding and sensitive-scope verification approved"
+    "Maintainer approval of beta acceptance and public limitations"
+  )
+fi
 
 require_completed_section() {
   local section=$1

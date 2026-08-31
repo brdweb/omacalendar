@@ -20,9 +20,10 @@ accounts in the acceptance test. OmaCalendar requests only these scopes:
 - `https://www.googleapis.com/auth/calendar.calendars`
 - `https://www.googleapis.com/auth/calendar.calendarlist.readonly`
 
-The `calendar.calendars` scope permits creating, updating, and deleting
-secondary calendars. After this scope is added to an existing installation,
-each previously connected Google account must complete **Reauthorize** once.
+The current app uses `calendar.calendars` only to delete an owned, non-primary
+secondary calendar after explicit confirmation. It does not create or rename
+Google calendars. After this scope is added to an existing installation, each
+previously connected Google account must complete **Reauthorize** once.
 
 Google's current desktop-app setup is also described in its
 [Calendar quickstart](https://developers.google.com/workspace/calendar/api/quickstart/go).
@@ -107,11 +108,12 @@ press **Sync now**.
 | All-day | Create an all-day event in each direction | Date is unchanged and no midnight/time-zone shift occurs |
 | Update | Change title, time, location, and notes locally | Remote event updates once, without a duplicate |
 | Delete | Delete a locally created event | Remote event is deleted and stays absent after another sync |
+| Secondary calendar deletion | Delete a pre-created, owned, non-primary test calendar from settings and confirm the warning | The Google calendar and its events are removed; primary and non-owned calendars are not offered as deletable |
 | Recurrence | Create a recurring event remotely | Instances appear in the requested local date range |
 | Exception | Move or cancel one remote occurrence | Only that occurrence changes or disappears locally |
 | Offline outbox | Stop networking, make an edit, restore networking, press Sync | Local edit remains visible and later drains to Google |
 | Restart | Close the app and daemon, then relaunch | No consent prompt; refresh token is loaded from the keyring |
-| Disconnect | Remove the account from settings | Refresh token and local cached account data are removed |
+| Disconnect | Remove the account from settings, first retaining downloaded data and then repeating with cache removal selected | The refresh token is removed in both cases; cached data follows the explicit retain/remove choice |
 
 ## 6. Safe diagnostics
 

@@ -1,0 +1,76 @@
+name: Provider interoperability result
+description: Report a sanitized Google, CalDAV, or ICS workflow result from the beta matrix.
+title: "[Provider]: "
+labels:
+  - provider
+body:
+  - type: markdown
+    attributes:
+      value: |
+        This form is for provider behavior, whether it passed or failed. Use a dedicated test account and synthetic events. Do not submit credentials, private endpoints, callback URLs, raw payloads, attendee addresses, or personal calendar content.
+  - type: dropdown
+    id: provider
+    attributes:
+      label: Provider
+      options:
+        - Google Calendar
+        - Radicale
+        - Nextcloud
+        - Fastmail
+        - Other CalDAV server
+        - HTTPS or webcal ICS
+    validations:
+      required: true
+  - type: input
+    id: versions
+    attributes:
+      label: Exact versions
+      description: Include OmaCalendar, Omarchy, Qt, and provider/server versions.
+    validations:
+      required: true
+  - type: dropdown
+    id: workflow
+    attributes:
+      label: Workflow
+      options:
+        - Account authorization or discovery
+        - Timed event CRUD
+        - All-day or multi-day event CRUD
+        - Recurrence or detached exception
+        - Invitations or RSVP
+        - Calendar management
+        - Offline edit and reconnect
+        - Token persistence and restart
+        - ICS subscription or import/export
+        - Other
+    validations:
+      required: true
+  - type: dropdown
+    id: result
+    attributes:
+      label: Result
+      options:
+        - Pass
+        - Fail
+        - Partial or unsupported
+    validations:
+      required: true
+  - type: textarea
+    id: procedure
+    attributes:
+      label: Sanitized procedure and result
+      description: Describe the action and observed result using synthetic names.
+    validations:
+      required: true
+  - type: textarea
+    id: recovery
+    attributes:
+      label: Recovery or retry behavior
+      description: If the operation failed, explain whether the local change remained safe and whether retry/restart recovered.
+  - type: checkboxes
+    id: safety
+    attributes:
+      label: Data-safety confirmation
+      options:
+        - label: I used synthetic data and removed credentials, tokens, personal content, attendee addresses, account identifiers, and private URLs.
+          required: true

@@ -34,6 +34,19 @@ attachments, video-provider authorization, and remote calendar creation are
 not part of the 1.0 scope. See the decision-complete [1.0 roadmap](docs/PLAN.md)
 for the full boundary and release gates.
 
+## Screenshots
+
+All screenshots use an isolated capture profile with synthetic calendars and
+events; no maintainer account or calendar data is included.
+
+![OmaCalendar month view with three synthetic calendars](docs/screenshots/desktop-month.png)
+
+| Week view with overlapping events | Scrollable agenda |
+|---|---|
+| ![OmaCalendar week view](docs/screenshots/desktop-week.png) | ![OmaCalendar agenda view](docs/screenshots/desktop-agenda.png) |
+
+![OmaCalendar event editor](docs/screenshots/event-editor.png)
+
 ## Alpha status
 
 The app is being qualified as `1.0.0-alpha` using IPC 2 and database schema 2.
@@ -55,8 +68,8 @@ unchanged snapshot in this development workspace.
 
 These results do not qualify stable 1.0. Live Google writes, the full Radicale
 matrix, Nextcloud, Fastmail, authenticated ICS, a clean current-Omarchy VM,
-complete desktop workflow testing, clean-checkout CI/AUR builds, and the final
-owner acceptance pass remain open.
+complete desktop workflow testing, clean-checkout CI/Arch package builds, and
+the final owner acceptance pass remain open.
 The detailed evidence and unchecked gates are maintained in [the implementation
 plan](docs/PLAN.md).
 
@@ -136,6 +149,30 @@ After installing, activate the on-demand backend with:
 systemctl --user daemon-reload
 systemctl --user enable --now omacalendard.socket
 ```
+
+## Install the beta Arch package
+
+When `v1.0.0-beta.1` is published, its GitHub release includes a native package
+for current Omarchy on x86-64. Download the package and checksum file into an
+empty directory, verify the exact package entry, then install it:
+
+```bash
+curl -LO https://github.com/brdweb/omacalendar/releases/download/v1.0.0-beta.1/omacalendar-1.0.0beta1-1-x86_64.pkg.tar.zst
+curl -LO https://github.com/brdweb/omacalendar/releases/download/v1.0.0-beta.1/SHA256SUMS
+grep ' omacalendar-1.0.0beta1-1-x86_64.pkg.tar.zst$' SHA256SUMS | sha256sum --check
+gh attestation verify ./omacalendar-1.0.0beta1-1-x86_64.pkg.tar.zst \
+  --repo brdweb/omacalendar
+sudo pacman -U ./omacalendar-1.0.0beta1-1-x86_64.pkg.tar.zst
+systemctl --user daemon-reload
+systemctl --user enable --now omacalendard.socket
+```
+
+The `gh attestation verify` step uses the optional GitHub CLI to verify build
+provenance; the exact `SHA256SUMS` entry must pass regardless. GitHub release
+packages do not add a pacman repository or automatic update channel. Install a
+newer release package explicitly when one is published. The source and binary
+AUR recipes remain prepared for publication when new AUR account registration
+is available again.
 
 ## Testing providers
 

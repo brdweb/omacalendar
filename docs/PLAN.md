@@ -55,7 +55,9 @@ checks do not satisfy a phase until its complete exit criteria pass end to end.
 | 5 | Independent Quickshell companion | Tracked and released by its own repository; does not gate this app release |
 | 6 | Hardening, packaging, and publication | Fresh compiler/sanitizer/performance and local package evidence pass; clean CI/chroot/VM gates remain |
 
-The app alpha candidate is `1.0.0-alpha` with IPC 2 and schema 2. Stable
+The published app alpha is `1.0.0-alpha` with IPC 2 and schema 2. The path to
+`1.0.0-beta.1`, including public OAuth and Arch package distribution, is tracked
+in [BETA_PLAN.md](BETA_PLAN.md). Stable
 `1.0.0` is reserved for the first app build that passes this document's app
 release gates. Widget versions are independent and compatibility is protocol-
 based.
@@ -142,7 +144,8 @@ the release notes. These gates remain non-negotiable:
   high defect.
 - [ ] A signed immutable app tag produces a draft GitHub prerelease whose
   checksums, SBOM, and attestations are independently verified before
-  publication. AUR publication remains deferred until stable 1.0.
+  publication. The alpha itself is not submitted to the AUR; beta distribution
+  uses a GitHub-hosted native Arch package while AUR registration is unavailable.
 
 ## Phase 1 — Replace the prototype foundation
 

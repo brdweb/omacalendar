@@ -1,7 +1,8 @@
 # Maintainer: OmaCalendar contributors
 pkgname=omacalendar-bin
-pkgver=@PROJECT_VERSION@
+pkgver=@ARCH_PKGVER@
 pkgrel=1
+_upstream_version=@UPSTREAM_VERSION@
 pkgdesc='Local-first calendar for Omarchy Linux (prebuilt)'
 arch=('x86_64')
 url='https://github.com/brdweb/omacalendar'
@@ -19,7 +20,7 @@ depends=(
 )
 provides=("omacalendar=${pkgver}")
 conflicts=('omacalendar')
-source_x86_64=("${pkgname}-${pkgver}.tar.zst::${url}/releases/download/v${pkgver}/omacalendar-${pkgver}-linux-x86_64.tar.zst")
+source_x86_64=("${pkgname}-${_upstream_version}-${CARCH}.tar.zst::${url}/releases/download/v${_upstream_version}/omacalendar-${_upstream_version}-linux-${CARCH}.tar.zst")
 sha256sums_x86_64=('@BINARY_SHA256@')
 
 package() {

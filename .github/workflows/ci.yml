@@ -25,7 +25,7 @@ jobs:
             appstream clang desktop-file-utils git
 
       - name: Check out source
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Check C++ formatting
         shell: bash
@@ -35,8 +35,13 @@ jobs:
 
       - name: Validate shell scripts
         run: |
-          bash -n packaging/aur/*.in packaging/release/*.sh
+          bash -n packaging/arch/*.in packaging/aur/*.in packaging/release/*.sh
           packaging/release/test-versioning.sh
+
+      - name: Validate native Arch package assembly
+        run: |
+          useradd --create-home --home-dir /tmp/omacalendar-package-test package-test
+          runuser -u package-test -- packaging/release/test-arch-package.sh
 
       - name: Validate desktop metadata
         run: desktop-file-validate packaging/org.omacalendar.OmaCalendar.desktop
@@ -68,7 +73,7 @@ jobs:
             ninja pkgconf qt6-base qt6-declarative qt6-networkauth systemd zstd
 
       - name: Check out source
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Configure
         env:
@@ -120,7 +125,7 @@ jobs:
             qt6-declarative qt6-networkauth systemd
 
       - name: Check out source
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Configure sanitizer build
         env:
@@ -155,7 +160,7 @@ jobs:
             pkgconf qt6-base qt6-declarative qt6-networkauth systemd
 
       - name: Check out source
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Configure
         run: |

@@ -2,7 +2,7 @@
 set -euo pipefail
 
 repository_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
-# shellcheck source=version-lib.sh
+# shellcheck source=packaging/release/version-lib.sh
 source "${repository_root}/packaging/release/version-lib.sh"
 
 for version in 0.0.0 1.0.0 1.0.0-alpha 1.0.0-alpha.1 2.3.4-rc-1; do
@@ -57,11 +57,55 @@ cleanup() {
 trap cleanup EXIT
 checksum=$(printf '0%.0s' {1..64})
 "${repository_root}/packaging/release/render-aur.sh" \
-  1.0.0 "${checksum}" "${checksum}" "${temporary_root}/aur"
-if "${repository_root}/packaging/release/render-aur.sh" \
-  1.0.0-alpha "${checksum}" "${checksum}" "${temporary_root}/invalid-aur" \
-  >/dev/null 2>&1; then
-  echo "prerelease version unexpectedly rendered an AUR package" >&2
+  1.0.0 "${checksum}" "${checksum}" "${temporary_root}/stable-aur"
+"${repository_root}/packaging/release/render-aur.sh" \
+  1.0.0-beta.1 "${checksum}" "${checksum}" "${temporary_root}/beta-aur"
+
+if [[ $(arch_pkgver 1.0.0) != 1.0.0 ]] || \
+  [[ $(arch_pkgver 1.0.0-alpha) != 1.0.0alpha ]] || \
+  [[ $(arch_pkgver 1.0.0-beta.1) != 1.0.0beta1 ]] || \
+  [[ $(arch_pkgver 1.0.0-1) != 1.0.0pre1 ]]; then
+  echo "semantic versions were not converted to canonical Arch pkgver values" >&2
+  exit 1
+fi
+
+for package_kind in source binary; do
+  stable_pkgbuild="${temporary_root}/stable-aur/${package_kind}/PKGBUILD"
+  beta_pkgbuild="${temporary_root}/beta-aur/${package_kind}/PKGBUILD"
+  bash -n "${stable_pkgbuild}" "${beta_pkgbuild}"
+  grep -Fxq 'pkgver=1.0.0' "${stable_pkgbuild}"
+  grep -Fxq 'pkgver=1.0.0beta1' "${beta_pkgbuild}"
+  grep -Fxq '_upstream_version=1.0.0' "${stable_pkgbuild}"
+  grep -Fxq '_upstream_version=1.0.0-beta.1' "${beta_pkgbuild}"
+  if grep -Eq '@[A-Z_]+@' "${stable_pkgbuild}" "${beta_pkgbuild}"; then
+    echo "rendered ${package_kind} PKGBUILD contains an unresolved template value" >&2
+    exit 1
+  fi
+  (
+    cd "$(dirname "${stable_pkgbuild}")"
+    makepkg --printsrcinfo >.SRCINFO
+  )
+  (
+    cd "$(dirname "${beta_pkgbuild}")"
+    makepkg --printsrcinfo >.SRCINFO
+  )
+  grep -Fq $'\tpkgver = 1.0.0' "$(dirname "${stable_pkgbuild}")/.SRCINFO"
+  grep -Fq $'\tpkgver = 1.0.0beta1' "$(dirname "${beta_pkgbuild}")/.SRCINFO"
+done
+
+grep -Fxq '    -DOMACALENDAR_VERSION_SUFFIX=' \
+  "${temporary_root}/stable-aur/source/PKGBUILD"
+grep -Fxq '    -DOMACALENDAR_VERSION_SUFFIX=-beta.1' \
+  "${temporary_root}/beta-aur/source/PKGBUILD"
+upstream_reference="\${_upstream_version}"
+grep -Fq "releases/download/v${upstream_reference}/omacalendar-${upstream_reference}-source.tar.gz" \
+  "${temporary_root}/beta-aur/source/PKGBUILD"
+grep -Fq "releases/download/v${upstream_reference}/omacalendar-${upstream_reference}-linux-\${CARCH}.tar.zst" \
+  "${temporary_root}/beta-aur/binary/PKGBUILD"
+
+if [[ $(vercmp 1.0.0beta1 1.0.0) -ge 0 ]] || \
+  [[ $(vercmp 1.0.0beta1 1.0.0beta2) -ge 0 ]]; then
+  echo "Arch prerelease pkgver ordering is invalid" >&2
   exit 1
 fi
 
