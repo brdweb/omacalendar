@@ -44,7 +44,7 @@ find_package(Qt6 6.8 REQUIRED COMPONENTS
   Sql
 )
 find_package(PkgConfig REQUIRED)
-pkg_check_modules(LibIcal REQUIRED IMPORTED_TARGET libical)
+pkg_check_modules(LibIcal REQUIRED IMPORTED_TARGET libical>=4.0)
 
 qt_standard_project_setup(REQUIRES 6.8)
 

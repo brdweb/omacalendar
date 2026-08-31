@@ -13,21 +13,19 @@ concurrency:
 permissions:
   contents: read
 
-env:
-  QT_VERSION: 6.8.*
-
 jobs:
   source-quality:
     name: Source and package metadata
     runs-on: ubuntu-24.04
+    container: archlinux:base-devel
     steps:
-      - name: Check out source
-        uses: actions/checkout@v7
-
       - name: Install validation tools
         run: |
-          sudo apt-get update
-          sudo apt-get install --yes appstream clang-format desktop-file-utils
+          pacman -Syu --noconfirm --needed \
+            appstream clang desktop-file-utils git
+
+      - name: Check out source
+        uses: actions/checkout@v7
 
       - name: Check C++ formatting
         shell: bash
@@ -49,6 +47,7 @@ jobs:
   build:
     name: ${{ matrix.name }}
     runs-on: ubuntu-24.04
+    container: archlinux:base-devel
     strategy:
       fail-fast: false
       matrix:
@@ -62,22 +61,14 @@ jobs:
             cxx: clang++
             build_type: RelWithDebInfo
     steps:
+      - name: Install current Arch dependencies
+        run: |
+          pacman -Syu --noconfirm --needed \
+            appstream clang cmake desktop-file-utils git libical libsecret \
+            ninja pkgconf qt6-base qt6-declarative qt6-networkauth systemd zstd
+
       - name: Check out source
         uses: actions/checkout@v7
-
-      - name: Install system dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install --yes \
-            appstream desktop-file-utils libical-dev libsecret-tools \
-            ninja-build pkg-config zstd
-
-      - name: Install Qt
-        uses: jurplel/install-qt-action@v4
-        with:
-          version: ${{ env.QT_VERSION }}
-          modules: qtnetworkauth
-          cache: true
 
       - name: Configure
         env:
@@ -120,21 +111,16 @@ jobs:
   sanitizers:
     name: ASan and UBSan
     runs-on: ubuntu-24.04
+    container: archlinux:base-devel
     steps:
+      - name: Install current Arch dependencies
+        run: |
+          pacman -Syu --noconfirm --needed \
+            clang cmake git libical libsecret ninja pkgconf qt6-base \
+            qt6-declarative qt6-networkauth systemd
+
       - name: Check out source
         uses: actions/checkout@v7
-
-      - name: Install system dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install --yes libical-dev libsecret-tools ninja-build pkg-config
-
-      - name: Install Qt
-        uses: jurplel/install-qt-action@v4
-        with:
-          version: ${{ env.QT_VERSION }}
-          modules: qtnetworkauth
-          cache: true
 
       - name: Configure sanitizer build
         env:

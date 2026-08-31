@@ -10,6 +10,7 @@ the stable 1.0 owner acceptance gate passes.
 |---|---|---|
 | Operating system | Current stable Omarchy, x86-64 | Local checks on Omarchy 4.0.1-1; pending clean-VM gate |
 | Qt | 6.8 or newer | Local 20-test matrices pass with Qt 6.11.2; final release version remains open |
+| libical | 4.0 or newer | Current Omarchy/Arch package |
 | GCC | Current Arch GCC | GCC 16.2.1 Release/Werror build and 20/20 tests pass; clean-checkout CI remains |
 | Clang | Current Arch/LLVM Clang | Clang 22.1.8 Werror and ASan/UBSan builds each pass 20/20 tests |
 | systemd | User manager shipped by release-reference Omarchy | Staged `/usr` unit validation passes; VM gate remains |

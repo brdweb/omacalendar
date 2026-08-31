@@ -8,7 +8,6 @@
 #include <QTime>
 #include <QTimeZone>
 #include <algorithm>
-#include <ctime>
 #include <memory>
 
 namespace omacalendar {
@@ -23,12 +22,6 @@ struct ComponentDeleter {
 };
 
 using ComponentPtr = std::unique_ptr<icalcomponent, ComponentDeleter>;
-
-#if ICAL_MAJOR_VERSION >= 4
-using IcalEpoch = icaltime_t;
-#else
-using IcalEpoch = time_t;
-#endif
 
 struct RecurrenceComponent {
   ComponentPtr owner;
@@ -230,7 +223,7 @@ icaltimetype dateValue(const QDate& date) {
 icaltimetype dateTimeValue(const QDateTime& utc, const QString& timeZone) {
   if (icaltimezone* zone = zoneFor(timeZone)) {
     return icaltime_from_timet_with_zone(
-        static_cast<IcalEpoch>(utc.toUTC().toSecsSinceEpoch()), false, zone);
+        static_cast<icaltime_t>(utc.toUTC().toSecsSinceEpoch()), false, zone);
   }
   if (timeZone.isEmpty()) {
     // Floating RFC 5545 values follow the desktop's current zone. Keep the
@@ -239,11 +232,11 @@ icaltimetype dateTimeValue(const QDateTime& utc, const QString& timeZone) {
     const QString systemZone = QString::fromUtf8(QTimeZone::systemTimeZoneId());
     if (icaltimezone* zone = zoneFor(systemZone)) {
       return icaltime_from_timet_with_zone(
-          static_cast<IcalEpoch>(utc.toUTC().toSecsSinceEpoch()), false, zone);
+          static_cast<icaltime_t>(utc.toUTC().toSecsSinceEpoch()), false, zone);
     }
   }
   return icaltime_from_timet_with_zone(
-      static_cast<IcalEpoch>(utc.toUTC().toSecsSinceEpoch()), false,
+      static_cast<icaltime_t>(utc.toUTC().toSecsSinceEpoch()), false,
       icaltimezone_get_utc_timezone());
 }
 
@@ -344,13 +337,7 @@ RecurrenceComponent componentFor(const Event& master, QStringList* warnings) {
   return result;
 }
 
-void collectOccurrence(icalcomponent*,
-#if ICAL_MAJOR_VERSION >= 4
-                       const icaltime_span* span,
-#else
-                       icaltime_span* span,
-#endif
-                       void* data) {
+void collectOccurrence(icalcomponent*, const icaltime_span* span, void* data) {
   auto* collector = static_cast<Collector*>(data);
   if (span == nullptr || collector == nullptr || collector->master == nullptr) {
     return;
@@ -407,10 +394,10 @@ QList<Event> expandMaster(const Event& master, const QDateTime& startUtc,
   }
   const QDateTime scanStart = startUtc.addSecs(-duration);
   const icaltimetype from = icaltime_from_timet_with_zone(
-      static_cast<IcalEpoch>(scanStart.toSecsSinceEpoch()), false,
+      static_cast<icaltime_t>(scanStart.toSecsSinceEpoch()), false,
       icaltimezone_get_utc_timezone());
   const icaltimetype until =
-      icaltime_from_timet_with_zone(static_cast<IcalEpoch>(endUtc.toSecsSinceEpoch()),
+      icaltime_from_timet_with_zone(static_cast<icaltime_t>(endUtc.toSecsSinceEpoch()),
                                     false, icaltimezone_get_utc_timezone());
 
   Collector collector;

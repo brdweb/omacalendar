@@ -94,7 +94,7 @@ for a provider sync.
 
 ## Build from source
 
-OmaCalendar uses C++20, CMake 3.28+, Ninja, Qt 6.8+, libical, and Secret Service.
+OmaCalendar uses C++20, CMake 3.28+, Ninja, Qt 6.8+, libical 4.0+, and Secret Service.
 On Omarchy/Arch Linux:
 
 ```bash
