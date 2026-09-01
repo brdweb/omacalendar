@@ -75,9 +75,9 @@ Do not paste the browser callback URL anywhere; the app handles it locally.
 
 The repository provides the public pages needed for Google's OAuth review:
 
-- application home: `https://brdweb.github.io/omacalendar/`
-- privacy policy: `https://brdweb.github.io/omacalendar/privacy.html`
-- terms of use: `https://brdweb.github.io/omacalendar/terms.html`
+- application home: `https://omacalendar.brdweb.com/`
+- privacy policy: `https://omacalendar.brdweb.com/privacy.html`
+- terms of use: `https://omacalendar.brdweb.com/terms.html`
 
 Before submitting, publish those pages, verify ownership of the authorized
 domain in Google Search Console, and make the product name, support email,
