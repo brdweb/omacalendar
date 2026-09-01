@@ -62,7 +62,10 @@ jobs:
         if: github.event_name == 'workflow_dispatch'
         run: |
           git diff --exit-code
-          packaging/release/test-versioning.sh
+          useradd --create-home --home-dir /tmp/omacalendar-release-test \
+            omacalendar-release-test
+          runuser -u omacalendar-release-test -- \
+            packaging/release/test-versioning.sh
 
       - name: Resolve version
         id: version
