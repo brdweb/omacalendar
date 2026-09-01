@@ -22,8 +22,10 @@ the work; the acceptance record decides whether the exact commit may be tagged.
 - [x] Request only the three Calendar scopes used by the application and
   document why each is necessary.
 - [ ] Verify the Google Auth Platform branding and authorized domain.
-- [ ] Reconcile the Cloud Console's OAuth-client secret warning. A desktop
-  client is public, uses PKCE, and should not depend on a distributable secret.
+- [x] Reconcile the Cloud Console's OAuth-client secret warning. Google's
+  Desktop client currently requires its generated shared value during token
+  exchange. Treat the client ID and that value as extractable public
+  application configuration, while PKCE protects each authorization code.
 - [ ] Record a privacy-safe demonstration of browser consent, account
   connection, calendar discovery, event CRUD, and secondary-calendar
   management.
@@ -90,9 +92,12 @@ The exact committed candidate must pass:
   ICS, URI dispatch, untrusted text, recurrence, credential, and widget
   activation boundaries.
 
-The signed tag workflow must create immutable source and binary archives,
-`SHA256SUMS`, an SPDX SBOM, and GitHub provenance/SBOM attestations. Download
-and independently verify the draft assets before publication.
+The manually dispatched release rehearsal must first build the complete
+candidate with the protected Google Desktop client configuration without
+creating a tag or release. The signed tag workflow must then create immutable
+source and binary archives, `SHA256SUMS`, an SPDX SBOM, and GitHub
+provenance/SBOM attestations. Download and independently verify the draft
+assets before publication.
 
 ## 5. Documentation, screenshots, and public feedback
 
@@ -122,7 +127,8 @@ and independently verify the draft assets before publication.
    validated staged `/usr` tree. Publish it with the GitHub release checksums,
    SBOM, and provenance so it never depends on a mutable branch or circular
    download from an unpublished release.
-6. Install that exact asset with `pacman -U` on a clean current-Omarchy profile
+6. Install that exact asset with `yay -U` (or `pacman -U`) on a clean
+   current-Omarchy profile
    and repeat the version, launch, socket, provider-reconnect, and uninstall
    smoke pass.
 7. Keep `omacalendar` and `omacalendar-bin` AUR recipes rendered and clean-build

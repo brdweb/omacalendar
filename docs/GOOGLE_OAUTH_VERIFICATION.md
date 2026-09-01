@@ -55,8 +55,9 @@ sufficient because list membership is not modified by the application.
 - Calendar data is cached in a user-local SQLite database for offline use.
 - OAuth refresh tokens are stored in the desktop Secret Service, not SQLite.
 - The desktop authorization flow uses a loopback redirect, per-request state,
-  and PKCE-S256. A distributed desktop build must not rely on a confidential
-  client secret.
+  and PKCE-S256. Google's generated Desktop client shared value is bundled as
+  public application configuration because Google requires it at token
+  exchange; it is not treated as a confidential credential or trust boundary.
 - Disconnecting an account removes its stored refresh token. The removal dialog
   lets the user either retain downloaded calendar data for offline reference
   (the default) or remove the account's local cached data at the same time.
@@ -92,7 +93,9 @@ the repository if it contains account-identifying browser UI.
 
 Before selecting **Submit for verification**:
 
-- reconcile every warning about enabled OAuth client secrets;
+- confirm the release rehearsal completed code exchange with the enabled
+  Desktop client configuration, and that no client value was committed or
+  printed by CI;
 - confirm Branding, Audience, and Data Access show the production values above;
 - confirm the app is External and In production;
 - confirm only the three documented scopes are declared;

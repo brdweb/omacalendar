@@ -1,5 +1,7 @@
 /build/
 /build-*/
+/artifacts-*/
+/stage-*/
 /.cache/
 /.qt/
 /.venv/
