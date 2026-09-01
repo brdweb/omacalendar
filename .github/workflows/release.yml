@@ -73,11 +73,14 @@ jobs:
         env:
           CC: gcc
           CXX: g++
+          OMACALENDAR_BUILD_GOOGLE_CLIENT_ID: ${{ secrets.OMACALENDAR_GOOGLE_CLIENT_ID }}
+          OMACALENDAR_BUILD_GOOGLE_CLIENT_SECRET: ${{ secrets.OMACALENDAR_GOOGLE_CLIENT_SECRET }}
         run: |
           cmake -S . -B build -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_INSTALL_PREFIX=/usr \
             -DOMACALENDAR_ENABLE_WERROR=ON \
+            -DOMACALENDAR_REQUIRE_GOOGLE_OAUTH_CONFIG=ON \
             -DOMACALENDAR_VERSION_SUFFIX=${{ steps.version.outputs.suffix }}
 
       - name: Build, test, and lint

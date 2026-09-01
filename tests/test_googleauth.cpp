@@ -17,6 +17,7 @@ class GoogleAuthAsyncTest final : public QObject {
  private slots:
   void initTestCase();
   void cleanupTestCase();
+  void deploymentClientDoesNotRestoreKeyringSecret();
   void delayedClientLookupQueuesAuthorizationWithoutBlocking();
   void delayedClientSecretStoreKeepsEventLoopResponsive();
   void clientSecretStoreFailureIsSanitized();
@@ -33,9 +34,13 @@ class GoogleAuthAsyncTest final : public QObject {
   QByteArray m_originalMode;
   QByteArray m_originalValue;
   QByteArray m_originalDelay;
+  QByteArray m_originalClientId;
+  QByteArray m_originalClientSecret;
   bool m_hadMode = false;
   bool m_hadValue = false;
   bool m_hadDelay = false;
+  bool m_hadClientId = false;
+  bool m_hadClientSecret = false;
 };
 
 void GoogleAuthAsyncTest::initTestCase() {
@@ -85,6 +90,10 @@ esac
   m_originalMode = qgetenv("FAKE_GOOGLE_SECRET_MODE");
   m_originalValue = qgetenv("FAKE_GOOGLE_SECRET_VALUE");
   m_originalDelay = qgetenv("FAKE_GOOGLE_SECRET_DELAY");
+  m_hadClientId = qEnvironmentVariableIsSet("OMACALENDAR_GOOGLE_CLIENT_ID");
+  m_hadClientSecret = qEnvironmentVariableIsSet("OMACALENDAR_GOOGLE_CLIENT_SECRET");
+  m_originalClientId = qgetenv("OMACALENDAR_GOOGLE_CLIENT_ID");
+  m_originalClientSecret = qgetenv("OMACALENDAR_GOOGLE_CLIENT_SECRET");
   qputenv("PATH", m_directory.path().toUtf8() + ':' + m_originalPath);
 }
 
@@ -101,6 +110,9 @@ void GoogleAuthAsyncTest::cleanupTestCase() {
   restore("FAKE_GOOGLE_SECRET_MODE", m_hadMode, m_originalMode);
   restore("FAKE_GOOGLE_SECRET_VALUE", m_hadValue, m_originalValue);
   restore("FAKE_GOOGLE_SECRET_DELAY", m_hadDelay, m_originalDelay);
+  restore("OMACALENDAR_GOOGLE_CLIENT_ID", m_hadClientId, m_originalClientId);
+  restore("OMACALENDAR_GOOGLE_CLIENT_SECRET", m_hadClientSecret,
+          m_originalClientSecret);
 }
 
 void GoogleAuthAsyncTest::setHelper(const QByteArray& mode, const QByteArray& value,
@@ -108,6 +120,38 @@ void GoogleAuthAsyncTest::setHelper(const QByteArray& mode, const QByteArray& va
   qputenv("FAKE_GOOGLE_SECRET_MODE", mode);
   qputenv("FAKE_GOOGLE_SECRET_VALUE", value);
   qputenv("FAKE_GOOGLE_SECRET_DELAY", delay);
+}
+
+void GoogleAuthAsyncTest::deploymentClientDoesNotRestoreKeyringSecret() {
+  const QByteArray clientId = QByteArrayLiteral("deployment.example.invalid");
+  qputenv("OMACALENDAR_GOOGLE_CLIENT_ID", clientId);
+  qunsetenv("OMACALENDAR_GOOGLE_CLIENT_SECRET");
+  // A failed helper proves that restoreClient did not attempt a keyring lookup.
+  setHelper(QByteArrayLiteral("failure"), QByteArrayLiteral("obsolete-keyring-secret"));
+
+  GoogleAuthManager auth;
+  QSignalSpy completion(&auth, &GoogleAuthManager::clientConfigurationFinished);
+  QSignalSpy authorizationUrl(&auth, &GoogleAuthManager::authorizationUrlReady);
+  QString error;
+  QVERIFY2(auth.restoreClient(QString::fromLatin1(clientId), &error),
+           qPrintable(error));
+  QVERIFY2(auth.startAuthorization(QStringLiteral("deployment-account"), &error),
+           qPrintable(error));
+  QTRY_COMPARE_WITH_TIMEOUT(completion.count(), 1, 1000);
+  QCOMPARE(completion.first().at(0).toBool(), true);
+  QTRY_COMPARE_WITH_TIMEOUT(authorizationUrl.count(), 1, 1000);
+  auth.cancel(QStringLiteral("deployment-account"));
+
+  if (m_hadClientId) {
+    qputenv("OMACALENDAR_GOOGLE_CLIENT_ID", m_originalClientId);
+  } else {
+    qunsetenv("OMACALENDAR_GOOGLE_CLIENT_ID");
+  }
+  if (m_hadClientSecret) {
+    qputenv("OMACALENDAR_GOOGLE_CLIENT_SECRET", m_originalClientSecret);
+  } else {
+    qunsetenv("OMACALENDAR_GOOGLE_CLIENT_SECRET");
+  }
 }
 
 void GoogleAuthAsyncTest::delayedClientLookupQueuesAuthorizationWithoutBlocking() {
@@ -121,6 +165,11 @@ void GoogleAuthAsyncTest::delayedClientLookupQueuesAuthorizationWithoutBlocking(
   QString error;
   QVERIFY2(auth.restoreClient(QStringLiteral("client-id.example.invalid"), &error),
            qPrintable(error));
+  // A matching bundled-client confirmation must not cancel the in-flight
+  // keyring lookup and replace its stored key with an empty value.
+  QVERIFY2(
+      auth.configureClient(QStringLiteral("client-id.example.invalid"), {}, &error),
+      qPrintable(error));
   QVERIFY2(auth.startAuthorization(QStringLiteral("queued-account"), &error),
            qPrintable(error));
   QCOMPARE(authorizationUrl.count(), 0);

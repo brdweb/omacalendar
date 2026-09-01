@@ -23,6 +23,52 @@ option(OMACALENDAR_ENABLE_SANITIZERS
 set(OMACALENDAR_VERSION_SUFFIX "-alpha" CACHE STRING
     "Suffix appended to the numeric project version (empty for a release)")
 set(OMACALENDAR_FULL_VERSION "${PROJECT_VERSION}${OMACALENDAR_VERSION_SUFFIX}")
+option(OMACALENDAR_REQUIRE_GOOGLE_OAUTH_CONFIG
+       "Fail configuration unless release Google OAuth values are injected" OFF)
+
+# Desktop OAuth clients are public clients, so their shared client value cannot
+# be treated as a confidential runtime secret. Release automation injects the
+# values from its protected configuration into a generated, non-installed
+# header. Source builds remain credential-free and can use runtime environment
+# overrides or the credentials picker instead.
+set(OMACALENDAR_GOOGLE_OAUTH_CLIENT_ID
+    "$ENV{OMACALENDAR_BUILD_GOOGLE_CLIENT_ID}")
+set(OMACALENDAR_GOOGLE_OAUTH_CLIENT_SECRET
+    "$ENV{OMACALENDAR_BUILD_GOOGLE_CLIENT_SECRET}")
+foreach(oauth_value IN ITEMS
+        OMACALENDAR_GOOGLE_OAUTH_CLIENT_ID
+        OMACALENDAR_GOOGLE_OAUTH_CLIENT_SECRET)
+  if(NOT "${${oauth_value}}" MATCHES "^[A-Za-z0-9._-]*$")
+    message(FATAL_ERROR "${oauth_value} contains unsupported characters")
+  endif()
+endforeach()
+if((OMACALENDAR_GOOGLE_OAUTH_CLIENT_ID STREQUAL "") AND
+   (NOT OMACALENDAR_GOOGLE_OAUTH_CLIENT_SECRET STREQUAL ""))
+  message(FATAL_ERROR "Google OAuth client secret was injected without a client ID")
+endif()
+if((NOT OMACALENDAR_GOOGLE_OAUTH_CLIENT_ID STREQUAL "") AND
+   (OMACALENDAR_GOOGLE_OAUTH_CLIENT_SECRET STREQUAL ""))
+  message(FATAL_ERROR "Google OAuth client ID was injected without its client secret")
+endif()
+if(OMACALENDAR_REQUIRE_GOOGLE_OAUTH_CONFIG AND
+   OMACALENDAR_GOOGLE_OAUTH_CLIENT_ID STREQUAL "")
+  message(FATAL_ERROR
+          "Release build requires injected Google OAuth deployment configuration")
+endif()
+
+set(OMACALENDAR_GENERATED_INCLUDE_DIR
+    "${CMAKE_CURRENT_BINARY_DIR}/generated")
+file(MAKE_DIRECTORY
+     "${OMACALENDAR_GENERATED_INCLUDE_DIR}/providers/google")
+configure_file(
+  src/providers/google/googleoauthdeployment.h.in
+  "${OMACALENDAR_GENERATED_INCLUDE_DIR}/providers/google/googleoauthdeployment.h"
+  @ONLY
+)
+file(CHMOD
+  "${OMACALENDAR_GENERATED_INCLUDE_DIR}/providers/google/googleoauthdeployment.h"
+  PERMISSIONS OWNER_READ OWNER_WRITE
+)
 
 if(OMACALENDAR_ENABLE_SANITIZERS)
   if(NOT CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
@@ -63,7 +109,10 @@ add_library(omacalendar_core STATIC
   src/core/widgeteventquery.h
 )
 
-target_include_directories(omacalendar_core PUBLIC src)
+target_include_directories(omacalendar_core PUBLIC
+  src
+  "${OMACALENDAR_GENERATED_INCLUDE_DIR}"
+)
 target_link_libraries(omacalendar_core
   PUBLIC
     Qt6::Core

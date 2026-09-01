@@ -32,9 +32,13 @@ daemon does not continue running the replaced binary.
 
 ## Install from source
 
-Install the build dependencies and compile the application:
+Clone the exact app release qualified with the current widget beta, install the
+build dependencies, and compile the application:
 
 ```bash
+git clone --branch v1.0.0-alpha --depth 1 \
+  https://github.com/brdweb/omacalendar.git
+cd omacalendar
 omarchy pkg add cmake ninja gcc qt6-base qt6-declarative \
   qt6-networkauth libical libsecret pkgconf
 cmake -S . -B build -G Ninja \
@@ -46,6 +50,12 @@ cmake --install build
 systemctl --user daemon-reload
 systemctl --user enable --now omacalendard.socket
 ```
+
+Google Calendar access is currently in Google's OAuth verification stage. Until
+Google approves it for unrestricted public use, use a configured test account
+or your own Google Desktop OAuth client and expect that Google may show its
+unverified-app warning. The rest of the application and widget can be evaluated
+without a Google account.
 
 Start OmaCalendar from the Omarchy application launcher or run:
 

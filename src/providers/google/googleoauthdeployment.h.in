@@ -1,0 +1,8 @@
+#pragma once
+
+namespace omacalendar::google::deployment {
+
+inline constexpr auto kClientId = "@OMACALENDAR_GOOGLE_OAUTH_CLIENT_ID@";
+inline constexpr auto kClientSecret = "@OMACALENDAR_GOOGLE_OAUTH_CLIENT_SECRET@";
+
+}  // namespace omacalendar::google::deployment
