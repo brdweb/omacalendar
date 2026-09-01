@@ -9,11 +9,11 @@ secret, token, private calendar data, or test-account address.
 Use these values consistently in Google Cloud and the shipped application:
 
 - Application name: **OmaCalendar**
-- Homepage: <https://brdweb.github.io/omacalendar/>
-- Privacy policy: <https://brdweb.github.io/omacalendar/privacy.html>
-- Terms of use: <https://brdweb.github.io/omacalendar/terms.html>
+- Homepage: <https://omacalendar.brdweb.com/>
+- Privacy policy: <https://omacalendar.brdweb.com/privacy.html>
+- Terms of use: <https://omacalendar.brdweb.com/terms.html>
 - Support and source: <https://github.com/brdweb/omacalendar>
-- Authorized domain: `brdweb.github.io`
+- Authorized domain: `brdweb.com`
 
 The consent screen must use a project-owned support address and developer
 contact. Upload the square OmaCalendar application icon without including user
