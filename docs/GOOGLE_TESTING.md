@@ -13,6 +13,9 @@ Release automation injects both values from protected CI configuration into a
 generated build-only header. The values are not committed to Git, copied into
 the source archive, printed by the build, or installed as a separate readable
 configuration file. A release build fails closed if either value is missing.
+The same Google Desktop client pair is intentionally reused for future
+releases; do not rotate it per release. Rotation is only required if the OAuth
+client is replaced or Google revokes its generated value.
 Runtime environment values override the packaged pair for owner testing and
 rotation. PKCE protects each authorization code, and each user's refresh token
 is stored by the desktop Secret Service (`secret-tool`) rather than in the
@@ -62,8 +65,9 @@ instead.
 1. Open **Accounts & settings**.
 2. Under **Google Calendar**, optionally enter an account label.
 3. Paste the Desktop OAuth **client ID** shown in Google Cloud, then select
-   **Continue with Google in browser**. If the app was launched with deployment
-   credentials in its environment, the client-ID field is already configured.
+   **Continue with Google in browser**. A source build also needs the matching
+   shared value in `OMACALENDAR_GOOGLE_CLIENT_SECRET`. In a release package the
+   client pair is already configured, so testers do not enter either value.
 4. Complete consent in the system browser. The callback uses a random
    `127.0.0.1` loopback port, PKCE-S256, and a per-request state value.
 5. Return to OmaCalendar. The account should change from `authorizing` to

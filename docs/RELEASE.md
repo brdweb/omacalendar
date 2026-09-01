@@ -70,6 +70,13 @@ binary AUR recipes, and creates GitHub provenance/SBOM attestations. It opens a
 **draft** release and marks hyphenated versions as prereleases. Widget
 automation is separate.
 
+Before tagging, run **Release candidate** manually with the intended semantic
+version. This exercises the same protected Google Desktop client injection,
+build, test, package, SBOM, and artifact-upload path without creating a tag,
+attestation, or GitHub release. Download and install that rehearsal artifact
+for owner acceptance; only the signed-tag run produces attestations and counts
+as release evidence.
+
 ## 4. Verify draft artifacts independently
 
 Download the draft assets in a clean environment:
@@ -115,13 +122,15 @@ gh attestation verify ./omacalendar-1.0.0beta1-1-x86_64.pkg.tar.zst \
 gh attestation verify ./omacalendar-1.0.0beta1-1-x86_64.pkg.tar.zst \
   --repo brdweb/omacalendar \
   --predicate-type https://spdx.dev/Document/v2.3
-sudo pacman -U ./omacalendar-1.0.0beta1-1-x86_64.pkg.tar.zst
+yay -U ./omacalendar-1.0.0beta1-1-x86_64.pkg.tar.zst
 systemctl --user daemon-reload
 systemctl --user enable --now omacalendard.socket
 systemctl --user try-restart omacalendard.service
 ```
 
-Verify socket activation, launch, reported version, desktop entry, provider
+`yay -U` installs this local package through pacman; it does not require or add
+an AUR package base. `sudo pacman -U` is equivalent. Verify socket activation,
+launch, reported version, desktop entry, provider
 reconnect, upgrade continuity, and `pacman -Rns omacalendar` on a clean current-
 Omarchy profile. GitHub release packages do not provide automatic pacman/yay
 updates; users must install a newer release package explicitly.

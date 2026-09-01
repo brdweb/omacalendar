@@ -172,7 +172,7 @@ gh attestation verify ./omacalendar-1.0.0beta1-1-x86_64.pkg.tar.zst \
 gh attestation verify ./omacalendar-1.0.0beta1-1-x86_64.pkg.tar.zst \
   --repo brdweb/omacalendar \
   --predicate-type https://spdx.dev/Document/v2.3
-sudo pacman -U ./omacalendar-1.0.0beta1-1-x86_64.pkg.tar.zst
+yay -U ./omacalendar-1.0.0beta1-1-x86_64.pkg.tar.zst
 systemctl --user daemon-reload
 systemctl --user enable --now omacalendard.socket
 systemctl --user try-restart omacalendard.service

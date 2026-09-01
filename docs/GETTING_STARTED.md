@@ -19,7 +19,7 @@ gh attestation verify ./omacalendar-1.0.0beta1-1-x86_64.pkg.tar.zst \
 gh attestation verify ./omacalendar-1.0.0beta1-1-x86_64.pkg.tar.zst \
   --repo brdweb/omacalendar \
   --predicate-type https://spdx.dev/Document/v2.3
-sudo pacman -U ./omacalendar-1.0.0beta1-1-x86_64.pkg.tar.zst
+yay -U ./omacalendar-1.0.0beta1-1-x86_64.pkg.tar.zst
 systemctl --user daemon-reload
 systemctl --user enable --now omacalendard.socket
 systemctl --user try-restart omacalendard.service
@@ -27,7 +27,7 @@ systemctl --user try-restart omacalendard.service
 
 The attestation commands require the optional GitHub CLI. This direct package
 does not configure an update repository. Repeat the download, verification,
-`pacman -U`, and user-service refresh steps for a newer release so an active
+`yay -U` (or `pacman -U`), and user-service refresh steps for a newer release so an active
 daemon does not continue running the replaced binary.
 
 ## Install from source
@@ -51,11 +51,13 @@ systemctl --user daemon-reload
 systemctl --user enable --now omacalendard.socket
 ```
 
-Google Calendar access is currently in Google's OAuth verification stage. Until
-Google approves it for unrestricted public use, use a configured test account
-or your own Google Desktop OAuth client and expect that Google may show its
-unverified-app warning. The rest of the application and widget can be evaluated
-without a Google account.
+Google Calendar access is currently in Google's OAuth verification stage. A
+release package contains the public Desktop client configuration and requires
+no credential setup by a tester. Until Google approves unrestricted public
+use, public Google testing remains restricted and Google may show its
+unverified-app warning. Source builds may instead use a separate Google Desktop
+OAuth client as described in the test guide. The rest of the application and
+widget can be evaluated without a Google account.
 
 Start OmaCalendar from the Omarchy application launcher or run:
 
@@ -67,10 +69,10 @@ omacalendar
 
 Open **Accounts & settings**, then choose a provider:
 
-- **Google Calendar:** enter the Desktop OAuth client ID for the configured
-  Google Cloud project, select **Continue with Google in browser**, and finish
-  consent in the browser. Existing accounts may require one reauthorization
-  after the requested scopes change.
+- **Google Calendar:** in a release package, select **Continue with Google in
+  browser** and finish consent. Source builds must first provide their Google
+  Desktop client configuration. Existing accounts may require one
+  reauthorization after the requested scopes change.
 - **CalDAV:** enter the server URL and credentials or app password supplied by
   the provider.
 - **Local calendar:** create events without connecting a remote provider.

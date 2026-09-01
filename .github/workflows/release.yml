@@ -4,6 +4,13 @@ on:
   push:
     tags:
       - 'v[0-9]*.[0-9]*.[0-9]*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Semantic version to build without creating a release
+        required: true
+        default: 1.0.0-beta.1
+        type: string
 
 permissions:
   contents: write
@@ -22,7 +29,7 @@ jobs:
             appstream cmake desktop-file-utils git github-cli libical libsecret \
             ninja pkgconf qt6-base qt6-declarative qt6-networkauth systemd zstd
 
-      - name: Check out tagged source
+      - name: Check out source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           fetch-depth: 0
@@ -32,6 +39,7 @@ jobs:
         run: git config --global --add safe.directory "$PWD"
 
       - name: Verify tag and release metadata
+        if: github.event_name == 'push'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -45,22 +53,39 @@ jobs:
           fi
 
       - name: Verify candidate tree and release metadata
+        if: github.event_name == 'push'
         env:
           OMACALENDAR_GITHUB_VERIFIED_TAG: '1'
         run: packaging/release/verify-release.sh "${GITHUB_REF_NAME}"
 
+      - name: Verify rehearsal source
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          git diff --exit-code
+          packaging/release/test-versioning.sh
+
       - name: Resolve version
         id: version
         shell: bash
+        env:
+          REHEARSAL_VERSION: ${{ inputs.version }}
         run: |
-          release_version=${GITHUB_REF_NAME#v}
+          if [[ ${GITHUB_EVENT_NAME} == workflow_dispatch ]]; then
+            release_version=${REHEARSAL_VERSION}
+          else
+            release_version=${GITHUB_REF_NAME#v}
+          fi
+          source packaging/release/version-lib.sh
+          if ! validate_release_version "${release_version}"; then
+            echo "release version is not canonical semantic versioning" >&2
+            exit 1
+          fi
           numeric_version=${release_version%%-*}
           version_suffix=${release_version#"${numeric_version}"}
           is_prerelease=false
           if [[ -n ${version_suffix} ]]; then
             is_prerelease=true
           fi
-          source packaging/release/version-lib.sh
           arch_pkgver=$(arch_pkgver "${release_version}")
           {
             echo "value=${release_version}"
@@ -168,6 +193,7 @@ jobs:
           sha256sum --check SHA256SUMS
 
       - name: Attest archive provenance
+        if: github.event_name == 'push'
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4
         with:
           subject-path: |
@@ -176,6 +202,7 @@ jobs:
             artifacts/omacalendar-${{ steps.version.outputs.arch_pkgver }}-1-x86_64.pkg.tar.zst
 
       - name: Attest binary SBOM
+        if: github.event_name == 'push'
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4
         with:
           subject-path: |
@@ -191,6 +218,7 @@ jobs:
           if-no-files-found: error
 
       - name: Create draft GitHub release
+        if: github.event_name == 'push'
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_VERSION: ${{ steps.version.outputs.value }}
@@ -213,3 +241,13 @@ jobs:
               "${release_flags[@]}" \
               --title "OmaCalendar ${RELEASE_VERSION}"
           fi
+
+      - name: Summarize release rehearsal
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          {
+            echo '### Release rehearsal passed'
+            echo
+            echo 'The candidate was built with the protected Google Desktop OAuth configuration.'
+            echo 'No tag or GitHub release was created.'
+          } >>"${GITHUB_STEP_SUMMARY}"
