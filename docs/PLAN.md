@@ -2,10 +2,10 @@
 
 ## Product outcome
 
-OmaCalendar 1.0 is a local-first, keyboard-fast Omarchy calendar inspired by
-Fantastical's full calendar window. This repository releases the native Qt
-Quick application, daemon, and CLI. The optional thin Quickshell plugin lives in
-a separate repository with its own version, gates, tags, and publication path.
+OmaCalendar 1.0 is a local-first, keyboard-fast Omarchy calendar with a dense,
+full-featured desktop window. This repository releases the native Qt Quick
+application, daemon, and CLI. The optional thin Quickshell plugin lives in a
+separate repository with its own version, gates, tags, and publication path.
 No stable app 1.0 release occurs until every app phase and stable release gate
 below passes. The explicit alpha track permits a public evaluation prerelease
 without weakening those stable gates.
