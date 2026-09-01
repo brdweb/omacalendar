@@ -2,12 +2,20 @@
 
 This guide is for the pre-release owner test. Source builds do not contain an
 OAuth credential. Paste the client ID from a Google Desktop OAuth client in a
-test project, or provide `OMACALENDAR_GOOGLE_CLIENT_ID` and the optional
-`OMACALENDAR_GOOGLE_CLIENT_SECRET` in the app environment. Installed desktop
-applications are public OAuth clients, but keeping deployment configuration
-out of source prevents accidental reuse and makes secret scanning meaningful.
-PKCE protects each authorization flow. The resulting refresh token is stored
-by the desktop Secret Service (`secret-tool`) and is never written to the
+test project, or provide `OMACALENDAR_GOOGLE_CLIENT_ID` and the matching
+`OMACALENDAR_GOOGLE_CLIENT_SECRET` in the app environment. Google currently
+generates a shared value for Desktop OAuth clients and rejects OmaCalendar's
+token exchange when that value is omitted. It is still public application
+configuration: anyone can extract it from a distributed desktop binary, so it
+must never be used as proof that the caller is trusted.
+
+Release automation injects both values from protected CI configuration into a
+generated build-only header. The values are not committed to Git, copied into
+the source archive, printed by the build, or installed as a separate readable
+configuration file. A release build fails closed if either value is missing.
+Runtime environment values override the packaged pair for owner testing and
+rotation. PKCE protects each authorization code, and each user's refresh token
+is stored by the desktop Secret Service (`secret-tool`) rather than in the
 calendar database.
 
 ## 1. Project configuration

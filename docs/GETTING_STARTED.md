@@ -4,11 +4,11 @@ OmaCalendar `1.0.0-alpha` is an evaluation release for Omarchy Linux. Back up
 important calendar data before testing it, and do not make the alpha your only
 copy of an important device-only calendar.
 
-## Install the beta package from GitHub
+## Install a future beta package from GitHub
 
-The `v1.0.0-beta.1` GitHub release provides a native package for current
-Omarchy on x86-64. In an empty directory, download and verify it before
-installation:
+When `v1.0.0-beta.1` is published, its GitHub release will provide a native
+package for current Omarchy on x86-64. In an empty directory, download and
+verify it before installation:
 
 ```bash
 curl -LO https://github.com/brdweb/omacalendar/releases/download/v1.0.0-beta.1/omacalendar-1.0.0beta1-1-x86_64.pkg.tar.zst
@@ -32,9 +32,13 @@ daemon does not continue running the replaced binary.
 
 ## Install from source
 
-Install the build dependencies and compile the application:
+Clone the exact app release qualified with the current widget beta, install the
+build dependencies, and compile the application:
 
 ```bash
+git clone --branch v1.0.0-alpha --depth 1 \
+  https://github.com/brdweb/omacalendar.git
+cd omacalendar
 omarchy pkg add cmake ninja gcc qt6-base qt6-declarative \
   qt6-networkauth libical libsecret pkgconf
 cmake -S . -B build -G Ninja \
@@ -46,6 +50,12 @@ cmake --install build
 systemctl --user daemon-reload
 systemctl --user enable --now omacalendard.socket
 ```
+
+Google Calendar access is currently in Google's OAuth verification stage. Until
+Google approves it for unrestricted public use, use a configured test account
+or your own Google Desktop OAuth client and expect that Google may show its
+unverified-app warning. The rest of the application and widget can be evaluated
+without a Google account.
 
 Start OmaCalendar from the Omarchy application launcher or run:
 

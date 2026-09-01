@@ -235,6 +235,7 @@ void ProviderTest::googleOAuthLoopbackConfiguration() {
   QCOMPARE(query.queryItemValue(QStringLiteral("code_challenge_method")),
            QStringLiteral("S256"));
   QVERIFY(!query.queryItemValue(QStringLiteral("code_challenge")).isEmpty());
+  QVERIFY(!query.hasQueryItem(QStringLiteral("include_granted_scopes")));
   const QString scopes = query.queryItemValue(QStringLiteral("scope"));
   QVERIFY(scopes.contains(
       QStringLiteral("https://www.googleapis.com/auth/calendar.events")));

@@ -73,6 +73,13 @@ the final owner acceptance pass remain open.
 The detailed evidence and unchecked gates are maintained in [the implementation
 plan](docs/PLAN.md).
 
+Google Calendar access is currently in Google's OAuth verification stage and
+has not yet been approved for unrestricted public use. Until Google completes
+that review, authorization may be limited to configured test users and Google
+may display its unverified-app warning. Local calendars, CalDAV, ICS, and the
+widget's connection to the local OmaCalendar daemon do not depend on Google
+approval.
+
 ## Architecture
 
 `omacalendard` is the only process allowed to write the SQLite database, access

@@ -3,12 +3,16 @@
 #include <QAbstractOAuth>
 #include <QAbstractOAuthReplyHandler>
 #include <QHostAddress>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QMetaEnum>
+#include <QNetworkReply>
 #include <QOAuth2AuthorizationCodeFlow>
 #include <QOAuthHttpServerReplyHandler>
 #include <QPointer>
 #include <QTimer>
 #include <QUrl>
+#include <algorithm>
 
 #include "core/domain.h"
 #include "providers/google/googleoauthconfig.h"
@@ -31,6 +35,75 @@ QString oauthErrorName(const QAbstractOAuth::Error error) {
   return name == nullptr ? QStringLiteral("oauth_error") : QString::fromLatin1(name);
 }
 
+QPair<QString, QString> tokenErrorDetails(const QString& errorString) {
+  const qsizetype objectStart = errorString.indexOf(QLatin1Char('{'));
+  const qsizetype objectEnd = errorString.lastIndexOf(QLatin1Char('}'));
+  if (objectStart >= 0 && objectEnd >= objectStart) {
+    QJsonParseError parseError;
+    const QJsonDocument document = QJsonDocument::fromJson(
+        errorString.sliced(objectStart, objectEnd - objectStart + 1).toUtf8(),
+        &parseError);
+    if (parseError.error == QJsonParseError::NoError && document.isObject()) {
+      const QJsonObject object = document.object();
+      QString code = object.value(QStringLiteral("error")).toString().left(64);
+      QString description =
+          object.value(QStringLiteral("error_description")).toString().simplified();
+      description = description.left(300);
+      const bool safeCode =
+          !code.isEmpty() && std::all_of(code.cbegin(), code.cend(), [](const QChar c) {
+            return c.isLetterOrNumber() || c == QLatin1Char('_') ||
+                   c == QLatin1Char('-');
+          });
+      if (safeCode) {
+        return {code, description};
+      }
+    }
+  }
+
+  // Some Qt versions reduce the response to an error string. Retain only a
+  // bounded allowlist code; never surface the raw response because it could
+  // contain credentials or callback material.
+  static const QStringList knownCodes = {
+      QStringLiteral("invalid_client"), QStringLiteral("invalid_request"),
+      QStringLiteral("invalid_grant"), QStringLiteral("unauthorized_client"),
+      QStringLiteral("access_denied")};
+  for (const QString& code : knownCodes) {
+    if (errorString.contains(code, Qt::CaseInsensitive)) {
+      return {code, {}};
+    }
+  }
+  return {};
+}
+
+class GoogleOAuthReplyHandler final : public QOAuthHttpServerReplyHandler {
+ public:
+  using TokenErrorObserver =
+      std::function<void(const QString& code, const QString& description)>;
+
+  GoogleOAuthReplyHandler(const QHostAddress& address, const quint16 port,
+                          QObject* parent)
+      : QOAuthHttpServerReplyHandler(address, port, parent) {}
+
+  void setTokenErrorObserver(TokenErrorObserver observer) {
+    m_tokenErrorObserver = std::move(observer);
+  }
+
+ protected:
+  void networkReplyFinished(QNetworkReply* reply) override {
+    if (reply != nullptr && m_tokenErrorObserver) {
+      const QByteArray response = reply->peek(64 * 1024);
+      const auto [code, description] = tokenErrorDetails(QString::fromUtf8(response));
+      if (!code.isEmpty()) {
+        m_tokenErrorObserver(code, description);
+      }
+    }
+    QOAuthHttpServerReplyHandler::networkReplyFinished(reply);
+  }
+
+ private:
+  TokenErrorObserver m_tokenErrorObserver;
+};
+
 }  // namespace
 
 struct GoogleAuthManager::Session final {
@@ -41,6 +114,7 @@ struct GoogleAuthManager::Session final {
   bool interactive = false;
   bool completionEmitted = false;
   bool failureInProgress = false;
+  bool failureEmitted = false;
   bool refreshInFlight = false;
   bool refreshCompletionNotified = false;
   bool grantObserved = false;
@@ -108,6 +182,22 @@ bool GoogleAuthManager::configureClient(const QString& clientId,
     }
     return false;
   }
+  if (normalizedClientId == m_clientId && clientSecret.isEmpty() &&
+      (!m_clientSecret.isEmpty() ||
+       m_clientSecretOperation != kInvalidSecretStoreOperationId)) {
+    // The GUI may confirm the deployment client while daemon startup is still
+    // restoring its matching shared key. Do not cancel that lookup or replace
+    // an already restored key with an empty public-client fallback.
+    if (m_clientReady) {
+      const quint64 generation = m_clientSecretGeneration;
+      QTimer::singleShot(0, this, [this, generation]() {
+        if (generation == m_clientSecretGeneration) {
+          emit clientConfigurationFinished(true, {}, {});
+        }
+      });
+    }
+    return true;
+  }
   cancelClientSecretOperation();
   m_clientId = normalizedClientId;
   m_clientSecret = clientSecret;
@@ -148,13 +238,25 @@ bool GoogleAuthManager::restoreClient(const QString& clientId, QString* errorMes
     return false;
   }
   cancelClientSecretOperation();
-  // Desktop/public clients may legitimately have no client secret. An absent
-  // keyring item therefore resolves to the configured fallback (usually empty).
   m_clientId = normalizedClientId;
-  m_clientSecret = normalizedClientId == defaultOAuthClientId()
-                       ? defaultOAuthClientSecret()
-                       : QString();
+  const bool deploymentClient = normalizedClientId == defaultOAuthClientId();
+  // A distributed desktop application is a public OAuth client: PKCE protects
+  // the authorization code, while a shared key embedded in the package cannot
+  // remain confidential. Deployment configuration is therefore authoritative
+  // and must never inherit an obsolete keyring value left by an older build.
+  m_clientSecret = deploymentClient ? defaultOAuthClientSecret() : QString();
   m_clientReady = false;
+  if (deploymentClient) {
+    m_clientReady = true;
+    const quint64 generation = m_clientSecretGeneration;
+    QTimer::singleShot(0, this, [this, generation]() {
+      if (generation == m_clientSecretGeneration) {
+        emit clientConfigurationFinished(true, {}, {});
+        continuePendingAuthorizations();
+      }
+    });
+    return true;
+  }
   const quint64 generation = m_clientSecretGeneration;
   m_clientSecretOperation = m_secrets.lookupAsync(
       normalizedClientId, QString::fromLatin1(kClientSecretKind),
@@ -219,6 +321,8 @@ GoogleAuthManager::Session* GoogleAuthManager::createSession(const QString& acco
   session->flow->setAuthorizationUrl(QUrl(QString::fromLatin1(kAuthorizationUrl)));
   session->flow->setTokenUrl(QUrl(QString::fromLatin1(kTokenUrl)));
   session->flow->setPkceMethod(QOAuth2AuthorizationCodeFlow::PkceMethod::S256, 64);
+  // Installed applications request their complete scope set up front. Google
+  // does not support incremental authorization for native applications.
   session->flow->setRequestedScopeTokens({
       QByteArrayLiteral("https://www.googleapis.com/auth/calendar.events"),
       QByteArrayLiteral("https://www.googleapis.com/auth/calendar.calendars"),
@@ -237,19 +341,20 @@ GoogleAuthManager::Session* GoogleAuthManager::createSession(const QString& acco
           return;
         }
         parameters->insert(QStringLiteral("access_type"), QStringLiteral("offline"));
-        parameters->insert(QStringLiteral("include_granted_scopes"),
-                           QStringLiteral("true"));
         if (interactive) {
           parameters->insert(QStringLiteral("prompt"), QStringLiteral("consent"));
         }
       });
 
+  const QString sessionAccountId = session->accountId;
+  const quint64 sessionGeneration = session->generation;
+
   if (interactive) {
     // Every QOAuthHttpServerReplyHandler constructor starts listening. Use
     // the address/port constructor directly; calling listen() a second time
     // fails because the random loopback port is already active.
-    session->replyHandler =
-        new QOAuthHttpServerReplyHandler(QHostAddress::LocalHost, 0, this);
+    auto* replyHandler = new GoogleOAuthReplyHandler(QHostAddress::LocalHost, 0, this);
+    session->replyHandler = replyHandler;
     session->replyHandler->setCallbackHost(QStringLiteral("127.0.0.1"));
     session->replyHandler->setCallbackPath(QStringLiteral("/oauth2callback"));
     session->replyHandler->setCallbackText(QStringLiteral(
@@ -266,11 +371,49 @@ GoogleAuthManager::Session* GoogleAuthManager::createSession(const QString& acco
       delete session;
       return nullptr;
     }
+    replyHandler->setTokenErrorObserver(
+        [this, sessionAccountId, sessionGeneration](const QString& code,
+                                                    const QString& description) {
+          Session* active = activeSession(sessionAccountId, sessionGeneration);
+          if (active != nullptr) {
+            fail(active, code,
+                 description.isEmpty() ? QStringLiteral("Google token exchange failed")
+                                       : description);
+          }
+        });
+    // Observe the token endpoint response before QOAuth2AuthorizationCodeFlow
+    // translates it to the broader requestFailed signal. This preserves a
+    // sanitized provider error without logging raw response or callback data.
+    connect(
+        session->replyHandler, &QAbstractOAuthReplyHandler::tokenRequestErrorOccurred,
+        this,
+        [this, sessionAccountId, sessionGeneration](const QAbstractOAuth::Error error,
+                                                    const QString& errorString) {
+          Session* active = activeSession(sessionAccountId, sessionGeneration);
+          if (active == nullptr) {
+            return;
+          }
+          const auto [serverCode, serverDescription] = tokenErrorDetails(errorString);
+          if (!serverCode.isEmpty()) {
+            fail(active, serverCode,
+                 serverDescription.isEmpty()
+                     ? QStringLiteral("Google token exchange failed")
+                     : serverDescription);
+            return;
+          }
+          const QString fallbackCode = oauthErrorName(error);
+          QTimer::singleShot(
+              0, this, [this, sessionAccountId, sessionGeneration, fallbackCode]() {
+                Session* pending = activeSession(sessionAccountId, sessionGeneration);
+                if (pending != nullptr) {
+                  fail(pending, fallbackCode,
+                       QStringLiteral("Google token exchange failed"));
+                }
+              });
+        });
     session->flow->setReplyHandler(session->replyHandler);
   }
 
-  const QString sessionAccountId = session->accountId;
-  const quint64 sessionGeneration = session->generation;
   connect(session->flow, &QAbstractOAuth::authorizeWithBrowser, this,
           [this, sessionAccountId, sessionGeneration](const QUrl& url) {
             if (activeSession(sessionAccountId, sessionGeneration) == nullptr) {
@@ -318,12 +461,15 @@ GoogleAuthManager::Session* GoogleAuthManager::createSession(const QString& acco
   connect(
       session->flow, &QAbstractOAuth::requestFailed, this,
       [this, sessionAccountId, sessionGeneration](const QAbstractOAuth::Error error) {
-        Session* active = activeSession(sessionAccountId, sessionGeneration);
-        if (active == nullptr) {
-          return;
-        }
-        fail(active, oauthErrorName(error),
-             QStringLiteral("Google authorization request failed"));
+        const QString fallbackCode = oauthErrorName(error);
+        QTimer::singleShot(
+            0, this, [this, sessionAccountId, sessionGeneration, fallbackCode]() {
+              Session* active = activeSession(sessionAccountId, sessionGeneration);
+              if (active != nullptr) {
+                fail(active, fallbackCode,
+                     QStringLiteral("Google authorization request failed"));
+              }
+            });
       });
   connect(session->flow, &QAbstractOAuth2::serverReportedErrorOccurred, this,
           [this, sessionAccountId, sessionGeneration](
@@ -336,19 +482,6 @@ GoogleAuthManager::Session* GoogleAuthManager::createSession(const QString& acco
                  description.isEmpty() ? QStringLiteral("Google rejected authorization")
                                        : description.left(300));
           });
-  if (session->replyHandler != nullptr) {
-    connect(session->replyHandler,
-            &QAbstractOAuthReplyHandler::tokenRequestErrorOccurred, this,
-            [this, sessionAccountId, sessionGeneration](
-                const QAbstractOAuth::Error error, const QString&) {
-              Session* active = activeSession(sessionAccountId, sessionGeneration);
-              if (active == nullptr) {
-                return;
-              }
-              fail(active, oauthErrorName(error),
-                   QStringLiteral("Google token exchange failed"));
-            });
-  }
   m_sessions.insert(accountId, session);
   return session;
 }
@@ -582,12 +715,13 @@ void GoogleAuthManager::fail(Session* session, const QString& code,
                              const QString& message) {
   if (session == nullptr ||
       activeSession(session->accountId, session->generation) != session ||
-      session->failureInProgress) {
+      session->failureInProgress || session->failureEmitted) {
     return;
   }
   const QString accountId = session->accountId;
   const quint64 generation = session->generation;
   session->failureInProgress = true;
+  session->failureEmitted = true;
   if (session->replyHandler != nullptr) {
     session->replyHandler->close();
   }
