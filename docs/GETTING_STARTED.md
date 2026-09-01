@@ -4,11 +4,11 @@ OmaCalendar `1.0.0-alpha` is an evaluation release for Omarchy Linux. Back up
 important calendar data before testing it, and do not make the alpha your only
 copy of an important device-only calendar.
 
-## Install the beta package from GitHub
+## Install a future beta package from GitHub
 
-The `v1.0.0-beta.1` GitHub release provides a native package for current
-Omarchy on x86-64. In an empty directory, download and verify it before
-installation:
+When `v1.0.0-beta.1` is published, its GitHub release will provide a native
+package for current Omarchy on x86-64. In an empty directory, download and
+verify it before installation:
 
 ```bash
 curl -LO https://github.com/brdweb/omacalendar/releases/download/v1.0.0-beta.1/omacalendar-1.0.0beta1-1-x86_64.pkg.tar.zst
