@@ -72,9 +72,10 @@ automation is separate.
 
 Before tagging, run **Release candidate** manually with the intended semantic
 version. This exercises the same protected Google Desktop client injection,
-build, test, package, SBOM, attestation, and artifact-upload path without
-creating a tag or GitHub release. Download and install that rehearsal artifact
-for owner acceptance; only the signed-tag run is release evidence.
+build, test, package, SBOM, and artifact-upload path without creating a tag,
+attestation, or GitHub release. Download and install that rehearsal artifact
+for owner acceptance; only the signed-tag run produces attestations and counts
+as release evidence.
 
 ## 4. Verify draft artifacts independently
 
