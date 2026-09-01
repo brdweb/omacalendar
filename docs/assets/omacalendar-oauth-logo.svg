@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img">
+  <title>OmaCalendar OAuth logo</title>
+  <defs>
+    <linearGradient id="surface" x1="18" y1="12" x2="112" y2="116"
+                    gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#8aadf4"/>
+      <stop offset="1" stop-color="#7dc4e4"/>
+    </linearGradient>
+  </defs>
+  <rect x="8" y="8" width="112" height="112" rx="26" fill="#181926"/>
+  <path d="M8 42C8 23 20 8 39 8h50c19 0 31 15 31 34v8H8z"
+        fill="url(#surface)"/>
+  <rect x="30" y="3" width="11" height="28" rx="5.5" fill="#cad3f5"/>
+  <rect x="87" y="3" width="11" height="28" rx="5.5" fill="#cad3f5"/>
+  <text x="64" y="91" fill="#cad3f5" font-family="DejaVu Sans, sans-serif"
+        font-size="38" font-weight="800" letter-spacing="-2.5"
+        text-anchor="middle">OMA</text>
+</svg>
