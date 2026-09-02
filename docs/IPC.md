@@ -195,8 +195,9 @@ additive-only:
   found there.
 - A renamed method keeps its old name callable as an alias, exactly like the
   existing `accounts.addGoogle`/`google.oauthStart`,
-  `accounts.addCalDav`/`accounts.createCalDav`, and `outbox.list`/
-  `outbox.retry` pairs documented above. A rename is not a removal.
+  `accounts.addCalDav`/`accounts.createCalDav`, `outbox.list`/
+  `operations.list`, and `outbox.retry`/`operations.retry` pairs documented
+  above. A rename is not a removal.
 
 A client that only calls methods it found in `system.info`'s `methods` array,
 treats every result field as optional unless this document marks it required,

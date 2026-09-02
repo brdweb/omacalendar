@@ -3,9 +3,10 @@
 ## Status
 
 Design record only. No implementation, no new tables, no new IPC methods.
-Tasks remain out of 1.0 scope per [PLAN.md](PLAN.md); this note exists so the
-schema question is answered before schema 2 freezes, per
-[ROADMAP.md](ROADMAP.md#tasks-and-the-schema-2-decision).
+Tasks remain out of 1.0 scope per
+[PLAN.md](PLAN.md#excluded-from-10); this note exists so the schema
+question is answered while schema 2 is still open to change, before it
+freezes for a stable release.
 
 ## Question
 

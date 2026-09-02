@@ -944,6 +944,19 @@ From </source>
     </message>
 </context>
 <context>
+    <name>AppAccordionSection</name>
+    <message>
+        <location filename="../qml/components/AppAccordionSection.qml" line="25"/>
+        <source>Collapse </source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../qml/components/AppAccordionSection.qml" line="25"/>
+        <source>Expand </source>
+        <translation type="unfinished"></translation>
+    </message>
+</context>
+<context>
     <name>AppCloseButton</name>
     <message>
         <location filename="../qml/components/AppCloseButton.qml" line="16"/>
