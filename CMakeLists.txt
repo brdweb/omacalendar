@@ -89,6 +89,9 @@ find_package(Qt6 6.8 REQUIRED COMPONENTS
   QuickControls2
   Sql
 )
+# Optional: only needed for the lupdate_ts translation-extraction target, not
+# for building or running the application.
+find_package(Qt6 6.8 QUIET COMPONENTS LinguistTools)
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(LibIcal REQUIRED IMPORTED_TARGET libical>=4.0)
 
@@ -196,6 +199,20 @@ target_link_libraries(omacalendarctl
 
 if(OMACALENDAR_BUILD_APP)
   add_subdirectory(src/app)
+  if(Qt6LinguistTools_FOUND)
+    # `ninja lupdate_ts` (or the aggregate `update_translations` target)
+    # regenerates src/app/translations/omacalendar_en.ts from qsTr()/tr()
+    # call sites. Not part of the default build; requires qt6-tools.
+    qt6_add_lupdate(
+      SOURCE_TARGETS omacalendar
+      TS_FILES "${CMAKE_CURRENT_SOURCE_DIR}/src/app/translations/omacalendar_en.ts"
+      LUPDATE_TARGET lupdate_ts
+    )
+  else()
+    message(STATUS
+      "Qt6 LinguistTools not found; the lupdate_ts translation-extraction "
+      "target is unavailable (install qt6-tools to enable it)")
+  endif()
 endif()
 
 install(TARGETS omacalendard omacalendarctl

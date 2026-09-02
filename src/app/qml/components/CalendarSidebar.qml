@@ -50,7 +50,7 @@ Rectangle {
                 iconText: "‹"
                 quiet: true
                 compact: true
-                toolTipText: "Previous month"
+                toolTipText: qsTr("Previous month")
                 onClicked: {
                     root.monthDate = new Date(root.monthDate.getFullYear(),
                                               root.monthDate.getMonth() - 1, 1)
@@ -69,7 +69,7 @@ Rectangle {
                 iconText: "›"
                 quiet: true
                 compact: true
-                toolTipText: "Next month"
+                toolTipText: qsTr("Next month")
                 onClicked: {
                     root.monthDate = new Date(root.monthDate.getFullYear(),
                                               root.monthDate.getMonth() + 1, 1)
@@ -119,14 +119,14 @@ Rectangle {
             Layout.fillWidth: true
             SectionLabel {
                 Layout.fillWidth: true
-                text: "CALENDAR SETS"
+                text: qsTr("CALENDAR SETS")
             }
             AppButton {
                 visible: root.modelCount(root.effectiveCalendarSetsModel) > 0
                 iconText: "+"
                 quiet: true
                 compact: true
-                toolTipText: "Manage calendar sets"
+                toolTipText: qsTr("Manage calendar sets")
                 onClicked: root.settingsRequested()
             }
         }
@@ -138,10 +138,10 @@ Rectangle {
             Repeater {
                 model: root.modelCount(root.effectiveCalendarSetsModel) > 0
                        ? root.effectiveCalendarSetsModel
-                       : [{"id": "", "name": "All calendars"}]
+                       : [{"id": "", "name": qsTr("All calendars")}]
                 delegate: AppButton {
                     required property var modelData
-                    text: modelData.name || "Calendar set"
+                    text: modelData.name || qsTr("Calendar set")
                     compact: true
                     quiet: String(modelData.id || "") !== root.activeSetId
                     primary: String(modelData.id || "") === root.activeSetId
@@ -154,7 +154,7 @@ Rectangle {
             Layout.fillWidth: true
             SectionLabel {
                 Layout.fillWidth: true
-                text: "CALENDARS"
+                text: qsTr("CALENDARS")
             }
             Text {
                 text: root.modelCount(root.effectiveCalendarsModel)
@@ -181,7 +181,7 @@ Rectangle {
                 padding: 0
                 hoverEnabled: true
                 Accessible.name: (root.calendarIsVisible(modelData.id)
-                                  ? "Hide " : "Show ") + modelData.name
+                                  ? qsTr("Hide ") : qsTr("Show ")) + modelData.name
                 onClicked: root.calendarVisibilityRequested(
                                modelData.id,
                                !root.calendarIsVisible(modelData.id))
@@ -215,7 +215,7 @@ Rectangle {
                     }
                     Text {
                         Layout.fillWidth: true
-                        text: calendarDelegate.modelData.name || "Calendar"
+                        text: calendarDelegate.modelData.name || qsTr("Calendar")
                         color: root.calendarIsVisible(calendarDelegate.modelData.id)
                                ? Theme.text : Theme.mutedText
                         elide: Text.ElideRight
@@ -223,7 +223,7 @@ Rectangle {
                     }
                     Text {
                         visible: calendarDelegate.modelData.readOnly === true
-                        text: "Read only"
+                        text: qsTr("Read only")
                         color: Theme.mutedText
                         font.pixelSize: Theme.microFontSize
                     }
@@ -235,8 +235,8 @@ Rectangle {
                 anchors.centerIn: parent
                 width: Math.min(220, parent.width - 20)
                 iconText: "◌"
-                title: "No calendars"
-                description: "Connect an account or create a local calendar."
+                title: qsTr("No calendars")
+                description: qsTr("Connect an account or create a local calendar.")
             }
         }
 
@@ -253,14 +253,14 @@ Rectangle {
             ItemDelegate {
                 Layout.fillWidth: true
                 implicitHeight: 38
-                text: "Invitations"
+                text: qsTr("Invitations")
                 icon.name: "mail-unread-symbolic"
                 onClicked: root.panelRequested("invitations")
                 contentItem: RowLayout {
                     Text { text: "◇"; color: Theme.mutedText }
                     Text {
                         Layout.fillWidth: true
-                        text: "Invitations"
+                        text: qsTr("Invitations")
                         color: Theme.text
                         font.pixelSize: Theme.smallFontSize
                     }
@@ -279,7 +279,7 @@ Rectangle {
                     Text { text: "⚙"; color: Theme.mutedText }
                     Text {
                         Layout.fillWidth: true
-                        text: "Accounts & settings"
+                        text: qsTr("Accounts & settings")
                         color: Theme.text
                         font.pixelSize: Theme.smallFontSize
                     }

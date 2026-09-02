@@ -10,7 +10,7 @@ Dialog {
     property var eventData: ({})
     property var contextData: ({})
     property var baseOptions: ({})
-    property string actionLabel: "Change event"
+    property string actionLabel: qsTr("Change event")
     property bool futureScopeSupported: false
     readonly property bool recurring: Boolean(eventData.recurrenceRule
                                                || eventData.recurrenceId)
@@ -24,7 +24,7 @@ Dialog {
     anchors.centerIn: Overlay.overlay
     width: Math.min(480, Overlay.overlay ? Overlay.overlay.width - 48 : 480)
     modal: true
-    title: actionLabel + "?"
+    title: actionLabel + qsTr("?")
     standardButtons: Dialog.Cancel
     closePolicy: Popup.CloseOnEscape
 
@@ -44,19 +44,19 @@ Dialog {
     }
 
     function recurrenceChoices() {
-        const choices = [{"text": "Choose recurrence scope…", "value": ""}]
+        const choices = [{"text": qsTr("Choose recurrence scope…"), "value": ""}]
         if (String(eventData.recurrenceId || "").length > 0) {
-            choices.push({"text": "This occurrence", "value": "occurrence"})
+            choices.push({"text": qsTr("This occurrence"), "value": "occurrence"})
             if (futureScopeSupported)
-                choices.push({"text": "This and future occurrences", "value": "future"})
+                choices.push({"text": qsTr("This and future occurrences"), "value": "future"})
         }
-        choices.push({"text": "Entire series", "value": "series"})
+        choices.push({"text": qsTr("Entire series"), "value": "series"})
         return choices
     }
 
     function openFor(value, label, context, options, supportsFuture) {
         eventData = value || ({})
-        actionLabel = String(label || "Change event")
+        actionLabel = String(label || qsTr("Change event"))
         contextData = context || ({})
         baseOptions = options || ({})
         futureScopeSupported = supportsFuture === true
@@ -87,7 +87,7 @@ Dialog {
 
         Text {
             Layout.fillWidth: true
-            text: root.eventData.summary || "Untitled event"
+            text: root.eventData.summary || qsTr("Untitled event")
             color: Theme.text
             font.pixelSize: Theme.fontSize
             font.weight: Font.DemiBold
@@ -96,7 +96,7 @@ Dialog {
         Text {
             visible: root.recurring
             Layout.fillWidth: true
-            text: "Choose exactly which part of the recurring event to change."
+            text: qsTr("Choose exactly which part of the recurring event to change.")
             color: Theme.mutedText
             font.pixelSize: Theme.smallFontSize
             wrapMode: Text.Wrap
@@ -109,12 +109,12 @@ Dialog {
             model: root.recurrenceChoices()
             textRole: "text"
             valueRole: "value"
-            Accessible.name: "Recurring event scope"
+            Accessible.name: qsTr("Recurring event scope")
         }
         Text {
             visible: root.hasGuests
             Layout.fillWidth: true
-            text: "This event has guests. Choose whether the provider should notify them."
+            text: qsTr("This event has guests. Choose whether the provider should notify them.")
             color: Theme.mutedText
             font.pixelSize: Theme.smallFontSize
             wrapMode: Text.Wrap
@@ -125,14 +125,14 @@ Dialog {
             visible: root.hasGuests
             Layout.fillWidth: true
             model: [
-                {"text": "Choose guest notification policy…", "value": ""},
-                {"text": "Do not notify guests", "value": "none"},
-                {"text": "Notify external guests only", "value": "externalOnly"},
-                {"text": "Notify all guests", "value": "all"}
+                {"text": qsTr("Choose guest notification policy…"), "value": ""},
+                {"text": qsTr("Do not notify guests"), "value": "none"},
+                {"text": qsTr("Notify external guests only"), "value": "externalOnly"},
+                {"text": qsTr("Notify all guests"), "value": "all"}
             ]
             textRole: "text"
             valueRole: "value"
-            Accessible.name: "Guest notification policy"
+            Accessible.name: qsTr("Guest notification policy")
         }
         RowLayout {
             Layout.fillWidth: true

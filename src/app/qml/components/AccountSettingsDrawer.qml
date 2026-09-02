@@ -50,7 +50,7 @@ Drawer {
     signal removeCalendarSetRequested(string calendarSetId)
 
     function buildTimeZoneOptions() {
-        const result = [{"text": "System default — " + systemTimeZoneId,
+        const result = [{"text": qsTr("System default — ") + systemTimeZoneId,
                          "value": ""}]
         for (let index = 0; index < availableTimeZoneIds.length; ++index) {
             const id = String(availableTimeZoneIds[index])
@@ -75,7 +75,7 @@ Drawer {
             const calendar = calendars[index]
             if (calendar && calendar.enabled !== false
                     && calendar.readOnly !== true) {
-                result.push({"text": String(calendar.name || "Calendar"),
+                result.push({"text": String(calendar.name || qsTr("Calendar")),
                              "value": String(calendar.id || "")})
             }
         }
@@ -147,20 +147,20 @@ Drawer {
             Layout.margins: 20
             spacing: 10
             AppCloseButton {
-                toolTipText: "Close settings"
+                toolTipText: qsTr("Close settings")
                 onClicked: root.close()
             }
             ColumnLayout {
                 Layout.fillWidth: true
                 spacing: 1
                 Text {
-                    text: "Accounts & settings"
+                    text: qsTr("Accounts & settings")
                     color: Theme.text
                     font.pixelSize: Theme.titleFontSize
                     font.weight: Font.Bold
                 }
                 Text {
-                    text: "Credentials stay in your desktop keyring."
+                    text: qsTr("Credentials stay in your desktop keyring.")
                     color: Theme.mutedText
                     font.pixelSize: Theme.smallFontSize
                 }
@@ -171,9 +171,9 @@ Drawer {
             id: settingsTabs
             Layout.fillWidth: true
             background: Rectangle { color: Theme.darkBackground }
-            AppTabButton { text: "Accounts" }
-            AppTabButton { text: "Calendars" }
-            AppTabButton { text: "Preferences" }
+            AppTabButton { text: qsTr("Accounts") }
+            AppTabButton { text: qsTr("Calendars") }
+            AppTabButton { text: qsTr("Preferences") }
         }
 
         StackLayout {
@@ -192,7 +192,7 @@ Drawer {
 
                     Item { Layout.preferredHeight: 5 }
                     AppAccordionSection {
-                        title: "Connected accounts"
+                        title: qsTr("Connected accounts")
                         detail: String(root.accounts.length)
                         expanded: true
 
@@ -214,7 +214,7 @@ Drawer {
                                 spacing: 10
                                 StatusBadge {
                                     dotOnly: true
-                                    text: accountCard.modelData.authStatus || "unknown"
+                                    text: accountCard.modelData.authStatus || qsTr("unknown")
                                     tone: accountCard.modelData.authStatus === "connected"
                                           ? "success"
                                           : accountCard.modelData.authStatus === "reauthorization_required"
@@ -227,7 +227,7 @@ Drawer {
                                         Layout.fillWidth: true
                                         text: accountCard.modelData.displayName
                                               || accountCard.modelData.principal
-                                              || "Calendar account"
+                                              || qsTr("Calendar account")
                                         color: Theme.text
                                         font.pixelSize: Theme.fontSize
                                         font.weight: Font.DemiBold
@@ -235,9 +235,9 @@ Drawer {
                                     }
                                     Text {
                                         Layout.fillWidth: true
-                                        text: String(accountCard.modelData.provider || "calendar").toUpperCase()
+                                        text: String(accountCard.modelData.provider || qsTr("calendar")).toUpperCase()
                                               + " · "
-                                              + String(accountCard.modelData.authStatus || "connected").replace(/_/g, " ")
+                                              + String(accountCard.modelData.authStatus || qsTr("connected")).replace(/_/g, " ")
                                         color: Theme.mutedText
                                         font.pixelSize: Theme.microFontSize
                                         elide: Text.ElideRight
@@ -246,7 +246,7 @@ Drawer {
                                 AppButton {
                                     visible: accountCard.modelData.provider !== "local"
                                     text: accountCard.modelData.provider === "ics"
-                                          ? "Refresh" : "Sync"
+                                          ? qsTr("Refresh") : qsTr("Sync")
                                     compact: true
                                     quiet: true
                                     enabled: root.connected && !root.busy
@@ -259,7 +259,7 @@ Drawer {
                                                  === "reauthorization_required"
                                                  || accountCard.modelData.authStatus
                                                     === "disconnected")
-                                    text: "Reauthorize"
+                                    text: qsTr("Reauthorize")
                                     compact: true
                                     primary: true
                                     onClicked: root.reauthorizeAccountRequested(
@@ -272,7 +272,7 @@ Drawer {
                                           === "reauthorization_required"
                                           || accountCard.modelData.authStatus
                                              === "disconnected"
-                                          ? "Reconnect" : "Credentials"
+                                          ? qsTr("Reconnect") : qsTr("Credentials")
                                     compact: true
                                     primary: accountCard.modelData.authStatus
                                              === "reauthorization_required"
@@ -284,7 +284,7 @@ Drawer {
                                 }
                                 AppButton {
                                     visible: accountCard.modelData.provider !== "local"
-                                    text: "Remove"
+                                    text: qsTr("Remove")
                                     quiet: true
                                     compact: true
                                     destructive: true
@@ -299,13 +299,13 @@ Drawer {
                             Layout.fillWidth: true
                             Layout.preferredHeight: 145
                             iconText: "◌"
-                            title: "No connected accounts"
-                            description: "Local calendars still work without a network account."
+                            title: qsTr("No connected accounts")
+                            description: qsTr("Local calendars still work without a network account.")
                         }
                     }
 
                     AppAccordionSection {
-                        title: "Google Calendar"
+                        title: qsTr("Google Calendar")
                         expanded: true
 
                         Rectangle {
@@ -323,7 +323,7 @@ Drawer {
                             spacing: 9
                             Text {
                                 Layout.fillWidth: true
-                                text: "Authorization opens in your browser and returns through a secure local callback. OmaCalendar requests calendar and event access only."
+                                text: qsTr("Authorization opens in your browser and returns through a secure local callback. OmaCalendar requests calendar and event access only.")
                                 color: Theme.mutedText
                                 font.pixelSize: Theme.smallFontSize
                                 wrapMode: Text.Wrap
@@ -331,20 +331,20 @@ Drawer {
                             AppTextField {
                                 id: googleName
                                 Layout.fillWidth: true
-                                placeholderText: "Account label (optional)"
+                                placeholderText: qsTr("Account label (optional)")
                             }
                             AppTextField {
                                 id: googleClientId
                                 visible: !root.bundledGoogleOAuthAvailable
                                          && !root.googleOAuthConfigured
                                 Layout.fillWidth: true
-                                placeholderText: "Desktop OAuth client ID"
-                                accessibleName: "Google Desktop OAuth client ID"
+                                placeholderText: qsTr("Desktop OAuth client ID")
+                                accessibleName: qsTr("Google Desktop OAuth client ID")
                                 inputMethodHints: Qt.ImhNoAutoUppercase
                             }
                             AppButton {
                                 Layout.fillWidth: true
-                                text: "Continue with Google in browser"
+                                text: qsTr("Continue with Google in browser")
                                 primary: true
                                 enabled: root.connected && !root.busy
                                          && (root.bundledGoogleOAuthAvailable
@@ -368,7 +368,7 @@ Drawer {
                     }
 
                     AppAccordionSection {
-                        title: "CalDAV"
+                        title: qsTr("CalDAV")
                         expanded: false
 
                         Rectangle {
@@ -387,29 +387,29 @@ Drawer {
                             AppTextField {
                                 id: caldavName
                                 Layout.fillWidth: true
-                                placeholderText: "Account label (optional)"
+                                placeholderText: qsTr("Account label (optional)")
                             }
                             AppTextField {
                                 id: caldavEndpoint
                                 Layout.fillWidth: true
-                                placeholderText: "https://caldav.example.com/"
+                                placeholderText: qsTr("https://caldav.example.com/")
                                 inputMethodHints: Qt.ImhUrlCharactersOnly | Qt.ImhNoAutoUppercase
                             }
                             AppTextField {
                                 id: caldavUser
                                 Layout.fillWidth: true
-                                placeholderText: "Username"
+                                placeholderText: qsTr("Username")
                                 inputMethodHints: Qt.ImhEmailCharactersOnly | Qt.ImhNoAutoUppercase
                             }
                             AppTextField {
                                 id: caldavPassword
                                 Layout.fillWidth: true
-                                placeholderText: "Password or app password"
+                                placeholderText: qsTr("Password or app password")
                                 echoMode: TextInput.Password
                             }
                             AppButton {
                                 Layout.fillWidth: true
-                                text: "Connect CalDAV"
+                                text: qsTr("Connect CalDAV")
                                 primary: true
                                 enabled: root.connected && !root.busy
                                          && caldavEndpoint.text.trim().length > 0
@@ -428,7 +428,7 @@ Drawer {
                     }
 
                     AppAccordionSection {
-                        title: "ICS subscription"
+                        title: qsTr("ICS subscription")
                         expanded: false
 
                         Rectangle {
@@ -444,12 +444,12 @@ Drawer {
                             AppTextField {
                                 id: icsName
                                 Layout.fillWidth: true
-                                placeholderText: "Subscription name (optional)"
+                                placeholderText: qsTr("Subscription name (optional)")
                             }
                             AppTextField {
                                 id: icsUrl
                                 Layout.fillWidth: true
-                                placeholderText: "https://example.com/calendar.ics"
+                                placeholderText: qsTr("https://example.com/calendar.ics")
                                 inputMethodHints: Qt.ImhUrlCharactersOnly | Qt.ImhNoAutoUppercase
                             }
                             RowLayout {
@@ -457,18 +457,18 @@ Drawer {
                                 AppTextField {
                                     id: icsUser
                                     Layout.fillWidth: true
-                                    placeholderText: "Username (optional)"
+                                    placeholderText: qsTr("Username (optional)")
                                 }
                                 AppTextField {
                                     id: icsPassword
                                     Layout.fillWidth: true
-                                    placeholderText: "Password (optional)"
+                                    placeholderText: qsTr("Password (optional)")
                                     echoMode: TextInput.Password
                                 }
                             }
                             AppButton {
                                 Layout.fillWidth: true
-                                text: "Add read-only subscription"
+                                text: qsTr("Add read-only subscription")
                                 enabled: root.connected && icsUrl.text.trim().length > 0
                                 onClicked: {
                                     root.addIcsSubscriptionRequested(icsUrl.text.trim(),
@@ -496,10 +496,10 @@ Drawer {
 
                     RowLayout {
                         Layout.fillWidth: true
-                        SectionLabel { Layout.fillWidth: true; text: "CALENDAR SETS" }
+                        SectionLabel { Layout.fillWidth: true; text: qsTr("CALENDAR SETS") }
                         AppButton {
                             iconText: "+"
-                            text: "New set"
+                            text: qsTr("New set")
                             compact: true
                             onClicked: calendarSetDialog.openNew()
                         }
@@ -524,26 +524,26 @@ Drawer {
                                     spacing: 2
                                     Text {
                                         Layout.fillWidth: true
-                                        text: setCard.modelData.name || "Calendar set"
+                                        text: setCard.modelData.name || qsTr("Calendar set")
                                         color: Theme.text
                                         font.weight: Font.DemiBold
                                         elide: Text.ElideRight
                                     }
                                     Text {
                                         text: (setCard.modelData.calendarIds || []).length
-                                              + " calendar(s)"
+                                              + qsTr(" calendar(s)")
                                         color: Theme.mutedText
                                         font.pixelSize: Theme.microFontSize
                                     }
                                 }
                                 StatusBadge {
                                     visible: setCard.modelData.isDefault === true
-                                    text: "Built in"
+                                    text: qsTr("Built in")
                                     tone: "neutral"
                                 }
                                 AppButton {
                                     visible: setCard.modelData.isDefault !== true
-                                    text: "Edit"
+                                    text: qsTr("Edit")
                                     compact: true
                                     quiet: true
                                     onClicked: calendarSetDialog.openExisting(
@@ -555,7 +555,7 @@ Drawer {
                                     compact: true
                                     quiet: true
                                     destructive: true
-                                    toolTipText: "Remove calendar set"
+                                    toolTipText: qsTr("Remove calendar set")
                                     onClicked: root.removeCalendarSetRequested(
                                                    String(setCard.modelData.id))
                                 }
@@ -565,10 +565,10 @@ Drawer {
 
                     RowLayout {
                         Layout.fillWidth: true
-                        SectionLabel { Layout.fillWidth: true; text: "CALENDARS" }
+                        SectionLabel { Layout.fillWidth: true; text: qsTr("CALENDARS") }
                         AppButton {
                             iconText: "+"
-                            text: "New local"
+                            text: qsTr("New local")
                             compact: true
                             onClicked: localCalendarDialog.open()
                         }
@@ -592,14 +592,14 @@ Drawer {
                                 spacing: 3
                                 Text {
                                     Layout.fillWidth: true
-                                    text: "Default calendar"
+                                    text: qsTr("Default calendar")
                                     color: Theme.text
                                     font.pixelSize: Theme.fontSize
                                     font.weight: Font.DemiBold
                                 }
                                 Text {
                                     Layout.fillWidth: true
-                                    text: "Used automatically for new events in the app and widget."
+                                    text: qsTr("Used automatically for new events in the app and widget.")
                                     color: Theme.mutedText
                                     font.pixelSize: Theme.smallFontSize
                                     wrapMode: Text.Wrap
@@ -615,7 +615,7 @@ Drawer {
                                 valueRole: "value"
                                 currentIndex: root.defaultCalendarIndex()
                                 enabled: count > 0
-                                Accessible.name: "Default calendar for new events"
+                                Accessible.name: qsTr("Default calendar for new events")
                                 onActivated: index => {
                                     const option = root.defaultCalendarOptions[index]
                                     if (option)
@@ -696,11 +696,11 @@ Drawer {
                                 Text {
                                     anchors.centerIn: parent
                                     width: parent.width - 20
-                                    text: "Drop "
+                                    text: qsTr("Drop ")
                                           + (calendarDropArea.placeAfter
-                                             ? "after " : "before ")
+                                             ? qsTr("after ") : qsTr("before "))
                                           + String(calendarCard.modelData.name
-                                                   || "calendar")
+                                                   || qsTr("calendar"))
                                     color: Theme.accentText
                                     font.pixelSize: Theme.smallFontSize
                                     font.weight: Font.DemiBold
@@ -723,9 +723,9 @@ Drawer {
                                                     + calendarCard.calendarId
                                         Layout.preferredWidth: 30
                                         Layout.preferredHeight: 30
-                                        Accessible.name: "Drag to reorder "
+                                        Accessible.name: qsTr("Drag to reorder ")
                                                          + String(calendarCard.modelData.name
-                                                                  || "calendar")
+                                                                  || qsTr("calendar"))
                                         Accessible.role: Accessible.Button
 
                                         Text {
@@ -790,14 +790,14 @@ Drawer {
                                                     Text {
                                                         Layout.fillWidth: true
                                                         text: calendarCard.modelData.name
-                                                              || "Calendar"
+                                                              || qsTr("Calendar")
                                                         color: Theme.text
                                                         font.pixelSize: Theme.smallFontSize
                                                         font.weight: Font.DemiBold
                                                         elide: Text.ElideRight
                                                     }
                                                     Text {
-                                                        text: "Move"
+                                                        text: qsTr("Move")
                                                         color: Theme.accent
                                                         font.pixelSize: Theme.microFontSize
                                                         font.weight: Font.DemiBold
@@ -817,7 +817,7 @@ Drawer {
                                     }
                                     Text {
                                         Layout.fillWidth: true
-                                        text: calendarCard.modelData.name || "Calendar"
+                                        text: calendarCard.modelData.name || qsTr("Calendar")
                                         color: Theme.text
                                         font.pixelSize: Theme.fontSize
                                         font.weight: Font.DemiBold
@@ -825,7 +825,7 @@ Drawer {
                                     }
                                     StatusBadge {
                                         visible: calendarCard.modelData.readOnly === true
-                                        text: "Read only"
+                                        text: qsTr("Read only")
                                         tone: "neutral"
                                     }
                                     AppButton {
@@ -833,11 +833,11 @@ Drawer {
                                                     + String(calendarCard.modelData.id || "")
                                         visible: root.calendarCanBeDeleted(
                                                      calendarCard.modelData)
-                                        text: "Delete"
+                                        text: qsTr("Delete")
                                         compact: true
                                         quiet: true
                                         destructive: true
-                                        toolTipText: "Permanently delete calendar and its events"
+                                        toolTipText: qsTr("Permanently delete calendar and its events")
                                         onClicked: localCalendarRemoveConfirm.openFor(
                                                        calendarCard.modelData)
                                     }
@@ -846,7 +846,7 @@ Drawer {
                                     Layout.fillWidth: true
                                     spacing: 14
                                     AppCheckBox {
-                                        text: "Visible"
+                                        text: qsTr("Visible")
                                         checked: calendarCard.modelData.visible !== false
                                                  && calendarCard.modelData.enabled !== false
                                         onToggled: root.calendarPreferenceChanged(
@@ -857,12 +857,12 @@ Drawer {
                                         id: muteInvitationAlerts
                                         objectName: "muteInvitationAlerts-"
                                                     + calendarCard.calendarId
-                                        text: "Mute invitation alerts"
+                                        text: qsTr("Mute invitation alerts")
                                         checked: calendarCard.modelData.ignoreAlerts === true
                                         ToolTip.visible: hovered
                                                              && !reorderMouse.drag.active
                                         ToolTip.delay: 450
-                                        ToolTip.text: "Suppresses desktop notifications for new, changed, or cancelled invitations on this calendar. Event reminders still fire."
+                                        ToolTip.text: qsTr("Suppresses desktop notifications for new, changed, or cancelled invitations on this calendar. Event reminders still fire.")
                                         Accessible.description: ToolTip.text
                                         onToggled: root.calendarPreferenceChanged(
                                                        calendarCard.modelData.id,
@@ -900,7 +900,7 @@ Drawer {
                     spacing: 13
                     Item { Layout.preferredHeight: 5 }
 
-                    SectionLabel { text: "DISPLAY" }
+                    SectionLabel { text: qsTr("DISPLAY") }
                     Rectangle {
                         Layout.fillWidth: true
                         implicitHeight: displayPreferences.implicitHeight + 24
@@ -914,21 +914,21 @@ Drawer {
                             spacing: 10
                             AppComboBox {
                                 Layout.fillWidth: true
-                                model: ["System time format", "12-hour", "24-hour"]
+                                model: [qsTr("System time format"), qsTr("12-hour"), qsTr("24-hour")]
                                 currentIndex: Math.max(0, ["system", "12h", "24h"].indexOf(
                                                            String(root.preferences.timeFormat
                                                                   || "system")))
-                                Accessible.name: "Time format"
+                                Accessible.name: qsTr("Time format")
                                 onActivated: index => root.preferenceChanged(
                                                  "timeFormat", ["system", "12h", "24h"][index])
                             }
                             AppComboBox {
                                 Layout.fillWidth: true
-                                model: ["System week start", "Monday", "Sunday"]
+                                model: [qsTr("System week start"), qsTr("Monday"), qsTr("Sunday")]
                                 currentIndex: Math.max(0, [0, 1, 7].indexOf(
                                                            Number(root.preferences.firstDayOfWeek
                                                                   || 0)))
-                                Accessible.name: "First day of week"
+                                Accessible.name: qsTr("First day of week")
                                 onActivated: index => root.preferenceChanged(
                                                  "firstDayOfWeek", [0, 1, 7][index])
                             }
@@ -940,33 +940,33 @@ Drawer {
                                 textRole: "text"
                                 valueRole: "value"
                                 currentIndex: root.displayTimeZoneIndex()
-                                Accessible.name: "Display time zone"
+                                Accessible.name: qsTr("Display time zone")
                                 onActivated: root.preferenceChanged("displayTimeZone",
                                                                     currentValue)
                             }
                             AppComboBox {
                                 Layout.fillWidth: true
                                 model: [
-                                    {"text": "Default duration: 15 minutes", "value": 15},
-                                    {"text": "Default duration: 30 minutes", "value": 30},
-                                    {"text": "Default duration: 45 minutes", "value": 45},
-                                    {"text": "Default duration: 1 hour", "value": 60},
-                                    {"text": "Default duration: 90 minutes", "value": 90},
-                                    {"text": "Default duration: 2 hours", "value": 120}
+                                    {"text": qsTr("Default duration: 15 minutes"), "value": 15},
+                                    {"text": qsTr("Default duration: 30 minutes"), "value": 30},
+                                    {"text": qsTr("Default duration: 45 minutes"), "value": 45},
+                                    {"text": qsTr("Default duration: 1 hour"), "value": 60},
+                                    {"text": qsTr("Default duration: 90 minutes"), "value": 90},
+                                    {"text": qsTr("Default duration: 2 hours"), "value": 120}
                                 ]
                                 textRole: "text"
                                 valueRole: "value"
                                 currentIndex: Math.max(0, [15, 30, 45, 60, 90, 120].indexOf(
                                                            Number(root.preferences.defaultDuration
                                                                   || 60)))
-                                Accessible.name: "Default event duration"
+                                Accessible.name: qsTr("Default event duration")
                                 onActivated: root.preferenceChanged("defaultDuration",
                                                                     currentValue)
                             }
                             RowLayout {
                                 Layout.fillWidth: true
                                 Text {
-                                    text: "Work hours"
+                                    text: qsTr("Work hours")
                                     color: Theme.mutedText
                                     font.pixelSize: Theme.smallFontSize
                                 }
@@ -974,16 +974,16 @@ Drawer {
                                     from: 0
                                     to: 23
                                     value: Number(root.preferences.workDayStart || 8)
-                                    Accessible.name: "Work day start hour"
+                                    Accessible.name: qsTr("Work day start hour")
                                     onValueModified: root.preferenceChanged("workDayStart",
                                                                              value)
                                 }
-                                Text { text: "to"; color: Theme.mutedText }
+                                Text { text: qsTr("to"); color: Theme.mutedText }
                                 AppSpinBox {
                                     from: 1
                                     to: 24
                                     value: Number(root.preferences.workDayEnd || 18)
-                                    Accessible.name: "Work day end hour"
+                                    Accessible.name: qsTr("Work day end hour")
                                     onValueModified: root.preferenceChanged("workDayEnd",
                                                                              value)
                                 }
@@ -991,24 +991,24 @@ Drawer {
                         }
                     }
 
-                    SectionLabel { text: "IMPORT & EXPORT" }
+                    SectionLabel { text: qsTr("IMPORT & EXPORT") }
                     RowLayout {
                         Layout.fillWidth: true
                         AppButton {
                             Layout.fillWidth: true
-                            text: "Import .ics…"
+                            text: qsTr("Import .ics…")
                             onClicked: root.importIcsRequested()
                         }
                         AppButton {
                             Layout.fillWidth: true
-                            text: "Export .ics…"
+                            text: qsTr("Export .ics…")
                             onClicked: root.exportIcsRequested()
                         }
                     }
-                    SectionLabel { text: "SUPPORT" }
+                    SectionLabel { text: qsTr("SUPPORT") }
                     AppButton {
                         Layout.fillWidth: true
-                        text: "Preview diagnostics"
+                        text: qsTr("Preview diagnostics")
                         onClicked: root.diagnosticsRequested()
                     }
                     Item { Layout.preferredHeight: 12 }
@@ -1024,7 +1024,7 @@ Drawer {
         anchors.centerIn: Overlay.overlay
         width: Math.min(430, Overlay.overlay ? Overlay.overlay.width - 48 : 430)
         modal: true
-        title: "Delete calendar?"
+        title: qsTr("Delete calendar?")
         standardButtons: Dialog.Cancel | Dialog.Ok
         function openFor(value) {
             calendarData = value || ({})
@@ -1039,9 +1039,9 @@ Drawer {
                 const provider = String((value.capabilities || {}).provider
                                         || root.accountProvider(value.accountId))
                 const location = provider === "google"
-                        ? " from Google Calendar" : " from this device"
-                return "Permanently delete " + (value.name || "this calendar")
-                        + location + " and all of its events? This cannot be undone."
+                        ? qsTr(" from Google Calendar") : qsTr(" from this device")
+                return qsTr("Permanently delete ") + (value.name || qsTr("this calendar"))
+                        + location + qsTr(" and all of its events? This cannot be undone.")
             }
             color: Theme.text
             wrapMode: Text.Wrap
@@ -1057,7 +1057,7 @@ Drawer {
         anchors.centerIn: Overlay.overlay
         width: Math.min(460, Overlay.overlay ? Overlay.overlay.width - 48 : 460)
         modal: true
-        title: setData.id ? "Edit calendar set" : "New calendar set"
+        title: setData.id ? qsTr("Edit calendar set") : qsTr("New calendar set")
         standardButtons: Dialog.Cancel
 
         function openNew() {
@@ -1135,12 +1135,12 @@ Drawer {
             AppTextField {
                 id: setName
                 Layout.fillWidth: true
-                placeholderText: "Set name"
-                accessibleName: "Calendar set name"
+                placeholderText: qsTr("Set name")
+                accessibleName: qsTr("Calendar set name")
             }
             Text {
                 Layout.fillWidth: true
-                text: "Select calendars. Use the arrows to control their order."
+                text: qsTr("Select calendars. Use the arrows to control their order.")
                 color: Theme.mutedText
                 font.pixelSize: Theme.smallFontSize
                 wrapMode: Text.Wrap
@@ -1157,7 +1157,7 @@ Drawer {
                             calendarSetDialog.selectionIndex(modelData.id)
                         AppCheckBox {
                             Layout.fillWidth: true
-                            text: membershipRow.modelData.name || "Calendar"
+                            text: membershipRow.modelData.name || qsTr("Calendar")
                             checked: membershipRow.selectedIndex >= 0
                             onToggled: calendarSetDialog.toggleCalendar(
                                            membershipRow.modelData.id, checked)
@@ -1168,7 +1168,7 @@ Drawer {
                             compact: true
                             quiet: true
                             enabled: membershipRow.selectedIndex > 0
-                            toolTipText: "Move earlier"
+                            toolTipText: qsTr("Move earlier")
                             onClicked: calendarSetDialog.moveCalendar(
                                            membershipRow.modelData.id, -1)
                         }
@@ -1179,7 +1179,7 @@ Drawer {
                             quiet: true
                             enabled: membershipRow.selectedIndex
                                      < calendarSetDialog.selectedIds.length - 1
-                            toolTipText: "Move later"
+                            toolTipText: qsTr("Move later")
                             onClicked: calendarSetDialog.moveCalendar(
                                            membershipRow.modelData.id, 1)
                         }
@@ -1195,14 +1195,14 @@ Drawer {
                 currentIndex: Math.max(0, calendarSetDialog.selectionIndex(
                                              calendarSetDialog.defaultCalendarId))
                 enabled: model.length > 0
-                Accessible.name: "Default writable calendar for this set"
+                Accessible.name: qsTr("Default writable calendar for this set")
                 onActivated: calendarSetDialog.defaultCalendarId = currentValue
             }
             RowLayout {
                 Layout.fillWidth: true
                 Item { Layout.fillWidth: true }
                 AppButton {
-                    text: "Save set"
+                    text: qsTr("Save set")
                     primary: true
                     enabled: setName.text.trim().length > 0
                              && calendarSetDialog.selectedIds.length > 0
@@ -1227,7 +1227,7 @@ Drawer {
         anchors.centerIn: Overlay.overlay
         width: Math.min(430, Overlay.overlay ? Overlay.overlay.width - 48 : 430)
         modal: true
-        title: isIcs ? "Subscription credentials" : "CalDAV credentials"
+        title: isIcs ? qsTr("Subscription credentials") : qsTr("CalDAV credentials")
         standardButtons: Dialog.Cancel
 
         function openFor(value) {
@@ -1243,8 +1243,8 @@ Drawer {
             Text {
                 Layout.fillWidth: true
                 text: credentialDialog.isIcs
-                      ? "Enter both fields to authenticate this feed, or leave both empty to use it without credentials."
-                      : "The saved server address is retained by the calendar service. Enter the replacement username and app password."
+                      ? qsTr("Enter both fields to authenticate this feed, or leave both empty to use it without credentials.")
+                      : qsTr("The saved server address is retained by the calendar service. Enter the replacement username and app password.")
                 color: Theme.mutedText
                 font.pixelSize: Theme.smallFontSize
                 wrapMode: Text.Wrap
@@ -1253,22 +1253,22 @@ Drawer {
                 id: credentialUsername
                 Layout.fillWidth: true
                 placeholderText: credentialDialog.isIcs
-                                 ? "Username (optional)" : "Username"
-                accessibleName: "Account username"
+                                 ? qsTr("Username (optional)") : qsTr("Username")
+                accessibleName: qsTr("Account username")
             }
             AppTextField {
                 id: credentialPassword
                 Layout.fillWidth: true
                 placeholderText: credentialDialog.isIcs
-                                 ? "Password (optional)" : "Password or app password"
-                accessibleName: "Account password"
+                                 ? qsTr("Password (optional)") : qsTr("Password or app password")
+                accessibleName: qsTr("Account password")
                 echoMode: TextInput.Password
             }
             RowLayout {
                 Layout.fillWidth: true
                 Item { Layout.fillWidth: true }
                 AppButton {
-                    text: "Save credentials"
+                    text: qsTr("Save credentials")
                     primary: true
                     enabled: credentialDialog.isIcs
                              ? (credentialUsername.text.length === 0
@@ -1296,7 +1296,7 @@ Drawer {
         anchors.centerIn: Overlay.overlay
         width: Math.min(430, Overlay.overlay ? Overlay.overlay.width - 48 : 430)
         modal: true
-        title: "Remove account?"
+        title: qsTr("Remove account?")
         standardButtons: Dialog.Cancel | Dialog.Ok
         function openFor(value) {
             accountData = value
@@ -1308,15 +1308,15 @@ Drawer {
             spacing: 10
             Text {
                 Layout.fillWidth: true
-                text: "Disconnect " + (removeConfirm.accountData.displayName
+                text: qsTr("Disconnect ") + (removeConfirm.accountData.displayName
                                         || removeConfirm.accountData.principal
-                                        || "this account") + "?"
+                                        || qsTr("this account")) + qsTr("?")
                 color: Theme.text
                 wrapMode: Text.Wrap
             }
             AppCheckBox {
                 id: keepCache
-                text: "Keep downloaded calendar data"
+                text: qsTr("Keep downloaded calendar data")
                 checked: true
             }
         }
@@ -1327,7 +1327,7 @@ Drawer {
         anchors.centerIn: Overlay.overlay
         width: Math.min(430, Overlay.overlay ? Overlay.overlay.width - 48 : 430)
         modal: true
-        title: "New local calendar"
+        title: qsTr("New local calendar")
         standardButtons: Dialog.Cancel | Dialog.Save
         onAccepted: root.addLocalCalendarRequested(
                         localCalendarName.text.trim(),
@@ -1337,7 +1337,7 @@ Drawer {
             AppTextField {
                 id: localCalendarName
                 Layout.fillWidth: true
-                placeholderText: "Calendar name"
+                placeholderText: qsTr("Calendar name")
             }
             AppColorPicker {
                 id: localCalendarColor

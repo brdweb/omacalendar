@@ -10,7 +10,7 @@ Item {
 
     property color selectedColor: Theme.accent
     property bool allowClear: false
-    property string buttonText: "Color"
+    property string buttonText: qsTr("Color")
     readonly property bool paletteVisible: palettePopup.opened
     signal colorSelected(string colorValue)
 
@@ -34,7 +34,7 @@ Item {
         id: colorButton
         anchors.fill: parent
         hoverEnabled: true
-        Accessible.name: "Choose " + root.buttonText.toLowerCase()
+        Accessible.name: qsTr("Choose ") + root.buttonText.toLowerCase()
         onClicked: palettePopup.open()
 
         contentItem: RowLayout {
@@ -96,7 +96,7 @@ Item {
                         Layout.preferredHeight: 36
                         padding: 0
                         hoverEnabled: true
-                        Accessible.name: "Choose calendar color " + modelData
+                        Accessible.name: qsTr("Choose calendar color ") + modelData
                         onClicked: {
                             root.selectedColor = modelData
                             root.colorSelected(modelData)
@@ -128,7 +128,7 @@ Item {
                 spacing: 8
                 AppButton {
                     visible: root.allowClear
-                    text: "Provider color"
+                    text: qsTr("Provider color")
                     compact: true
                     quiet: true
                     onClicked: {
@@ -138,7 +138,7 @@ Item {
                 }
                 Item { Layout.fillWidth: true }
                 AppButton {
-                    text: "Custom…"
+                    text: qsTr("Custom…")
                     compact: true
                     onClicked: {
                         palettePopup.close()
@@ -157,7 +157,7 @@ Item {
 
     ColorDialog {
         id: customColorDialog
-        title: "Choose calendar color"
+        title: qsTr("Choose calendar color")
         selectedColor: root.selectedColor
         onAccepted: {
             root.selectedColor = selectedColor

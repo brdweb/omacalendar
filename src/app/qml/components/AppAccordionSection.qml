@@ -22,7 +22,7 @@ ColumnLayout {
         implicitHeight: 44
         padding: 0
         hoverEnabled: true
-        Accessible.name: (root.expanded ? "Collapse " : "Expand ") + root.title
+        Accessible.name: (root.expanded ? qsTr("Collapse ") : qsTr("Expand ")) + root.title
         onClicked: root.expanded = !root.expanded
 
         contentItem: RowLayout {

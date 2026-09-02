@@ -162,10 +162,10 @@ Item {
                             objectName: "monthMore-" + dayCell.index
                             visible: dayCell.dayEvents.length > 3
                             Layout.fillWidth: true
-                            text: "+" + (dayCell.dayEvents.length - 3) + " more"
+                            text: "+" + (dayCell.dayEvents.length - 3) + qsTr(" more")
                             flat: true
                             padding: 0
-                            Accessible.name: text + " on "
+                            Accessible.name: text + qsTr(" on ")
                                              + Qt.formatDate(dayCell.dateValue,
                                                              "MMMM d")
                             font.pixelSize: Theme.microFontSize
@@ -264,10 +264,10 @@ Item {
                                             quiet: true
                                             enabled: root.eventEditable(
                                                          overflowEventRow.modelData)
-                                            Accessible.name: "Move "
+                                            Accessible.name: qsTr("Move ")
                                                 + (overflowEventRow.modelData.summary
-                                                   || "event")
-                                                + " to previous day"
+                                                   || qsTr("event"))
+                                                + qsTr(" to previous day")
                                             onClicked: root.requestDateChange(
                                                            overflowEventRow.modelData,
                                                            root.addDays(
@@ -313,10 +313,10 @@ Item {
                                             quiet: true
                                             enabled: root.eventEditable(
                                                          overflowEventRow.modelData)
-                                            Accessible.name: "Move "
+                                            Accessible.name: qsTr("Move ")
                                                 + (overflowEventRow.modelData.summary
-                                                   || "event")
-                                                + " to next day"
+                                                   || qsTr("event"))
+                                                + qsTr(" to next day")
                                             onClicked: root.requestDateChange(
                                                            overflowEventRow.modelData,
                                                            root.addDays(

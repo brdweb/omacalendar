@@ -13,7 +13,7 @@ Button {
     Accessible.name: toolTipText
     Accessible.role: Accessible.Button
 
-    property string toolTipText: "Close"
+    property string toolTipText: qsTr("Close")
 
     ToolTip.visible: hovered
     ToolTip.text: toolTipText

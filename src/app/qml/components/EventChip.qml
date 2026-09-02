@@ -36,15 +36,28 @@ ItemDelegate {
             return "Read only"
         return ""
     }
+    readonly property string stateLabel: {
+        if (stateText === "Conflict")
+            return qsTr("Conflict")
+        if (stateText === "Retrying")
+            return qsTr("Retrying")
+        if (stateText === "Failed")
+            return qsTr("Failed")
+        if (stateText === "Pending")
+            return qsTr("Pending")
+        if (stateText === "Read only")
+            return qsTr("Read only")
+        return ""
+    }
 
     implicitHeight: compact ? 24 : 36
     padding: 0
     hoverEnabled: true
     opacity: dragging ? 0.82 : 1
     z: dragging ? 100 : 0
-    Accessible.name: (eventData.summary || "Untitled event")
+    Accessible.name: (eventData.summary || qsTr("Untitled event"))
                      + (timeText.length > 0 ? ", " + timeText : "")
-    Accessible.description: stateText
+    Accessible.description: stateLabel
     Accessible.role: Accessible.Button
     onClicked: activated(eventData)
 
@@ -106,7 +119,7 @@ ItemDelegate {
         }
         Text {
             Layout.fillWidth: true
-            text: root.eventData.summary || "Untitled event"
+            text: root.eventData.summary || qsTr("Untitled event")
             color: Theme.text
             font.pixelSize: root.compact ? Theme.microFontSize : Theme.smallFontSize
             font.weight: Font.DemiBold
@@ -125,7 +138,7 @@ ItemDelegate {
         }
         Text {
             visible: root.stateText.length > 0 && !root.compact
-            text: root.stateText
+            text: root.stateLabel
             color: root.stateText === "Conflict" ? Theme.danger : Theme.mutedText
             font.pixelSize: Theme.microFontSize
         }

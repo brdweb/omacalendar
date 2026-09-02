@@ -154,7 +154,9 @@ Deliver:
 - Ordered transactional schema 2. Before replacing a schema 1 database, stop
   the daemon, archive the complete database to a timestamped user-only backup,
   initialize schema 2, and require account reconnection. Preserve legacy
-  keyring items until the user explicitly removes them.
+  keyring items until the user explicitly removes them. (This is the
+  migration mechanism [DESIGN_TASKS_SCHEMA.md](DESIGN_TASKS_SCHEMA.md)
+  evaluates against a future tasks feature.)
 - IPC 2.0 with presentation-only DTOs. Provider URLs, ETags, tokens, raw
   payloads, and mutation bodies remain daemon-private.
 - One shared provider contract for Google, CalDAV, ICS, and local calendars,

@@ -83,7 +83,7 @@ ApplicationWindow {
                 iconText: window.sidebarVisible ? "◧" : "▣"
                 quiet: true
                 compact: true
-                toolTipText: window.sidebarVisible ? "Hide sidebar" : "Show sidebar"
+                toolTipText: window.sidebarVisible ? qsTr("Hide sidebar") : qsTr("Show sidebar")
                 onClicked: window.sidebarVisible = !window.sidebarVisible
             }
 
@@ -114,11 +114,11 @@ ApplicationWindow {
                 iconText: "‹"
                 quiet: true
                 compact: true
-                toolTipText: "Previous period  ["
+                toolTipText: qsTr("Previous period  [")
                 onClicked: window.navigatePeriod(-1)
             }
             AppButton {
-                text: "Today"
+                text: qsTr("Today")
                 quiet: true
                 compact: true
                 onClicked: window.goToday()
@@ -127,7 +127,7 @@ ApplicationWindow {
                 iconText: "›"
                 quiet: true
                 compact: true
-                toolTipText: "Next period  ]"
+                toolTipText: qsTr("Next period  ]")
                 onClicked: window.navigatePeriod(1)
             }
 
@@ -165,11 +165,11 @@ ApplicationWindow {
                     spacing: 2
                     Repeater {
                         model: [
-                            {"id": "agenda", "label": "Agenda", "key": "1"},
-                            {"id": "day", "label": "Day", "key": "2"},
-                            {"id": "week", "label": "Week", "key": "3"},
-                            {"id": "month", "label": "Month", "key": "4"},
-                            {"id": "year", "label": "Year", "key": "5"}
+                            {"id": "agenda", "label": qsTr("Agenda"), "key": "1"},
+                            {"id": "day", "label": qsTr("Day"), "key": "2"},
+                            {"id": "week", "label": qsTr("Week"), "key": "3"},
+                            {"id": "month", "label": qsTr("Month"), "key": "4"},
+                            {"id": "year", "label": qsTr("Year"), "key": "5"}
                         ]
                         delegate: AppButton {
                             required property var modelData
@@ -177,7 +177,7 @@ ApplicationWindow {
                             compact: true
                             quiet: window.currentView !== modelData.id
                             primary: window.currentView === modelData.id
-                            toolTipText: modelData.label + " view  Alt+" + modelData.key
+                            toolTipText: modelData.label + qsTr(" view  Alt+") + modelData.key
                             onClicked: window.setView(modelData.id)
                         }
                     }
@@ -188,17 +188,17 @@ ApplicationWindow {
                 iconText: "⌕"
                 quiet: true
                 compact: true
-                toolTipText: "Search  Ctrl+F"
+                toolTipText: qsTr("Search  Ctrl+F")
                 onClicked: window.openActivity("search")
             }
 
             StatusBadge {
-                text: App.connected ? (App.busy ? "Syncing" : "Connected") : "Offline"
+                text: App.connected ? (App.busy ? qsTr("Syncing") : qsTr("Connected")) : qsTr("Offline")
                 tone: App.connected ? (App.busy ? "info" : "success") : "danger"
             }
 
             AppButton {
-                text: "New event"
+                text: qsTr("New event")
                 iconText: "+"
                 primary: true
                 onClicked: editor.openNew(App.selectedDate, 540)
@@ -270,7 +270,7 @@ ApplicationWindow {
                         anchors.topMargin: 9
                         anchors.bottomMargin: 9
                         spacing: 10
-                        StatusBadge { dotOnly: true; text: "Error"; tone: "danger" }
+                        StatusBadge { dotOnly: true; text: qsTr("Error"); tone: "danger" }
                         Text {
                             Layout.fillWidth: true
                             text: App.lastError
@@ -280,12 +280,12 @@ ApplicationWindow {
                         }
                         AppButton {
                             visible: !App.connected
-                            text: "Reconnect"
+                            text: qsTr("Reconnect")
                             compact: true
                             onClicked: App.reconnect()
                         }
                         AppButton {
-                            text: "Details"
+                            text: qsTr("Details")
                             compact: true
                             quiet: true
                             onClicked: window.openActivity("sync")
@@ -401,9 +401,9 @@ ApplicationWindow {
                         anchors.centerIn: parent
                         width: Math.min(420, parent.width - 60)
                         iconText: "◫"
-                        title: "Your calendar, locally first"
-                        description: "Create a device-only calendar or connect Google, CalDAV, or an ICS subscription."
-                        actionText: "Add a calendar"
+                        title: qsTr("Your calendar, locally first")
+                        description: qsTr("Create a device-only calendar or connect Google, CalDAV, or an ICS subscription.")
+                        actionText: qsTr("Add a calendar")
                         onActionRequested: settingsDrawer.open()
                     }
 
@@ -430,13 +430,13 @@ ApplicationWindow {
                         spacing: 9
                         Text {
                             Layout.fillWidth: true
-                            text: App.busy ? "Working…" : App.statusText
+                            text: App.busy ? qsTr("Working…") : App.statusText
                             color: Theme.mutedText
                             font.pixelSize: Theme.microFontSize
                             elide: Text.ElideRight
                         }
                         Text {
-                            text: window.visibleEvents.length + " events loaded"
+                            text: window.visibleEvents.length + qsTr(" events loaded")
                             color: Theme.mutedText
                             font.pixelSize: Theme.microFontSize
                         }
@@ -485,14 +485,13 @@ ApplicationWindow {
         width: Math.min(470, Overlay.overlay ? Overlay.overlay.width - 48 : 470)
         height: 190
         modal: true
-        title: "Move event to another account?"
+        title: qsTr("Move event to another account?")
         standardButtons: Dialog.Cancel | Dialog.Ok
         closePolicy: Popup.CloseOnEscape
 
         contentItem: Text {
             width: crossAccountMoveDialog.availableWidth
-            text: "OmaCalendar will create the destination event first. "
-                  + "It will delete the original only after the destination provider acknowledges it."
+            text: qsTr("OmaCalendar will create the destination event first. It will delete the original only after the destination provider acknowledges it.")
             color: Theme.text
             wrapMode: Text.Wrap
             font.pixelSize: Theme.smallFontSize
@@ -522,7 +521,7 @@ ApplicationWindow {
         width: Math.min(680, Overlay.overlay ? Overlay.overlay.width - 48 : 680)
         height: Math.min(760, Overlay.overlay ? Overlay.overlay.height - 48 : 760)
         modal: true
-        title: "Merge conflicting event"
+        title: qsTr("Merge conflicting event")
         standardButtons: Dialog.Cancel
         closePolicy: Popup.CloseOnEscape
 
@@ -640,7 +639,7 @@ ApplicationWindow {
         function submitMerge() {
             validationError = ""
             if (!mergeTitleField.text.trim()) {
-                validationError = "Add an event title."
+                validationError = qsTr("Add an event title.")
                 return
             }
             const start = new Date(mergeStartDate.text + "T"
@@ -649,12 +648,12 @@ ApplicationWindow {
                                  + (mergeAllDay.checked ? "00:00" : mergeEndTime.text))
             if (isNaN(start.getTime()) || isNaN(end.getTime()) || end < start
                     || (!mergeAllDay.checked && end <= start)) {
-                validationError = "Enter a valid end after the start."
+                validationError = qsTr("Enter a valid end after the start.")
                 return
             }
             if (!mergeAllDay.checked && mergeTimeKind.currentValue !== "floating"
                     && !App.isValidTimeZone(mergeTimeZoneField.text.trim())) {
-                validationError = "Enter a valid IANA time zone."
+                validationError = qsTr("Enter a valid IANA time zone.")
                 return
             }
 
@@ -694,7 +693,7 @@ ApplicationWindow {
                                             mergeEndTime.text,
                                             merged.endTimeZone)
                 if (!merged.startUtc || !merged.endUtc) {
-                    validationError = "That wall time does not exist in the selected time zone."
+                    validationError = qsTr("That wall time does not exist in the selected time zone.")
                     return
                 }
                 merged.startDate = ""
@@ -714,8 +713,7 @@ ApplicationWindow {
 
                 Text {
                     Layout.fillWidth: true
-                    text: "Start from either saved version, then edit the final event. "
-                          + "Provider identity and unsupported fields are preserved."
+                    text: qsTr("Start from either saved version, then edit the final event. Provider identity and unsupported fields are preserved.")
                     color: Theme.mutedText
                     wrapMode: Text.Wrap
                     font.pixelSize: Theme.smallFontSize
@@ -723,32 +721,32 @@ ApplicationWindow {
                 AppComboBox {
                     id: sourceVersionBox
                     Layout.fillWidth: true
-                    model: ["Start with my version", "Start with remote version"]
-                    Accessible.name: "Conflict merge starting version"
+                    model: [qsTr("Start with my version"), qsTr("Start with remote version")]
+                    Accessible.name: qsTr("Conflict merge starting version")
                     onActivated: conflictMergeDialog.loadSnapshot()
                 }
                 AppTextField {
                     id: mergeTitleField
                     Layout.fillWidth: true
-                    placeholderText: "Title"
-                    accessibleName: "Merged event title"
+                    placeholderText: qsTr("Title")
+                    accessibleName: qsTr("Merged event title")
                 }
                 RowLayout {
                     Layout.fillWidth: true
                     AppCheckBox {
                         id: mergeAllDay
-                        text: "All day"
+                        text: qsTr("All day")
                         Accessible.name: text
                     }
                     AppComboBox {
                         id: mergeTimeKind
                         Layout.fillWidth: true
                         visible: !mergeAllDay.checked
-                        model: [{"text": "Zoned time", "value": "zoned"},
-                                {"text": "Floating time", "value": "floating"}]
+                        model: [{"text": qsTr("Zoned time"), "value": "zoned"},
+                                {"text": qsTr("Floating time"), "value": "floating"}]
                         textRole: "text"
                         valueRole: "value"
-                        Accessible.name: "Merged event time type"
+                        Accessible.name: qsTr("Merged event time type")
                     }
                 }
                 GridLayout {
@@ -759,28 +757,28 @@ ApplicationWindow {
                     AppTextField {
                         id: mergeStartDate
                         Layout.fillWidth: true
-                        placeholderText: "Start date · YYYY-MM-DD"
-                        accessibleName: "Merged event start date"
+                        placeholderText: qsTr("Start date · YYYY-MM-DD")
+                        accessibleName: qsTr("Merged event start date")
                     }
                     AppTextField {
                         id: mergeStartTime
                         Layout.fillWidth: true
                         visible: !mergeAllDay.checked
-                        placeholderText: "Start time · HH:MM"
-                        accessibleName: "Merged event start time"
+                        placeholderText: qsTr("Start time · HH:MM")
+                        accessibleName: qsTr("Merged event start time")
                     }
                     AppTextField {
                         id: mergeEndDate
                         Layout.fillWidth: true
-                        placeholderText: "End date · YYYY-MM-DD"
-                        accessibleName: "Merged event end date"
+                        placeholderText: qsTr("End date · YYYY-MM-DD")
+                        accessibleName: qsTr("Merged event end date")
                     }
                     AppTextField {
                         id: mergeEndTime
                         Layout.fillWidth: true
                         visible: !mergeAllDay.checked
-                        placeholderText: "End time · HH:MM"
-                        accessibleName: "Merged event end time"
+                        placeholderText: qsTr("End time · HH:MM")
+                        accessibleName: qsTr("Merged event end time")
                     }
                 }
                 AppTextField {
@@ -788,64 +786,64 @@ ApplicationWindow {
                     Layout.fillWidth: true
                     visible: !mergeAllDay.checked
                              && mergeTimeKind.currentValue !== "floating"
-                    placeholderText: "IANA time zone · Europe/London"
-                    accessibleName: "Merged event time zone"
+                    placeholderText: qsTr("IANA time zone · Europe/London")
+                    accessibleName: qsTr("Merged event time zone")
                 }
                 AppTextField {
                     id: mergeLocationField
                     Layout.fillWidth: true
-                    placeholderText: "Location"
-                    accessibleName: "Merged event location"
+                    placeholderText: qsTr("Location")
+                    accessibleName: qsTr("Merged event location")
                 }
                 AppTextField {
                     id: mergeUrlField
                     Layout.fillWidth: true
-                    placeholderText: "URL or meeting link"
-                    accessibleName: "Merged event URL"
+                    placeholderText: qsTr("URL or meeting link")
+                    accessibleName: qsTr("Merged event URL")
                 }
                 AppTextField {
                     id: mergeAttendeesField
                     Layout.fillWidth: true
-                    placeholderText: "Guest emails, separated by commas"
-                    accessibleName: "Merged event guests"
+                    placeholderText: qsTr("Guest emails, separated by commas")
+                    accessibleName: qsTr("Merged event guests")
                 }
                 RowLayout {
                     Layout.fillWidth: true
                     AppComboBox {
                         id: mergeAvailability
                         Layout.fillWidth: true
-                        model: [{"text": "Busy", "value": "opaque"},
-                                {"text": "Free", "value": "transparent"}]
+                        model: [{"text": qsTr("Busy"), "value": "opaque"},
+                                {"text": qsTr("Free"), "value": "transparent"}]
                         textRole: "text"
                         valueRole: "value"
-                        Accessible.name: "Merged event availability"
+                        Accessible.name: qsTr("Merged event availability")
                     }
                     AppComboBox {
                         id: mergeVisibility
                         Layout.fillWidth: true
-                        model: [{"text": "Default visibility", "value": "default"},
-                                {"text": "Public", "value": "public"},
-                                {"text": "Private", "value": "private"},
-                                {"text": "Confidential", "value": "confidential"}]
+                        model: [{"text": qsTr("Default visibility"), "value": "default"},
+                                {"text": qsTr("Public"), "value": "public"},
+                                {"text": qsTr("Private"), "value": "private"},
+                                {"text": qsTr("Confidential"), "value": "confidential"}]
                         textRole: "text"
                         valueRole: "value"
-                        Accessible.name: "Merged event visibility"
+                        Accessible.name: qsTr("Merged event visibility")
                     }
                 }
                 AppTextField {
                     id: mergeRecurrenceField
                     Layout.fillWidth: true
-                    placeholderText: "Recurrence rule, for example FREQ=WEEKLY"
-                    accessibleName: "Merged event recurrence rule"
+                    placeholderText: qsTr("Recurrence rule, for example FREQ=WEEKLY")
+                    accessibleName: qsTr("Merged event recurrence rule")
                 }
                 TextArea {
                     id: mergeNotesField
                     Layout.fillWidth: true
                     Layout.preferredHeight: 100
-                    placeholderText: "Notes"
+                    placeholderText: qsTr("Notes")
                     color: Theme.text
                     wrapMode: TextEdit.Wrap
-                    Accessible.name: "Merged event notes"
+                    Accessible.name: qsTr("Merged event notes")
                 }
                 Text {
                     visible: conflictMergeDialog.validationError.length > 0
@@ -859,7 +857,7 @@ ApplicationWindow {
                     Layout.fillWidth: true
                     Item { Layout.fillWidth: true }
                     AppButton {
-                        text: "Apply merged event"
+                        text: qsTr("Apply merged event")
                         primary: true
                         onClicked: conflictMergeDialog.submitMerge()
                     }
@@ -986,18 +984,18 @@ ApplicationWindow {
 
     FileDialog {
         id: googleCredentialsFileDialog
-        title: "Choose Google desktop OAuth credentials"
+        title: qsTr("Choose Google desktop OAuth credentials")
         fileMode: FileDialog.OpenFile
-        nameFilters: ["JSON files (*.json)", "All files (*)"]
+        nameFilters: [qsTr("JSON files (*.json)"), qsTr("All files (*)")]
         onAccepted: App.connectGoogleWithCredentials(
                         selectedFile, window.pendingGoogleDisplayName)
     }
 
     FileDialog {
         id: importIcsFileDialog
-        title: "Choose an iCalendar file"
+        title: qsTr("Choose an iCalendar file")
         fileMode: FileDialog.OpenFile
-        nameFilters: ["iCalendar files (*.ics)", "All files (*)"]
+        nameFilters: [qsTr("iCalendar files (*.ics)"), qsTr("All files (*)")]
         onAccepted: window.openIcsImport(selectedFile)
     }
 
@@ -1008,7 +1006,7 @@ ApplicationWindow {
         anchors.centerIn: Overlay.overlay
         width: Math.min(580, Overlay.overlay ? Overlay.overlay.width - 48 : 580)
         modal: true
-        title: "Import iCalendar events"
+        title: qsTr("Import iCalendar events")
         standardButtons: Dialog.Cancel
 
         contentItem: ColumnLayout {
@@ -1026,27 +1024,27 @@ ApplicationWindow {
                 model: window.writableCalendars
                 textRole: "name"
                 valueRole: "id"
-                Accessible.name: "Import destination calendar"
+                Accessible.name: qsTr("Import destination calendar")
             }
             AppComboBox {
                 id: duplicatePolicyBox
                 Layout.fillWidth: true
                 model: [
-                    {"text": "Skip matching UIDs", "value": "skip"},
-                    {"text": "Import duplicates as copies", "value": "copy"},
-                    {"text": "Replace matching UIDs", "value": "replace"}
+                    {"text": qsTr("Skip matching UIDs"), "value": "skip"},
+                    {"text": qsTr("Import duplicates as copies"), "value": "copy"},
+                    {"text": qsTr("Replace matching UIDs"), "value": "replace"}
                 ]
                 textRole: "text"
                 valueRole: "value"
-                Accessible.name: "Duplicate import handling"
+                Accessible.name: qsTr("Duplicate import handling")
             }
             Text {
                 Layout.fillWidth: true
                 text: icsImportDialog.preview.count === undefined
-                      ? "Preview the file before importing."
-                      : Number(icsImportDialog.preview.count) + " event(s), "
+                      ? qsTr("Preview the file before importing.")
+                      : Number(icsImportDialog.preview.count) + qsTr(" event(s), ")
                         + Number(icsImportDialog.preview.duplicateCount || 0)
-                        + " matching UID(s)"
+                        + qsTr(" matching UID(s)")
                 color: Theme.mutedText
                 font.pixelSize: Theme.smallFontSize
             }
@@ -1057,8 +1055,8 @@ ApplicationWindow {
                     delegate: Text {
                         required property var modelData
                         Layout.fillWidth: true
-                        text: "• " + (modelData.event.summary || "Untitled event")
-                              + (modelData.duplicate ? "  ·  duplicate" : "")
+                        text: "• " + (modelData.event.summary || qsTr("Untitled event"))
+                              + (modelData.duplicate ? qsTr("  ·  duplicate") : "")
                         color: modelData.duplicate ? Theme.warning : Theme.text
                         font.pixelSize: Theme.smallFontSize
                         elide: Text.ElideRight
@@ -1069,13 +1067,13 @@ ApplicationWindow {
                 Layout.fillWidth: true
                 Item { Layout.fillWidth: true }
                 AppButton {
-                    text: "Preview"
+                    text: qsTr("Preview")
                     enabled: importCalendarBox.currentIndex >= 0
                     onClicked: App.previewIcsImport(icsImportDialog.fileUrl,
                                                     importCalendarBox.currentValue)
                 }
                 AppButton {
-                    text: "Import"
+                    text: qsTr("Import")
                     primary: true
                     enabled: Number(icsImportDialog.preview.count || 0) > 0
                     onClicked: App.commitIcsImport(icsImportDialog.fileUrl,
@@ -1091,7 +1089,7 @@ ApplicationWindow {
         anchors.centerIn: Overlay.overlay
         width: Math.min(520, Overlay.overlay ? Overlay.overlay.width - 48 : 520)
         modal: true
-        title: "Export iCalendar events"
+        title: qsTr("Export iCalendar events")
         standardButtons: Dialog.Cancel
 
         function openForSelection() {
@@ -1109,8 +1107,8 @@ ApplicationWindow {
             AppComboBox {
                 id: exportScopeBox
                 Layout.fillWidth: true
-                model: ["Date range", "Active calendar set", "Entire local calendar"]
-                Accessible.name: "Export scope"
+                model: [qsTr("Date range"), qsTr("Active calendar set"), qsTr("Entire local calendar")]
+                Accessible.name: qsTr("Export scope")
             }
             AppComboBox {
                 id: exportCalendarSetBox
@@ -1121,7 +1119,7 @@ ApplicationWindow {
                 valueRole: "id"
                 currentIndex: Math.max(0, window.calendarSetIndex(
                                              window.activeCalendarSetId))
-                Accessible.name: "Calendar set to export"
+                Accessible.name: qsTr("Calendar set to export")
             }
             AppComboBox {
                 id: exportLocalCalendarBox
@@ -1130,7 +1128,7 @@ ApplicationWindow {
                 model: window.localWritableCalendars
                 textRole: "name"
                 valueRole: "id"
-                Accessible.name: "Local calendar to export"
+                Accessible.name: qsTr("Local calendar to export")
             }
             RowLayout {
                 visible: exportScopeBox.currentIndex === 0
@@ -1138,22 +1136,22 @@ ApplicationWindow {
                 AppTextField {
                     id: rangeStartField
                     Layout.fillWidth: true
-                    placeholderText: "YYYY-MM-DD"
-                    accessibleName: "Export range start"
+                    placeholderText: qsTr("YYYY-MM-DD")
+                    accessibleName: qsTr("Export range start")
                 }
-                Text { text: "to"; color: Theme.mutedText }
+                Text { text: qsTr("to"); color: Theme.mutedText }
                 AppTextField {
                     id: rangeEndField
                     Layout.fillWidth: true
-                    placeholderText: "YYYY-MM-DD"
-                    accessibleName: "Export range end"
+                    placeholderText: qsTr("YYYY-MM-DD")
+                    accessibleName: qsTr("Export range end")
                 }
             }
             Text {
                 visible: exportScopeBox.currentIndex === 2
                          && window.localWritableCalendars.length === 0
                 Layout.fillWidth: true
-                text: "Create a local calendar before exporting a whole calendar."
+                text: qsTr("Create a local calendar before exporting a whole calendar.")
                 color: Theme.warning
                 wrapMode: Text.Wrap
                 font.pixelSize: Theme.smallFontSize
@@ -1162,7 +1160,7 @@ ApplicationWindow {
                 Layout.fillWidth: true
                 Item { Layout.fillWidth: true }
                 AppButton {
-                    text: "Choose destination…"
+                    text: qsTr("Choose destination…")
                     primary: true
                     enabled: exportScopeBox.currentIndex !== 2
                              || exportLocalCalendarBox.currentIndex >= 0
@@ -1186,10 +1184,10 @@ ApplicationWindow {
 
     FileDialog {
         id: exportIcsFileDialog
-        title: "Save iCalendar export"
+        title: qsTr("Save iCalendar export")
         fileMode: FileDialog.SaveFile
         defaultSuffix: "ics"
-        nameFilters: ["iCalendar files (*.ics)"]
+        nameFilters: [qsTr("iCalendar files (*.ics)")]
         onAccepted: App.exportIcs(window.pendingExportScope, selectedFile)
     }
 
@@ -1393,7 +1391,7 @@ ApplicationWindow {
         for (let index = 0; index < values.length; ++index) {
             const value = Object.assign({}, values[index])
             const calendar = calendarFor(value.calendarId)
-            value.calendarName = calendar.name || "Calendar"
+            value.calendarName = calendar.name || qsTr("Calendar")
             value.calendarColor = calendar.colorOverride || calendar.color || Theme.accent
             value.readOnly = value.readOnly === true || calendar.readOnly === true
             result.push(value)
@@ -1640,12 +1638,14 @@ ApplicationWindow {
 
     function periodSubtitle() {
         if (currentView === "agenda")
-            return "Upcoming agenda"
+            return qsTr("Upcoming agenda")
         if (currentView === "month")
             return Qt.formatDate(App.selectedDate, "dddd, MMMM d")
         if (currentView === "year")
-            return "Year overview"
-        return currentView.charAt(0).toUpperCase() + currentView.slice(1) + " view"
+            return qsTr("Year overview")
+        if (currentView === "week")
+            return qsTr("Week view")
+        return qsTr("Day view")
     }
 
     function openEvent(value) {
@@ -1748,7 +1748,7 @@ ApplicationWindow {
         delete copy.uid
         delete copy.etag
         delete copy.recurrenceId
-        copy.summary = (copy.summary || "Untitled event") + " copy"
+        copy.summary = (copy.summary || qsTr("Untitled event")) + qsTr(" copy")
         copy.dirty = false
         copy.conflict = false
         editor.openExisting(copy)
@@ -1822,7 +1822,7 @@ ApplicationWindow {
         }
         if (mutationConfirmation.needsChoiceFor(source)) {
             mutationConfirmation.openFor(
-                        source, "Apply change",
+                        source, qsTr("Apply change"),
                         {"kind": "save", "draft": updated}, options,
                         futureScopeSupportedForEvent(source))
             return
@@ -1847,7 +1847,7 @@ ApplicationWindow {
         }
         if (mutationConfirmation.needsChoiceFor(value)) {
             mutationConfirmation.openFor(
-                        value, "Delete event",
+                        value, qsTr("Delete event"),
                         {"kind": "delete", "eventId": String(value.id)}, options,
                         futureScopeSupportedForEvent(value))
             return

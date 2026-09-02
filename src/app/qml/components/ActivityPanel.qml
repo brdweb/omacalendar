@@ -78,7 +78,7 @@ Drawer {
             Layout.bottomMargin: 10
 
             AppCloseButton {
-                toolTipText: "Close activity center"
+                toolTipText: qsTr("Close activity center")
                 onClicked: root.close()
             }
 
@@ -86,13 +86,13 @@ Drawer {
                 Layout.fillWidth: true
                 spacing: 2
                 Text {
-                    text: "Activity center"
+                    text: qsTr("Activity center")
                     color: Theme.text
                     font.pixelSize: Theme.fontSize + 4
                     font.weight: Font.Bold
                 }
                 Text {
-                    text: root.connected ? root.statusText : "Calendar service offline"
+                    text: root.connected ? root.statusText : qsTr("Calendar service offline")
                     color: Theme.mutedText
                     font.pixelSize: Theme.microFontSize
                     elide: Text.ElideRight
@@ -112,8 +112,8 @@ Drawer {
                     searchField.forceActiveFocus()
             }
 
-            AppTabButton { text: "Search" }
-            AppTabButton { text: "Invites" + (root.modelCount(
+            AppTabButton { text: qsTr("Search") }
+            AppTabButton { text: qsTr("Invites") + (root.modelCount(
                                                 root.effectiveInvitationsModel) > 0
                                             ? "  " + root.modelCount(
                                                 root.effectiveInvitationsModel) : "") }
@@ -133,8 +133,8 @@ Drawer {
                     AppTextField {
                         id: searchField
                         Layout.fillWidth: true
-                        placeholderText: "Search events, people, notes, locations…"
-                        accessibleName: "Search all events"
+                        placeholderText: qsTr("Search events, people, notes, locations…")
+                        accessibleName: qsTr("Search all events")
                         inputMethodHints: Qt.ImhNoPredictiveText
                         onTextEdited: searchDelay.restart()
                         onAccepted: root.submitSearch()
@@ -155,7 +155,7 @@ Drawer {
                             model: root.calendarFilterModel()
                             textRole: "name"
                             valueRole: "id"
-                            Accessible.name: "Search calendar filter"
+                            Accessible.name: qsTr("Search calendar filter")
                             onActivated: root.submitSearch()
                         }
                         AppComboBox {
@@ -164,22 +164,22 @@ Drawer {
                             model: root.accountFilterModel()
                             textRole: "name"
                             valueRole: "id"
-                            Accessible.name: "Search account filter"
+                            Accessible.name: qsTr("Search account filter")
                             onActivated: root.submitSearch()
                         }
                         AppComboBox {
                             id: searchInvitationFilter
                             Layout.fillWidth: true
                             model: [
-                                {"text": "Any response", "value": ""},
-                                {"text": "Needs response", "value": "needsAction"},
-                                {"text": "Accepted", "value": "accepted"},
-                                {"text": "Maybe", "value": "tentative"},
-                                {"text": "Declined", "value": "declined"}
+                                {"text": qsTr("Any response"), "value": ""},
+                                {"text": qsTr("Needs response"), "value": "needsAction"},
+                                {"text": qsTr("Accepted"), "value": "accepted"},
+                                {"text": qsTr("Maybe"), "value": "tentative"},
+                                {"text": qsTr("Declined"), "value": "declined"}
                             ]
                             textRole: "text"
                             valueRole: "value"
-                            Accessible.name: "Search invitation response filter"
+                            Accessible.name: qsTr("Search invitation response filter")
                             onActivated: root.submitSearch()
                         }
                     }
@@ -188,15 +188,15 @@ Drawer {
                         AppTextField {
                             id: searchStartDate
                             Layout.fillWidth: true
-                            placeholderText: "From YYYY-MM-DD"
-                            accessibleName: "Search start date"
+                            placeholderText: qsTr("From YYYY-MM-DD")
+                            accessibleName: qsTr("Search start date")
                             onAccepted: root.submitSearch()
                         }
                         AppTextField {
                             id: searchEndDate
                             Layout.fillWidth: true
-                            placeholderText: "Through YYYY-MM-DD"
-                            accessibleName: "Search end date"
+                            placeholderText: qsTr("Through YYYY-MM-DD")
+                            accessibleName: qsTr("Search end date")
                             onAccepted: root.submitSearch()
                         }
                     }
@@ -224,11 +224,11 @@ Drawer {
                             width: Math.min(300, parent.width - 24)
                             iconText: "⌕"
                             title: searchField.text.trim().length === 0
-                                   ? "Search every calendar"
-                                   : "No matching events"
+                                   ? qsTr("Search every calendar")
+                                   : qsTr("No matching events")
                             description: searchField.text.trim().length === 0
-                                         ? "Results include titles, people, notes, and locations."
-                                         : "Try fewer words or a different spelling."
+                                         ? qsTr("Results include titles, people, notes, and locations.")
+                                         : qsTr("Try fewer words or a different spelling.")
                         }
                     }
                 }
@@ -267,7 +267,7 @@ Drawer {
                                 Text {
                                     Layout.fillWidth: true
                                     text: invitationCard.modelData.summary
-                                          || "Untitled invitation"
+                                          || qsTr("Untitled invitation")
                                     color: Theme.text
                                     font.pixelSize: Theme.fontSize
                                     font.weight: Font.DemiBold
@@ -275,7 +275,7 @@ Drawer {
                                 }
                                 StatusBadge {
                                     visible: invitationCard.modelData.seen !== true
-                                    text: "New"
+                                    text: qsTr("New")
                                     tone: "info"
                                 }
                             }
@@ -289,7 +289,7 @@ Drawer {
                             RowLayout {
                                 Layout.fillWidth: true
                                 AppButton {
-                                    text: "Decline"
+                                    text: qsTr("Decline")
                                     compact: true
                                     quiet: true
                                     enabled: root.invitationResponseSupported(
@@ -298,7 +298,7 @@ Drawer {
                                                    invitationCard.modelData, "declined")
                                 }
                                 AppButton {
-                                    text: "Maybe"
+                                    text: qsTr("Maybe")
                                     compact: true
                                     enabled: root.invitationResponseSupported(
                                                  invitationCard.modelData)
@@ -306,7 +306,7 @@ Drawer {
                                                    invitationCard.modelData, "tentative")
                                 }
                                 AppButton {
-                                    text: "Accept"
+                                    text: qsTr("Accept")
                                     compact: true
                                     primary: true
                                     enabled: root.invitationResponseSupported(
@@ -317,14 +317,14 @@ Drawer {
                                 Item { Layout.fillWidth: true }
                                 AppButton {
                                     visible: invitationCard.modelData.seen !== true
-                                    text: "Mark seen"
+                                    text: qsTr("Mark seen")
                                     compact: true
                                     quiet: true
                                     onClicked: root.invitationSeenRequested(
                                                    invitationCard.modelData.id)
                                 }
                                 AppButton {
-                                    text: "Open"
+                                    text: qsTr("Open")
                                     compact: true
                                     quiet: true
                                     onClicked: root.openInvitation(
@@ -335,7 +335,7 @@ Drawer {
                                 visible: !root.invitationResponseSupported(
                                              invitationCard.modelData)
                                 Layout.fillWidth: true
-                                text: "RSVP is unavailable because this calendar is read-only or its server did not advertise scheduling support."
+                                text: qsTr("RSVP is unavailable because this calendar is read-only or its server did not advertise scheduling support.")
                                 color: Theme.mutedText
                                 font.pixelSize: Theme.microFontSize
                                 wrapMode: Text.Wrap
@@ -348,8 +348,8 @@ Drawer {
                         anchors.centerIn: parent
                         width: Math.min(300, parent.width - 24)
                         iconText: "◇"
-                        title: "No invitations waiting"
-                        description: "New invitations and changed meeting requests appear here."
+                        title: qsTr("No invitations waiting")
+                        description: qsTr("New invitations and changed meeting requests appear here.")
                     }
                 }
             }
@@ -388,18 +388,18 @@ Drawer {
                                     Layout.fillWidth: true
                                     text: conflictCard.modelData.summary
                                           || conflictCard.modelData.eventSummary
-                                          || "Calendar conflict"
+                                          || qsTr("Calendar conflict")
                                     color: Theme.text
                                     font.pixelSize: Theme.fontSize
                                     font.weight: Font.DemiBold
                                     wrapMode: Text.Wrap
                                 }
-                                StatusBadge { text: "Needs review"; tone: "danger" }
+                                StatusBadge { text: qsTr("Needs review"); tone: "danger" }
                             }
                             Text {
                                 Layout.fillWidth: true
                                 text: conflictCard.modelData.message
-                                      || "This event changed both locally and remotely. Choose which version to keep."
+                                      || qsTr("This event changed both locally and remotely. Choose which version to keep.")
                                 color: Theme.mutedText
                                 font.pixelSize: Theme.smallFontSize
                                 wrapMode: Text.Wrap
@@ -407,21 +407,21 @@ Drawer {
                             RowLayout {
                                 Layout.fillWidth: true
                                 AppButton {
-                                    text: "Keep remote"
+                                    text: qsTr("Keep remote")
                                     compact: true
                                     onClicked: root.conflictResolutionRequested(
                                                    conflictCard.modelData.id,
                                                    "keep_remote", {})
                                 }
                                 AppButton {
-                                    text: "Keep mine"
+                                    text: qsTr("Keep mine")
                                     compact: true
                                     onClicked: root.conflictResolutionRequested(
                                                    conflictCard.modelData.id,
                                                    "keep_local", {})
                                 }
                                 AppButton {
-                                    text: "Review merge"
+                                    text: qsTr("Review merge")
                                     compact: true
                                     primary: true
                                     onClicked: root.conflictMergeRequested(
@@ -436,8 +436,8 @@ Drawer {
                         anchors.centerIn: parent
                         width: Math.min(300, parent.width - 24)
                         iconText: "✓"
-                        title: "No conflicts"
-                        description: "When local and remote edits collide, both versions stay safe here."
+                        title: qsTr("No conflicts")
+                        description: qsTr("When local and remote edits collide, both versions stay safe here.")
                     }
                 }
             }
@@ -460,7 +460,7 @@ Drawer {
                             anchors.margins: 12
                             StatusBadge {
                                 dotOnly: true
-                                text: root.connected ? "Connected" : "Offline"
+                                text: root.connected ? qsTr("Connected") : qsTr("Offline")
                                 tone: root.connected ? (root.syncing ? "info" : "success")
                                                      : "danger"
                             }
@@ -468,9 +468,9 @@ Drawer {
                                 Layout.fillWidth: true
                                 spacing: 1
                                 Text {
-                                    text: root.syncing ? "Synchronizing"
-                                                       : root.connected ? "Calendar service connected"
-                                                                        : "Working offline"
+                                    text: root.syncing ? qsTr("Synchronizing")
+                                                       : root.connected ? qsTr("Calendar service connected")
+                                                                        : qsTr("Working offline")
                                     color: Theme.text
                                     font.pixelSize: Theme.fontSize
                                     font.weight: Font.DemiBold
@@ -484,7 +484,7 @@ Drawer {
                                 }
                             }
                             AppButton {
-                                text: "Sync now"
+                                text: qsTr("Sync now")
                                 compact: true
                                 enabled: root.connected && !root.syncing
                                 onClicked: root.syncRequested()
@@ -492,7 +492,7 @@ Drawer {
                         }
                     }
 
-                    SectionLabel { text: "PENDING & FAILED OPERATIONS" }
+                    SectionLabel { text: qsTr("PENDING & FAILED OPERATIONS") }
                     ListView {
                         id: operationList
                         Layout.fillWidth: true
@@ -519,7 +519,7 @@ Drawer {
                                 spacing: 9
                                 StatusBadge {
                                     dotOnly: true
-                                    text: operationCard.modelData.state || "pending"
+                                    text: operationCard.modelData.state || qsTr("pending")
                                     tone: operationCard.modelData.state === "blocked"
                                           ? "danger"
                                           : operationCard.modelData.state === "retry_wait"
@@ -539,7 +539,7 @@ Drawer {
                                     Text {
                                         Layout.fillWidth: true
                                         text: operationCard.modelData.errorMessage
-                                              || String(operationCard.modelData.state || "pending").replace(/_/g, " ")
+                                              || String(operationCard.modelData.state || qsTr("pending")).replace(/_/g, " ")
                                         color: Theme.mutedText
                                         font.pixelSize: Theme.microFontSize
                                         elide: Text.ElideRight
@@ -548,13 +548,13 @@ Drawer {
                                 AppButton {
                                     visible: operationCard.modelData.state === "blocked"
                                              || operationCard.modelData.state === "retry_wait"
-                                    text: "Retry"
+                                    text: qsTr("Retry")
                                     compact: true
                                     onClicked: root.operationRetryRequested(
                                                    operationCard.modelData.id)
                                 }
                                 AppButton {
-                                    text: "Discard"
+                                    text: qsTr("Discard")
                                     compact: true
                                     quiet: true
                                     destructive: true
@@ -569,8 +569,8 @@ Drawer {
                             anchors.centerIn: parent
                             width: Math.min(300, parent.width - 24)
                             iconText: "✓"
-                            title: "Everything is sent"
-                            description: "Pending writes, retries, and blocked changes appear here."
+                            title: qsTr("Everything is sent")
+                            description: qsTr("Pending writes, retries, and blocked changes appear here.")
                         }
                     }
                 }
@@ -583,7 +583,7 @@ Drawer {
         anchors.centerIn: Overlay.overlay
         width: Math.min(450, Overlay.overlay ? Overlay.overlay.width - 48 : 450)
         modal: true
-        title: "Respond to recurring invitation?"
+        title: qsTr("Respond to recurring invitation?")
         standardButtons: Dialog.Cancel
         closePolicy: Popup.CloseOnEscape
         onOpened: invitationScopeBox.currentIndex = 0
@@ -592,7 +592,7 @@ Drawer {
             spacing: 12
             Text {
                 Layout.fillWidth: true
-                text: "Choose which part of the recurring invitation receives this response."
+                text: qsTr("Choose which part of the recurring invitation receives this response.")
                 color: Theme.text
                 font.pixelSize: Theme.smallFontSize
                 wrapMode: Text.Wrap
@@ -604,14 +604,14 @@ Drawer {
                 model: root.invitationScopeChoices()
                 textRole: "text"
                 valueRole: "value"
-                Accessible.name: "Invitation recurrence scope"
+                Accessible.name: qsTr("Invitation recurrence scope")
             }
             RowLayout {
                 Layout.fillWidth: true
                 Item { Layout.fillWidth: true }
                 AppButton {
                     objectName: "confirmInvitationResponse"
-                    text: "Send response"
+                    text: qsTr("Send response")
                     primary: true
                     enabled: Boolean(invitationScopeBox.currentValue)
                     onClicked: root.completeInvitationResponse(
@@ -632,7 +632,7 @@ Drawer {
                                                     timePattern())
         const organizer = value.organizer && (value.organizer.displayName
                                               || value.organizer.email)
-        return when + (organizer ? "\nFrom " + organizer : "")
+        return when + (organizer ? qsTr("\nFrom ") + organizer : "")
     }
 
     function calendarForId(calendarId) {
@@ -666,10 +666,10 @@ Drawer {
     }
 
     function invitationScopeChoices() {
-        const choices = [{"text": "Choose recurrence scope…", "value": ""}]
+        const choices = [{"text": qsTr("Choose recurrence scope…"), "value": ""}]
         if (String(pendingInvitation.recurrenceId || "").length > 0)
-            choices.push({"text": "This occurrence", "value": "occurrence"})
-        choices.push({"text": "Entire series", "value": "series"})
+            choices.push({"text": qsTr("This occurrence"), "value": "occurrence"})
+        choices.push({"text": qsTr("Entire series"), "value": "series"})
         return choices
     }
 
@@ -708,19 +708,19 @@ Drawer {
     }
 
     function calendarFilterModel() {
-        const values = [{"id": "", "name": "All calendars"}]
+        const values = [{"id": "", "name": qsTr("All calendars")}]
         for (let index = 0; index < calendars.length; ++index)
             values.push(calendars[index])
         return values
     }
 
     function accountFilterModel() {
-        const values = [{"id": "", "name": "All accounts"}]
+        const values = [{"id": "", "name": qsTr("All accounts")}]
         for (let index = 0; index < accounts.length; ++index) {
             values.push({"id": accounts[index].id,
                          "name": accounts[index].displayName
                                  || accounts[index].principal
-                                 || accounts[index].provider || "Account"})
+                                 || accounts[index].provider || qsTr("Account")})
         }
         return values
     }

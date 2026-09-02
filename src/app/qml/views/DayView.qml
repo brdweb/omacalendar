@@ -54,7 +54,7 @@ Item {
 
                 Text {
                     Layout.preferredWidth: 54
-                    text: "all-day\nspanning"
+                    text: qsTr("all-day\nspanning")
                     color: Theme.mutedText
                     horizontalAlignment: Text.AlignRight
                     font.pixelSize: Theme.microFontSize
@@ -75,7 +75,7 @@ Item {
                                       === root.selectedEventReference
                             draggable: root.eventEditable(modelData)
                             showTime: !modelData.allDay
-                            timeText: modelData.allDay ? "" : "multi-day"
+                            timeText: modelData.allDay ? "" : qsTr("multi-day")
                             compact: true
                             onActivated: value => root.eventActivated(value)
                             onDragStarted: root.headerDragActive = true
@@ -106,7 +106,7 @@ Item {
                     border.color: Theme.accent
                     Text {
                         anchors.centerIn: parent
-                        text: "‹ day"
+                        text: qsTr("‹ day")
                         color: Theme.text
                         font.pixelSize: Theme.microFontSize
                         font.weight: Font.DemiBold
@@ -135,7 +135,7 @@ Item {
                     border.color: Theme.accent
                     Text {
                         anchors.centerIn: parent
-                        text: "day ›"
+                        text: qsTr("day ›")
                         color: Theme.text
                         font.pixelSize: Theme.microFontSize
                         font.weight: Font.DemiBold
