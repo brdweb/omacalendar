@@ -174,3 +174,78 @@ never opens the database or contacts providers directly.
 `system.info` returns protocol/schema versions, the callable method list, and
 provider capabilities. App and widget disable unsupported controls and explain
 the limitation instead of invoking an unavailable or unsafe operation.
+
+## Stability and deprecation policy
+
+The Quickshell widget is released independently of the app, and IPC 2 is the
+natural integration point for third-party Omarchy surfaces — bar modules,
+launchers, and scripts. This section states what any of those consumers may
+rely on across `omacalendard` versions.
+
+### Compatibility guarantee within a major version
+
+Within `protocolMajor: 2`, the surface described in this document is
+additive-only:
+
+- An existing method's accepted params, required fields, and result fields
+  never change meaning or get removed in a minor revision.
+- A new method, a new optional param, or a new result field ships as a
+  `protocolMinor` bump and is discovered through `system.info`'s `methods`
+  list — a client must not assume a method is present, only rely on ones it
+  found there.
+- A renamed method keeps its old name callable as an alias, exactly like the
+  existing `accounts.addGoogle`/`google.oauthStart`,
+  `accounts.addCalDav`/`accounts.createCalDav`, and `outbox.list`/
+  `outbox.retry` pairs documented above. A rename is not a removal.
+
+A client that only calls methods it found in `system.info`'s `methods` array,
+treats every result field as optional unless this document marks it required,
+and rejects (rather than assumes) a `protocolMajor` it doesn't recognize,
+stays compatible across every IPC 2.x minor release without a coordinated
+update.
+
+### Deprecation notice
+
+Deprecating a method or field lands in the same pull request as the change
+that introduces its replacement, per `CONTRIBUTING.md`'s wire-contract rule,
+and has two parts:
+
+1. This document notes the deprecation next to the method or field's existing
+   entry (for example, "Deprecated: superseded by `X`; see Removal criteria
+   below") and adds a row to the Deprecations log at the end of this section
+   recording the app version and date the deprecation was announced.
+2. The deprecated method or field keeps working exactly as before —
+   deprecation is a notice, not a behavior change, and it is not removed from
+   `system.info`'s `methods` list during its notice window. `system.info`
+   carries no per-method deprecation flag today, so a consumer cannot detect
+   a deprecation automatically; it has to track this document.
+
+Minimum notice is one released stable app line (`1.x`, post-`1.0.0`) after
+the deprecation is documented here — not the date the replacement shipped,
+which may be the same release. Because the widget has its own release
+cadence and cannot be forced onto the app's schedule, the window is measured
+in stable app releases, so a widget maintainer who updates infrequently still
+gets the full window from whenever they next read this document.
+
+### Removal criteria
+
+A deprecated method or field is deleted from the protocol, and from this
+document, only when all of the following hold:
+
+- The minimum notice window above has elapsed.
+- Nothing else in this document still recommends it to a new consumer.
+- The removal itself ships on a `protocolMajor` bump, never a minor one —
+  deleting a method a client might still call is a breaking change by
+  definition, and a major-version mismatch is already the mechanism this
+  protocol uses to reject an incompatible peer cleanly (see Versioning
+  above), rather than failing an individual call unpredictably.
+
+In practice, a deprecated IPC 2.x method or field stays callable throughout
+2.x and disappears only if and when `protocolMajor: 3` ships. IPC 2 has had
+no major bump and no removal to date; the aliases listed above are the only
+cases of "old name kept alive alongside a new one" the protocol currently
+carries, and none are scheduled for removal.
+
+### Deprecations
+
+None recorded yet.

@@ -237,7 +237,7 @@ Dialog {
                     : App.wallTimeToUtc(endDateField.text, endTimeField.text,
                                         value.endTimeZone)
             if (!value.startUtc || !value.endUtc) {
-                validationError = "That wall time does not exist in the selected time zone."
+                validationError = qsTr("That wall time does not exist in the selected time zone.")
                 return
             }
             value.startDate = ""
@@ -260,40 +260,40 @@ Dialog {
 
     function validateFields() {
         if (readOnly)
-            return "This event belongs to a read-only calendar."
+            return qsTr("This event belongs to a read-only calendar.")
         if (!titleField.text.trim())
-            return "Add an event title."
+            return qsTr("Add an event title.")
         if (calendarBox.currentIndex < 0)
-            return "Choose a writable calendar."
+            return qsTr("Choose a writable calendar.")
         const startDate = new Date(startDateField.text + "T00:00:00")
         const endDate = new Date(endDateField.text + "T00:00:00")
         if (isNaN(startDate.getTime()) || isNaN(endDate.getTime()))
-            return "Enter valid start and end dates."
+            return qsTr("Enter valid start and end dates.")
         if (allDay.checked) {
             if (endDate < startDate)
-                return "The end date must be on or after the start date."
+                return qsTr("The end date must be on or after the start date.")
         } else {
             const start = dateTime(startDateField.text, startTimeField.text)
             const end = dateTime(endDateField.text, endTimeField.text)
             if (isNaN(start.getTime()) || isNaN(end.getTime()))
-                return "Enter valid start and end times."
+                return qsTr("Enter valid start and end times.")
             if (end <= start)
-                return "The event must end after it starts."
+                return qsTr("The event must end after it starts.")
             if (timeKindBox.currentValue !== "floating"
                     && !App.isValidTimeZone(selectedTimeZone()))
-                return "Enter a valid IANA time zone."
+                return qsTr("Enter a valid IANA time zone.")
         }
         if (recurrenceBox.currentIndex === 5
                 && recurrenceRuleField.text.trim().length === 0)
-            return "Enter a recurrence rule for the custom repeat option."
+            return qsTr("Enter a recurrence rule for the custom repeat option.")
         if (recurrenceBox.currentIndex > 0 && !recurrenceEditingSupported)
-            return "This calendar cannot write recurring events."
+            return qsTr("This calendar cannot write recurring events.")
         if (hasGuests && !attendeeEditingSupported)
-            return "This calendar cannot write guests or invitations."
+            return qsTr("This calendar cannot write guests or invitations.")
         if (editing && recurring && !scopeBox.currentValue)
-            return "Choose which recurring events this change applies to."
+            return qsTr("Choose which recurring events this change applies to.")
         if (hasGuests && !notificationBox.currentValue)
-            return "Choose whether guests should be notified."
+            return qsTr("Choose whether guests should be notified.")
         return ""
     }
 
@@ -426,17 +426,17 @@ Dialog {
     function reminderMethodLabel(method) {
         const normalized = String(method || "popup").toLowerCase()
         if (normalized === "email")
-            return "Email"
+            return qsTr("Email")
         if (normalized === "audio")
-            return "Audio"
-        return "Popup"
+            return qsTr("Audio")
+        return qsTr("Popup")
     }
 
     function absoluteReminderText(method, value) {
         const parsed = new Date(value)
         const timestamp = isNaN(parsed.getTime())
                 ? String(value) : Qt.formatDateTime(parsed, Locale.ShortFormat)
-        return reminderMethodLabel(method) + " at " + timestamp
+        return reminderMethodLabel(method) + qsTr(" at ") + timestamp
     }
 
     function attendeeText(values) {
@@ -532,7 +532,7 @@ Dialog {
             spacing: 10
 
             AppCloseButton {
-                toolTipText: "Close event editor"
+                toolTipText: qsTr("Close event editor")
                 onClicked: editor.close()
             }
 
@@ -540,7 +540,7 @@ Dialog {
                 Layout.fillWidth: true
                 spacing: 1
                 Text {
-                    text: editor.editing ? "Event details" : "New event"
+                    text: editor.editing ? qsTr("Event details") : qsTr("New event")
                     color: Theme.text
                     font.pixelSize: Theme.fontSize + 5
                     font.weight: Font.Bold
@@ -556,9 +556,9 @@ Dialog {
                 visible: editor.eventData.dirty === true
                          || editor.eventData.conflict === true
                          || editor.readOnly
-                text: editor.eventData.conflict === true ? "Conflict"
-                                                         : editor.readOnly ? "Read only"
-                                                                           : "Pending"
+                text: editor.eventData.conflict === true ? qsTr("Conflict")
+                                                         : editor.readOnly ? qsTr("Read only")
+                                                                           : qsTr("Pending")
                 tone: editor.eventData.conflict === true ? "danger" : "info"
             }
         }
@@ -594,20 +594,20 @@ Dialog {
                         anchors.fill: parent
                         anchors.margins: 10
                         text: editor.eventData.conflict === true
-                              ? "A newer local or remote update is being selected in the background."
-                              : "This calendar is read-only. You can inspect details or duplicate the event into a writable calendar."
+                              ? qsTr("A newer local or remote update is being selected in the background.")
+                              : qsTr("This calendar is read-only. You can inspect details or duplicate the event into a writable calendar.")
                         color: Theme.text
                         font.pixelSize: Theme.smallFontSize
                         wrapMode: Text.Wrap
                     }
                 }
 
-                SectionLabel { text: "EVENT" }
+                SectionLabel { text: qsTr("EVENT") }
                 AppTextField {
                     id: titleField
                     Layout.fillWidth: true
-                    placeholderText: "Event title"
-                    accessibleName: "Event title"
+                    placeholderText: qsTr("Event title")
+                    accessibleName: qsTr("Event title")
                     enabled: !editor.readOnly
                     font.pixelSize: Theme.fontSize + 2
                 }
@@ -622,17 +622,17 @@ Dialog {
                         textRole: "name"
                         valueRole: "id"
                         enabled: !editor.readOnly
-                        Accessible.name: "Calendar"
+                        Accessible.name: qsTr("Calendar")
                     }
                     AppCheckBox {
                         id: allDay
-                        text: "All day"
+                        text: qsTr("All day")
                         enabled: !editor.readOnly
-                        Accessible.name: "All-day event"
+                        Accessible.name: qsTr("All-day event")
                     }
                 }
 
-                SectionLabel { text: "DATE & TIME" }
+                SectionLabel { text: qsTr("DATE & TIME") }
                 GridLayout {
                     Layout.fillWidth: true
                     columns: 4
@@ -640,46 +640,46 @@ Dialog {
                     rowSpacing: 8
 
                     Text {
-                        text: "Starts"
+                        text: qsTr("Starts")
                         color: Theme.mutedText
                         font.pixelSize: Theme.smallFontSize
                     }
                     AppTextField {
                         id: startDateField
                         Layout.fillWidth: true
-                        placeholderText: "YYYY-MM-DD"
-                        accessibleName: "Start date"
+                        placeholderText: qsTr("YYYY-MM-DD")
+                        accessibleName: qsTr("Start date")
                         enabled: !editor.readOnly
                     }
                     AppTextField {
                         id: startTimeField
                         visible: !allDay.checked
                         Layout.fillWidth: true
-                        placeholderText: "09:00"
-                        accessibleName: "Start time"
+                        placeholderText: qsTr("09:00")
+                        accessibleName: qsTr("Start time")
                         enabled: !editor.readOnly
                     }
                     Item { visible: allDay.checked; Layout.fillWidth: true }
                     Item { Layout.preferredWidth: 1 }
 
                     Text {
-                        text: "Ends"
+                        text: qsTr("Ends")
                         color: Theme.mutedText
                         font.pixelSize: Theme.smallFontSize
                     }
                     AppTextField {
                         id: endDateField
                         Layout.fillWidth: true
-                        placeholderText: "YYYY-MM-DD"
-                        accessibleName: "End date"
+                        placeholderText: qsTr("YYYY-MM-DD")
+                        accessibleName: qsTr("End date")
                         enabled: !editor.readOnly
                     }
                     AppTextField {
                         id: endTimeField
                         visible: !allDay.checked
                         Layout.fillWidth: true
-                        placeholderText: "10:00"
-                        accessibleName: "End time"
+                        placeholderText: qsTr("10:00")
+                        accessibleName: qsTr("End time")
                         enabled: !editor.readOnly
                     }
                     Item { visible: allDay.checked; Layout.fillWidth: true }
@@ -692,17 +692,17 @@ Dialog {
                         id: timeKindBox
                         Layout.preferredWidth: 145
                         model: [
-                            {"text": "Zoned time", "value": "zoned"},
-                            {"text": "Floating time", "value": "floating"}
+                            {"text": qsTr("Zoned time"), "value": "zoned"},
+                            {"text": qsTr("Floating time"), "value": "floating"}
                         ]
                         textRole: "text"
                         valueRole: "value"
                         enabled: !editor.readOnly
-                        Accessible.name: "Event time type"
+                        Accessible.name: qsTr("Event time type")
                         ToolTip.visible: hovered
                         ToolTip.text: currentValue === "floating"
-                                      ? "Keeps the same wall-clock time in every time zone"
-                                      : "Keeps the event at one absolute moment"
+                                      ? qsTr("Keeps the same wall-clock time in every time zone")
+                                      : qsTr("Keeps the event at one absolute moment")
                     }
                     AppComboBox {
                         id: timeZoneBox
@@ -710,17 +710,17 @@ Dialog {
                         visible: timeKindBox.currentValue !== "floating"
                         Layout.fillWidth: true
                         model: App.availableTimeZoneIds
-                        Accessible.name: "Time zone"
+                        Accessible.name: qsTr("Time zone")
                         enabled: !editor.readOnly
                     }
                 }
 
-                SectionLabel { text: "DETAILS" }
+                SectionLabel { text: qsTr("DETAILS") }
                 AppTextField {
                     id: locationField
                     Layout.fillWidth: true
-                    placeholderText: "Location"
-                    accessibleName: "Location"
+                    placeholderText: qsTr("Location")
+                    accessibleName: qsTr("Location")
                     enabled: !editor.readOnly
                 }
                 RowLayout {
@@ -728,14 +728,14 @@ Dialog {
                     AppTextField {
                         id: urlField
                         Layout.fillWidth: true
-                        placeholderText: "Meeting or event URL"
-                        accessibleName: "Meeting or event URL"
+                        placeholderText: qsTr("Meeting or event URL")
+                        accessibleName: qsTr("Meeting or event URL")
                         enabled: !editor.readOnly
                         inputMethodHints: Qt.ImhUrlCharactersOnly
                     }
                     AppButton {
                         visible: urlField.text.trim().length > 0
-                        text: "Join"
+                        text: qsTr("Join")
                         compact: true
                         onClicked: editor.joinRequested(urlField.text.trim())
                     }
@@ -744,13 +744,13 @@ Dialog {
                     id: notesField
                     Layout.fillWidth: true
                     Layout.preferredHeight: 88
-                    placeholderText: "Notes"
+                    placeholderText: qsTr("Notes")
                     color: Theme.text
                     placeholderTextColor: Theme.mutedText
                     enabled: !editor.readOnly
                     wrapMode: TextEdit.Wrap
                     selectByMouse: true
-                    Accessible.name: "Event notes"
+                    Accessible.name: qsTr("Event notes")
                     background: Rectangle {
                         radius: Theme.smallRadius
                         color: Theme.background
@@ -764,44 +764,44 @@ Dialog {
                         id: availabilityBox
                         Layout.fillWidth: true
                         model: [
-                            {"text": "Busy", "value": "busy"},
-                            {"text": "Free", "value": "free"}
+                            {"text": qsTr("Busy"), "value": "busy"},
+                            {"text": qsTr("Free"), "value": "free"}
                         ]
                         textRole: "text"
                         valueRole: "value"
                         enabled: !editor.readOnly
-                        Accessible.name: "Availability"
+                        Accessible.name: qsTr("Availability")
                     }
                     AppComboBox {
                         id: visibilityBox
                         Layout.fillWidth: true
                         model: [
-                            {"text": "Default visibility", "value": "default"},
-                            {"text": "Public", "value": "public"},
-                            {"text": "Private", "value": "private"},
-                            {"text": "Confidential", "value": "confidential"}
+                            {"text": qsTr("Default visibility"), "value": "default"},
+                            {"text": qsTr("Public"), "value": "public"},
+                            {"text": qsTr("Private"), "value": "private"},
+                            {"text": qsTr("Confidential"), "value": "confidential"}
                         ]
                         textRole: "text"
                         valueRole: "value"
                         enabled: !editor.readOnly
-                        Accessible.name: "Visibility"
+                        Accessible.name: qsTr("Visibility")
                     }
                 }
 
-                SectionLabel { text: "REPEAT" }
+                SectionLabel { text: qsTr("REPEAT") }
                 AppComboBox {
                     id: recurrenceBox
                     Layout.fillWidth: true
-                    model: ["Does not repeat", "Daily", "Weekly", "Monthly", "Yearly", "Custom rule"]
+                    model: [qsTr("Does not repeat"), qsTr("Daily"), qsTr("Weekly"), qsTr("Monthly"), qsTr("Yearly"), qsTr("Custom rule")]
                     enabled: !editor.readOnly && editor.recurrenceEditingSupported
-                    Accessible.name: "Event recurrence"
+                    Accessible.name: qsTr("Event recurrence")
                 }
                 AppTextField {
                     id: recurrenceRuleField
                     visible: recurrenceBox.currentIndex === 5
                     Layout.fillWidth: true
-                    placeholderText: "FREQ=WEEKLY;INTERVAL=2;BYDAY=MO"
-                    accessibleName: "Custom recurrence rule"
+                    placeholderText: qsTr("FREQ=WEEKLY;INTERVAL=2;BYDAY=MO")
+                    accessibleName: qsTr("Custom recurrence rule")
                     enabled: !editor.readOnly
                 }
                 AppComboBox {
@@ -811,26 +811,26 @@ Dialog {
                     Layout.fillWidth: true
                     model: editor.futureScopeSupported
                            ? [
-                               {"text": "Choose recurrence scope…", "value": ""},
-                               {"text": "This occurrence", "value": "occurrence"},
-                               {"text": "This and future occurrences", "value": "future"},
-                               {"text": "Entire series", "value": "series"}
+                               {"text": qsTr("Choose recurrence scope…"), "value": ""},
+                               {"text": qsTr("This occurrence"), "value": "occurrence"},
+                               {"text": qsTr("This and future occurrences"), "value": "future"},
+                               {"text": qsTr("Entire series"), "value": "series"}
                            ] : [
-                               {"text": "Choose recurrence scope…", "value": ""},
-                               {"text": "This occurrence", "value": "occurrence"},
-                               {"text": "Entire series", "value": "series"}
+                               {"text": qsTr("Choose recurrence scope…"), "value": ""},
+                               {"text": qsTr("This occurrence"), "value": "occurrence"},
+                               {"text": qsTr("Entire series"), "value": "series"}
                            ]
                     textRole: "text"
                     valueRole: "value"
-                    Accessible.name: "Recurring event edit scope"
+                    Accessible.name: qsTr("Recurring event edit scope")
                 }
                 Text {
                     visible: editor.editing && editor.recurring
                              && !editor.futureScopeSupported
                     Layout.fillWidth: true
                     text: editor.movingCalendars
-                          ? "This and future occurrences cannot be moved between calendars. Choose this occurrence or the entire series."
-                          : "This calendar has not advertised safe support for changing this and future occurrences."
+                          ? qsTr("This and future occurrences cannot be moved between calendars. Choose this occurrence or the entire series.")
+                          : qsTr("This calendar has not advertised safe support for changing this and future occurrences.")
                     color: Theme.mutedText
                     font.pixelSize: Theme.smallFontSize
                     wrapMode: Text.Wrap
@@ -838,24 +838,24 @@ Dialog {
                 Text {
                     visible: !editor.readOnly && !editor.recurrenceEditingSupported
                     Layout.fillWidth: true
-                    text: "This calendar cannot write recurring events. Existing recurrence data is preserved."
+                    text: qsTr("This calendar cannot write recurring events. Existing recurrence data is preserved.")
                     color: Theme.mutedText
                     font.pixelSize: Theme.smallFontSize
                     wrapMode: Text.Wrap
                 }
 
-                SectionLabel { text: "GUESTS" }
+                SectionLabel { text: qsTr("GUESTS") }
                 TextArea {
                     id: attendeeField
                     Layout.fillWidth: true
                     Layout.preferredHeight: 64
-                    placeholderText: "Guest email addresses, separated by commas"
+                    placeholderText: qsTr("Guest email addresses, separated by commas")
                     color: Theme.text
                     placeholderTextColor: Theme.mutedText
                     enabled: !editor.readOnly && editor.attendeeEditingSupported
                     wrapMode: TextEdit.Wrap
                     selectByMouse: true
-                    Accessible.name: "Event guests"
+                    Accessible.name: qsTr("Event guests")
                     background: Rectangle {
                         radius: Theme.smallRadius
                         color: Theme.background
@@ -867,21 +867,21 @@ Dialog {
                     visible: editor.hasGuests && editor.attendeeEditingSupported
                     Layout.fillWidth: true
                     model: [
-                        {"text": "Choose guest notification policy…", "value": ""},
-                        {"text": "Do not notify guests", "value": "none"},
-                        {"text": "Notify external guests only", "value": "externalOnly"},
-                        {"text": "Notify all guests", "value": "all"}
+                        {"text": qsTr("Choose guest notification policy…"), "value": ""},
+                        {"text": qsTr("Do not notify guests"), "value": "none"},
+                        {"text": qsTr("Notify external guests only"), "value": "externalOnly"},
+                        {"text": qsTr("Notify all guests"), "value": "all"}
                     ]
                     textRole: "text"
                     valueRole: "value"
-                    Accessible.name: "Guest notification policy"
+                    Accessible.name: qsTr("Guest notification policy")
                 }
                 Text {
                     visible: !editor.readOnly && !editor.attendeeEditingSupported
                     Layout.fillWidth: true
                     text: editor.activeProvider === "caldav"
-                          ? "This CalDAV server did not advertise scheduling, so guest and RSVP writes are disabled. Existing attendee data is preserved."
-                          : "This calendar does not support guest or invitation writes. Existing attendee data is preserved."
+                          ? qsTr("This CalDAV server did not advertise scheduling, so guest and RSVP writes are disabled. Existing attendee data is preserved.")
+                          : qsTr("This calendar does not support guest or invitation writes. Existing attendee data is preserved.")
                     color: Theme.mutedText
                     font.pixelSize: Theme.smallFontSize
                     wrapMode: Text.Wrap
@@ -891,11 +891,11 @@ Dialog {
                     Layout.fillWidth: true
                     SectionLabel {
                         Layout.fillWidth: true
-                        text: "REMINDERS"
+                        text: qsTr("REMINDERS")
                     }
                     AppButton {
                         iconText: "+"
-                        text: "Add"
+                        text: qsTr("Add")
                         compact: true
                         quiet: true
                         enabled: !editor.readOnly && editor.reminderEditingSupported
@@ -931,13 +931,13 @@ Dialog {
                                             reminderRow.method,
                                             reminderRow.absoluteAt)
                                       : reminderRow.kind === "unsupported"
-                                        ? "Provider reminder"
+                                        ? qsTr("Provider reminder")
                                         : reminderRow.minutes === 0
-                                          ? "At start time"
+                                          ? qsTr("At start time")
                                           : reminderRow.minutes < 60
-                                            ? reminderRow.minutes + " minutes before"
+                                            ? reminderRow.minutes + qsTr(" minutes before")
                                             : (reminderRow.minutes / 60)
-                                              + " hours before"
+                                              + qsTr(" hours before")
                                 color: Theme.text
                                 font.pixelSize: Theme.smallFontSize
                                 wrapMode: Text.Wrap
@@ -947,8 +947,8 @@ Dialog {
                                 visible: reminderRow.kind !== "relative"
                                 Layout.fillWidth: true
                                 text: reminderRow.kind === "absolute"
-                                      ? "This absolute reminder is read-only and will be preserved. Remove it to discard it."
-                                      : "This provider reminder format is read-only and will be preserved. Remove it to discard it."
+                                      ? qsTr("This absolute reminder is read-only and will be preserved. Remove it to discard it.")
+                                      : qsTr("This provider reminder format is read-only and will be preserved. Remove it to discard it.")
                                 color: Theme.mutedText
                                 font.pixelSize: Theme.smallFontSize
                                 wrapMode: Text.Wrap
@@ -963,11 +963,11 @@ Dialog {
                             delegate: ItemDelegate {
                                 required property var modelData
                                 width: ListView.view.width
-                                text: modelData === 0 ? "At start time"
-                                                     : modelData < 60 ? modelData + " minutes"
+                                text: modelData === 0 ? qsTr("At start time")
+                                                     : modelData < 60 ? modelData + qsTr(" minutes")
                                                                       : modelData < 1440
-                                                                        ? (modelData / 60) + " hours"
-                                                                        : "1 day"
+                                                                        ? (modelData / 60) + qsTr(" hours")
+                                                                        : qsTr("1 day")
                             }
                             onActivated: index => {
                                 reminderModel.setProperty(reminderRow.index,
@@ -977,7 +977,7 @@ Dialog {
                                 reminderModel.setProperty(reminderRow.index,
                                                           "edited", true)
                             }
-                            Accessible.name: "Reminder time"
+                            Accessible.name: qsTr("Reminder time")
                         }
                         AppButton {
                             objectName: "removeReminder-" + reminderRow.index
@@ -986,7 +986,7 @@ Dialog {
                             quiet: true
                             destructive: true
                             enabled: !editor.readOnly && editor.reminderEditingSupported
-                            toolTipText: "Remove reminder"
+                            toolTipText: qsTr("Remove reminder")
                             onClicked: reminderModel.remove(reminderRow.index)
                         }
                     }
@@ -994,7 +994,7 @@ Dialog {
                 Text {
                     visible: !editor.readOnly && !editor.reminderEditingSupported
                     Layout.fillWidth: true
-                    text: "This calendar cannot write reminders. Existing provider reminders are preserved."
+                    text: qsTr("This calendar cannot write reminders. Existing provider reminders are preserved.")
                     color: Theme.mutedText
                     font.pixelSize: Theme.smallFontSize
                     wrapMode: Text.Wrap
@@ -1024,30 +1024,30 @@ Dialog {
 
             AppButton {
                 visible: editor.editing && !editor.readOnly
-                text: editor.deleteArmed ? "Confirm delete" : "Delete"
+                text: editor.deleteArmed ? qsTr("Confirm delete") : qsTr("Delete")
                 destructive: true
                 onClicked: editor.requestDelete()
             }
             AppButton {
                 visible: editor.editing
-                text: "Duplicate"
+                text: qsTr("Duplicate")
                 quiet: true
                 onClicked: editor.duplicateRequested(editor.eventData)
             }
             AppButton {
                 visible: editor.editing
-                text: "Export .ics"
+                text: qsTr("Export .ics")
                 quiet: true
                 onClicked: editor.exportRequested(String(editor.eventData.id))
             }
             Item { Layout.fillWidth: true }
             AppButton {
-                text: "Cancel"
+                text: qsTr("Cancel")
                 quiet: true
                 onClicked: editor.close()
             }
             AppButton {
-                text: editor.editing ? "Save changes" : "Add event"
+                text: editor.editing ? qsTr("Save changes") : qsTr("Add event")
                 primary: true
                 enabled: !editor.readOnly
                          && titleField.text.trim().length > 0

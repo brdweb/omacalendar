@@ -98,7 +98,7 @@ Item {
                             iconText: "+"
                             quiet: true
                             compact: true
-                            toolTipText: "New event on "
+                            toolTipText: qsTr("New event on ")
                                          + Qt.formatDate(daySection.dateValue, "MMMM d")
                             onClicked: root.createRequested(daySection.dateValue)
                         }
@@ -130,7 +130,7 @@ Item {
                             anchors.left: parent.left
                             anchors.leftMargin: 54
                             anchors.verticalCenter: parent.verticalCenter
-                            text: "No events"
+                            text: qsTr("No events")
                             color: Theme.alpha(Theme.mutedText, 0.68)
                             font.pixelSize: Theme.smallFontSize
                         }
@@ -193,11 +193,11 @@ Item {
         const dayEnd = new Date(dayStart.getFullYear(), dayStart.getMonth(),
                                 dayStart.getDate() + 1)
         if (start < dayStart && end > dayEnd)
-            return "Continues"
+            return qsTr("Continues")
         if (start < dayStart)
-            return "Ends today"
+            return qsTr("Ends today")
         if (end > dayEnd)
-            return "Continues tomorrow"
+            return qsTr("Continues tomorrow")
         return ""
     }
 

@@ -6,6 +6,21 @@ Versioning once public releases begin.
 
 ## [Unreleased]
 
+### Added
+
+- IPC 2 stability and deprecation policy in `docs/IPC.md`, documenting
+  compatibility guarantees, deprecation notice, and removal criteria for the
+  cross-repository protocol.
+- Translatable user-facing strings: every QML view/component and the desktop
+  app's C++ status/error surface now route through `qsTr()`/`tr()`, and an
+  optional `lupdate_ts` CMake target (requires `qt6-tools`) regenerates
+  `src/app/translations/omacalendar_en.ts`. English-only UI, no behavior
+  change; no catalogue is shipped or loaded yet.
+- `docs/DESIGN_TASKS_SCHEMA.md`: a design record answering whether tasks
+  (`VTODO`) fit schema 2. Recommends a sibling `tasks` table, added the same
+  way existing additive schema-2 repairs are, so a first tasks release would
+  not need a migration. No implementation.
+
 ## [1.0.0-alpha] - 2026-08-30
 
 ### Added

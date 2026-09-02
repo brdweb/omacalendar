@@ -81,7 +81,7 @@ AppController::AppController(QObject* parent) : QObject(parent) {
     if (connected()) {
       m_daemonStartAttempted = false;
       setError({});
-      setStatus(QStringLiteral("Calendar service connected"));
+      setStatus(tr("Calendar service connected"));
       QJsonObject subscription{
           {QStringLiteral("topics"),
            QJsonArray{QStringLiteral("accounts"), QStringLiteral("calendars"),
@@ -108,7 +108,7 @@ AppController::AppController(QObject* parent) : QObject(parent) {
       m_refreshTimer.stop();
       m_activeRequests = 0;
       setBusy(false);
-      setStatus(QStringLiteral("Reconnecting to calendar service…"));
+      setStatus(tr("Reconnecting to calendar service…"));
       QTimer::singleShot(500, this, &AppController::startDaemonIfNeeded);
     }
   });
@@ -133,7 +133,7 @@ AppController::AppController(QObject* parent) : QObject(parent) {
               setBusy(m_activeRequests > 0);
             }
             setError(error.value(QStringLiteral("message"))
-                         .toString(QStringLiteral("Calendar service request failed")));
+                         .toString(tr("Calendar service request failed")));
           });
   connect(
       &m_client, &ipc::IpcClient::notificationReceived, this,
@@ -146,7 +146,7 @@ AppController::AppController(QObject* parent) : QObject(parent) {
           const QUrl url(data.value(QStringLiteral("url")).toString());
           if (url.isValid()) {
             QDesktopServices::openUrl(url);
-            setStatus(QStringLiteral("Complete Google sign-in in your browser"));
+            setStatus(tr("Complete Google sign-in in your browser"));
           }
           return;
         }
@@ -164,10 +164,10 @@ AppController::AppController(QObject* parent) : QObject(parent) {
               state == QStringLiteral("reauthorization_required")) {
             setError(status.value(QStringLiteral("message")).toString());
           } else if (state == QStringLiteral("syncing")) {
-            setStatus(QStringLiteral("Synchronizing calendars…"));
+            setStatus(tr("Synchronizing calendars…"));
           } else if (state == QStringLiteral("idle")) {
             setError({});
-            setStatus(QStringLiteral("Synchronization complete"));
+            setStatus(tr("Synchronization complete"));
           }
         }
       });
@@ -267,20 +267,20 @@ void AppController::startDaemonIfNeeded() {
     QProcess::startDetached(executable, {});
     QTimer::singleShot(400, this, &AppController::reconnect);
   } else {
-    setError(QStringLiteral("omacalendard was not found. Start it, then retry."));
+    setError(tr("omacalendard was not found. Start it, then retry."));
   }
 }
 
 QString AppController::send(const QString& method, const QJsonObject& params,
                             ResultHandler handler, const bool contributesToBusy) {
   if (!connected()) {
-    setError(QStringLiteral("Calendar service is not connected"));
+    setError(tr("Calendar service is not connected"));
     startDaemonIfNeeded();
     return {};
   }
   const QString id = m_client.request(method, params);
   if (id.isEmpty()) {
-    setError(QStringLiteral("Could not send request to calendar service"));
+    setError(tr("Could not send request to calendar service"));
     return {};
   }
   m_pending.insert(id, std::move(handler));
@@ -373,7 +373,7 @@ void AppController::refresh() {
 
 void AppController::loadRange(const QDate& firstDate, const QDate& lastDate) {
   if (!firstDate.isValid() || !lastDate.isValid() || firstDate > lastDate) {
-    setError(QStringLiteral("A valid date range is required"));
+    setError(tr("A valid date range is required"));
     return;
   }
   m_rangeStart = firstDate;
@@ -388,7 +388,7 @@ void AppController::loadRange(const QDate& firstDate, const QDate& lastDate) {
         m_events = variantList(value, QStringLiteral("events"));
         applyDisplayTimes(&m_events);
         m_eventsModel.replace(m_events);
-        setStatus(QStringLiteral("Calendar is up to date locally"));
+        setStatus(tr("Calendar is up to date locally"));
         emit eventsChanged();
       },
       false);
@@ -476,8 +476,7 @@ void AppController::saveEvent(const QVariantMap& values,
       m_lastUndoEvent.clear();
       m_lastUndoOptions.clear();
     }
-    setStatus(calendarChanged ? QStringLiteral("Event moved")
-                              : QStringLiteral("Saved — press Ctrl+Z to undo"));
+    setStatus(calendarChanged ? tr("Event moved") : tr("Saved — press Ctrl+Z to undo"));
     emit eventSaved();
     loadRange(m_rangeStart, m_rangeEnd);
   };
@@ -576,7 +575,7 @@ void AppController::requestDeleteEvent(const QString& eventId,
          m_lastUndoOptions.clear();
          m_lastUndoToken =
              value.toObject().value(QStringLiteral("undoToken")).toString();
-         setStatus(QStringLiteral("Delete queued — press Ctrl+Z within 10 seconds"));
+         setStatus(tr("Delete queued — press Ctrl+Z within 10 seconds"));
          const QString undoToken = m_lastUndoToken;
          QTimer::singleShot(10000, this, [this, mutationId, undoToken]() {
            if (m_lastUndoToken == undoToken) {
@@ -663,7 +662,7 @@ void AppController::resolveConflict(const QString& conflictId, const QString& st
   bool ok = false;
   const qint64 id = conflictId.toLongLong(&ok);
   if (!ok) {
-    setError(QStringLiteral("Invalid conflict identifier"));
+    setError(tr("Invalid conflict identifier"));
     return;
   }
   send(QStringLiteral("conflicts.resolve"),
@@ -697,7 +696,7 @@ void AppController::discardOperation(const QString& operationId) {
 
 void AppController::addLocalCalendar(const QString& name, const QString& color) {
   if (name.trimmed().isEmpty()) {
-    setError(QStringLiteral("Local calendar name is required"));
+    setError(tr("Local calendar name is required"));
     return;
   }
   const QJsonObject calendar{
@@ -719,8 +718,7 @@ void AppController::removeCalendar(const QString& calendarId) {
        [this](const QJsonValue& value) {
          const bool pending =
              value.toObject().value(QStringLiteral("accepted")).toBool();
-         setStatus(pending ? QStringLiteral("Deleting calendar…")
-                           : QStringLiteral("Calendar deleted"));
+         setStatus(pending ? tr("Deleting calendar…") : tr("Calendar deleted"));
          refresh();
        });
 }
@@ -733,7 +731,7 @@ void AppController::addIcsSubscription(const QVariantMap& config) {
   QJsonObject params = QJsonObject::fromVariantMap(config);
   params.insert(QStringLiteral("clientMutationId"), newUuid());
   send(QStringLiteral("accounts.addIcs"), params, [this](const QJsonValue&) {
-    setStatus(QStringLiteral("Refreshing calendar subscription…"));
+    setStatus(tr("Refreshing calendar subscription…"));
     refresh();
   });
 }
@@ -742,7 +740,7 @@ void AppController::previewIcsImport(const QUrl& file,
                                      const QString& destinationCalendarId) {
   const QString path = file.toLocalFile();
   if (path.isEmpty() || destinationCalendarId.trimmed().isEmpty()) {
-    setError(QStringLiteral("Choose an iCalendar file and writable destination"));
+    setError(tr("Choose an iCalendar file and writable destination"));
     return;
   }
   send(QStringLiteral("import.preview"),
@@ -750,7 +748,7 @@ void AppController::previewIcsImport(const QUrl& file,
         {QStringLiteral("destinationCalendarId"), destinationCalendarId}},
        [this](const QJsonValue& value) {
          const QVariantMap preview = value.toObject().toVariantMap();
-         setStatus(QStringLiteral("Import preview: %1 event(s), %2 duplicate(s)")
+         setStatus(tr("Import preview: %1 event(s), %2 duplicate(s)")
                        .arg(preview.value(QStringLiteral("count")).toInt())
                        .arg(preview.value(QStringLiteral("duplicateCount")).toInt()));
          emit icsImportPreviewReady(preview);
@@ -762,7 +760,7 @@ void AppController::commitIcsImport(const QUrl& file,
                                     const QString& duplicatePolicy) {
   const QString path = file.toLocalFile();
   if (path.isEmpty() || destinationCalendarId.trimmed().isEmpty()) {
-    setError(QStringLiteral("Choose an iCalendar file and writable destination"));
+    setError(tr("Choose an iCalendar file and writable destination"));
     return;
   }
   send(QStringLiteral("import.commit"),
@@ -771,7 +769,7 @@ void AppController::commitIcsImport(const QUrl& file,
         {QStringLiteral("duplicatePolicy"), duplicatePolicy}},
        [this](const QJsonValue& value) {
          const QVariantMap result = value.toObject().toVariantMap();
-         setStatus(QStringLiteral("Imported %1 event(s); skipped %2; replaced %3")
+         setStatus(tr("Imported %1 event(s); skipped %2; replaced %3")
                        .arg(result.value(QStringLiteral("imported")).toInt())
                        .arg(result.value(QStringLiteral("skipped")).toInt())
                        .arg(result.value(QStringLiteral("replaced")).toInt()));
@@ -783,7 +781,7 @@ void AppController::commitIcsImport(const QUrl& file,
 void AppController::exportIcs(const QVariantMap& scope, const QUrl& destination) {
   QString path = destination.toLocalFile();
   if (path.isEmpty()) {
-    setError(QStringLiteral("Choose a local destination for the iCalendar export"));
+    setError(tr("Choose a local destination for the iCalendar export"));
     return;
   }
   if (!path.endsWith(QStringLiteral(".ics"), Qt::CaseInsensitive)) {
@@ -795,7 +793,7 @@ void AppController::exportIcs(const QVariantMap& scope, const QUrl& destination)
   params.insert(QStringLiteral("overwrite"), true);
   send(QStringLiteral("export.run"), params, [this](const QJsonValue& value) {
     const QVariantMap result = value.toObject().toVariantMap();
-    setStatus(QStringLiteral("Exported %1 event(s) to %2")
+    setStatus(tr("Exported %1 event(s) to %2")
                   .arg(result.value(QStringLiteral("count")).toInt())
                   .arg(result.value(QStringLiteral("path")).toString()));
     emit icsExportCompleted(result);
@@ -805,9 +803,9 @@ void AppController::exportIcs(const QVariantMap& scope, const QUrl& destination)
 void AppController::connectGoogle(const QString& displayName) {
   const QString clientId = google::defaultOAuthClientId();
   if (clientId.isEmpty()) {
-    setError(QStringLiteral(
-        "This build has no bundled Google OAuth client. Enter a Desktop OAuth "
-        "client ID in Accounts & settings."));
+    setError(
+        tr("This build has no bundled Google OAuth client. Enter a Desktop OAuth "
+           "client ID in Accounts & settings."));
     return;
   }
   setError({});
@@ -822,7 +820,7 @@ void AppController::connectGoogle(const QString& displayName) {
          send(QStringLiteral("google.oauthStart"),
               {{QStringLiteral("displayName"), displayName.trimmed()}},
               [this](const QJsonValue&) {
-                setStatus(QStringLiteral("Opening Google authorization…"));
+                setStatus(tr("Opening Google authorization…"));
                 emit accountSetupStarted();
                 refresh();
               });
@@ -834,7 +832,7 @@ void AppController::connectGoogleConfigured(const QString& displayName) {
   send(QStringLiteral("google.oauthStart"),
        {{QStringLiteral("displayName"), displayName.trimmed()}},
        [this](const QJsonValue&) {
-         setStatus(QStringLiteral("Opening Google authorization…"));
+         setStatus(tr("Opening Google authorization…"));
          emit accountSetupStarted();
          refresh();
        });
@@ -844,7 +842,7 @@ void AppController::connectGoogleWithClientId(const QString& clientId,
                                               const QString& displayName) {
   const QString normalizedClientId = clientId.trimmed();
   if (normalizedClientId.isEmpty()) {
-    setError(QStringLiteral("Enter a Google Desktop OAuth client ID"));
+    setError(tr("Enter a Google Desktop OAuth client ID"));
     return;
   }
   setError({});
@@ -859,7 +857,7 @@ void AppController::connectGoogleWithClientId(const QString& clientId,
          send(QStringLiteral("google.oauthStart"),
               {{QStringLiteral("displayName"), displayName.trimmed()}},
               [this](const QJsonValue&) {
-                setStatus(QStringLiteral("Opening Google authorization…"));
+                setStatus(tr("Opening Google authorization…"));
                 emit accountSetupStarted();
                 refresh();
               });
@@ -872,13 +870,13 @@ void AppController::connectGoogleWithCredentials(const QUrl& credentialsFile,
                                                      : credentialsFile.toString();
   QFile file(path);
   if (!file.open(QIODevice::ReadOnly)) {
-    setError(QStringLiteral("Could not read the selected Google credentials file"));
+    setError(tr("Could not read the selected Google credentials file"));
     return;
   }
   QJsonParseError parseError;
   const QJsonDocument document = QJsonDocument::fromJson(file.readAll(), &parseError);
   if (parseError.error != QJsonParseError::NoError || !document.isObject()) {
-    setError(QStringLiteral("The selected file is not valid Google credentials JSON"));
+    setError(tr("The selected file is not valid Google credentials JSON"));
     return;
   }
   const QJsonObject root = document.object();
@@ -887,8 +885,7 @@ void AppController::connectGoogleWithCredentials(const QUrl& credentialsFile,
   const QString clientSecret =
       installed.value(QStringLiteral("client_secret")).toString();
   if (clientId.isEmpty()) {
-    setError(
-        QStringLiteral("Choose OAuth credentials created as a Google Desktop app"));
+    setError(tr("Choose OAuth credentials created as a Google Desktop app"));
     return;
   }
   setError({});
@@ -899,7 +896,7 @@ void AppController::connectGoogleWithCredentials(const QUrl& credentialsFile,
          send(QStringLiteral("google.oauthStart"),
               {{QStringLiteral("displayName"), displayName}},
               [this](const QJsonValue&) {
-                setStatus(QStringLiteral("Opening Google authorization…"));
+                setStatus(tr("Opening Google authorization…"));
                 emit accountSetupStarted();
                 refresh();
               });
@@ -911,7 +908,7 @@ void AppController::addCalDavAccount(const QString& endpoint, const QString& use
                                      const QString& displayName) {
   if (endpoint.trimmed().isEmpty() || username.trimmed().isEmpty() ||
       password.isEmpty()) {
-    setError(QStringLiteral("CalDAV URL, username, and password are required"));
+    setError(tr("CalDAV URL, username, and password are required"));
     return;
   }
   setError({});
@@ -921,7 +918,7 @@ void AppController::addCalDavAccount(const QString& endpoint, const QString& use
         {QStringLiteral("password"), password},
         {QStringLiteral("displayName"), displayName.trimmed()}},
        [this](const QJsonValue&) {
-         setStatus(QStringLiteral("Discovering CalDAV calendars…"));
+         setStatus(tr("Discovering CalDAV calendars…"));
          emit accountSetupStarted();
          refresh();
        });
@@ -948,7 +945,7 @@ void AppController::reauthorizeAccount(const QString& accountId) {
   }
   send(QStringLiteral("accounts.reauthorize"),
        {{QStringLiteral("accountId"), accountId}}, [this](const QJsonValue&) {
-         setStatus(QStringLiteral("Opening account authorization…"));
+         setStatus(tr("Opening account authorization…"));
          emit accountSetupStarted();
          refresh();
        });
@@ -958,7 +955,7 @@ void AppController::updateAccountCredentials(const QString& accountId,
                                              const QString& username,
                                              const QString& password) {
   if (accountId.trimmed().isEmpty()) {
-    setError(QStringLiteral("An account is required"));
+    setError(tr("An account is required"));
     return;
   }
   setError({});
@@ -967,7 +964,7 @@ void AppController::updateAccountCredentials(const QString& accountId,
         {QStringLiteral("username"), username.trimmed()},
         {QStringLiteral("password"), password}},
        [this](const QJsonValue&) {
-         setStatus(QStringLiteral("Account credentials are being updated…"));
+         setStatus(tr("Account credentials are being updated…"));
          refresh();
        });
 }
@@ -1151,7 +1148,7 @@ void AppController::setCurrentView(const QString& view) {
 void AppController::undoLastMutation() {
   if (m_lastMutationId.isEmpty() && m_lastUndoToken.isEmpty() &&
       m_lastUndoKind.isEmpty()) {
-    setStatus(QStringLiteral("Nothing to undo"));
+    setStatus(tr("Nothing to undo"));
     return;
   }
   if (m_lastUndoToken.isEmpty() && !m_lastUndoKind.isEmpty()) {
@@ -1177,7 +1174,7 @@ void AppController::undoLastMutation() {
        [this](const QJsonValue&) {
          m_lastMutationId.clear();
          m_lastUndoToken.clear();
-         setStatus(QStringLiteral("Delete undone"));
+         setStatus(tr("Delete undone"));
          refresh();
        });
 }
@@ -1186,7 +1183,7 @@ void AppController::installWidget() {
   const QString executable =
       QStandardPaths::findExecutable(QStringLiteral("omacalendar-widgetctl"));
   if (executable.isEmpty()) {
-    setError(QStringLiteral("omacalendar-widgetctl is not installed"));
+    setError(tr("omacalendar-widgetctl is not installed"));
     return;
   }
   auto* process = new QProcess(this);
@@ -1206,15 +1203,15 @@ void AppController::installWidget() {
                 emit widgetInstalledChanged();
               }
               setError({});
-              setStatus(installed ? QStringLiteral("OmaCalendar widget installed")
-                                  : QStringLiteral("Widget activation completed"));
+              setStatus(installed ? tr("OmaCalendar widget installed")
+                                  : tr("Widget activation completed"));
             } else {
               const QString message = result.value(QStringLiteral("error"))
                                           .toObject()
                                           .value(QStringLiteral("message"))
                                           .toString();
               setError(!message.isEmpty()  ? message
-                       : failure.isEmpty() ? QStringLiteral("Widget install failed")
+                       : failure.isEmpty() ? tr("Widget install failed")
                                            : failure.left(500));
             }
           });
@@ -1227,7 +1224,7 @@ void AppController::restoreOmarchyClock() {
   const QString executable =
       QStandardPaths::findExecutable(QStringLiteral("omacalendar-widgetctl"));
   if (executable.isEmpty()) {
-    setError(QStringLiteral("omacalendar-widgetctl is not installed"));
+    setError(tr("omacalendar-widgetctl is not installed"));
     return;
   }
   auto* process = new QProcess(this);
@@ -1242,14 +1239,14 @@ void AppController::restoreOmarchyClock() {
               m_widgetInstalled = false;
               emit widgetInstalledChanged();
               setError({});
-              setStatus(QStringLiteral("Omarchy clock restored"));
+              setStatus(tr("Omarchy clock restored"));
             } else {
               const QString message = result.value(QStringLiteral("error"))
                                           .toObject()
                                           .value(QStringLiteral("message"))
                                           .toString();
               setError(!message.isEmpty()  ? message
-                       : failure.isEmpty() ? QStringLiteral("Clock restore failed")
+                       : failure.isEmpty() ? tr("Clock restore failed")
                                            : failure.left(500));
             }
           });
@@ -1283,7 +1280,7 @@ void AppController::refreshWidgetStatus() {
 
 void AppController::handleDeepLink(const QUrl& url) {
   if (!url.isValid() || url.scheme() != QStringLiteral("omacalendar")) {
-    setError(QStringLiteral("This OmaCalendar link is not valid"));
+    setError(tr("This OmaCalendar link is not valid"));
     return;
   }
   m_pendingDeepLink = url;
@@ -1293,7 +1290,7 @@ void AppController::handleDeepLink(const QUrl& url) {
 void AppController::handleIcsImportFile(const QUrl& file) {
   const QUrl normalized = normalizedLocalIcsUrl(file);
   if (!normalized.isValid()) {
-    setError(QStringLiteral("Only a readable local .ics file can be imported"));
+    setError(tr("Only a readable local .ics file can be imported"));
     return;
   }
   emit openIcsImportRequested(normalized);
@@ -1320,7 +1317,7 @@ void AppController::processPendingDeepLink() {
     }
     const QString eventId = QUrl::fromPercentEncoding(path.toUtf8());
     if (eventId.isEmpty()) {
-      setError(QStringLiteral("The event link is missing an event identifier"));
+      setError(tr("The event link is missing an event identifier"));
       m_pendingDeepLink = QUrl();
       return;
     }
@@ -1376,7 +1373,7 @@ void AppController::processPendingDeepLink() {
                                   ? QStringLiteral("accounts")
                                   : QStringLiteral("settings"));
   } else if (!route.isEmpty()) {
-    setError(QStringLiteral("This OmaCalendar link is not supported"));
+    setError(tr("This OmaCalendar link is not supported"));
   }
 }
 
@@ -1391,7 +1388,7 @@ void AppController::previewDiagnostics() {
                              .filePath(QStringLiteral("diagnostics-preview.json"));
     QSaveFile file(path);
     if (!file.open(QIODevice::WriteOnly)) {
-      setError(QStringLiteral("Could not create diagnostics preview"));
+      setError(tr("Could not create diagnostics preview"));
       return;
     }
     QJsonObject document{
@@ -1403,18 +1400,17 @@ void AppController::previewDiagnostics() {
     };
     file.write(QJsonDocument(document).toJson(QJsonDocument::Indented));
     if (!file.commit()) {
-      setError(QStringLiteral("Could not save diagnostics preview"));
+      setError(tr("Could not save diagnostics preview"));
       return;
     }
     QDesktopServices::openUrl(QUrl::fromLocalFile(path));
-    setStatus(QStringLiteral("Opened privacy-safe diagnostics preview"));
+    setStatus(tr("Opened privacy-safe diagnostics preview"));
   });
 }
 
 void AppController::syncAll() {
-  send(QStringLiteral("sync.all"), {}, [this](const QJsonValue&) {
-    setStatus(QStringLiteral("Synchronizing calendars…"));
-  });
+  send(QStringLiteral("sync.all"), {},
+       [this](const QJsonValue&) { setStatus(tr("Synchronizing calendars…")); });
 }
 
 void AppController::syncAccount(const QString& accountId) {
@@ -1423,7 +1419,7 @@ void AppController::syncAccount(const QString& accountId) {
   }
   send(QStringLiteral("sync.account"), {{QStringLiteral("accountId"), accountId}},
        [this](const QJsonValue&) {
-         setStatus(QStringLiteral("Account sync started"));
+         setStatus(tr("Account sync started"));
          refresh();
        });
 }

@@ -59,6 +59,19 @@ Control {
             return "Read only"
         return ""
     }
+    readonly property string stateLabel: {
+        if (stateText === "Conflict")
+            return qsTr("Conflict")
+        if (stateText === "Retrying")
+            return qsTr("Retrying")
+        if (stateText === "Failed")
+            return qsTr("Failed")
+        if (stateText === "Pending")
+            return qsTr("Pending")
+        if (stateText === "Read only")
+            return qsTr("Read only")
+        return ""
+    }
     readonly property bool interacting: moveArea.pressed
                                         || startResizeArea.pressed
                                         || endResizeArea.pressed
@@ -81,8 +94,8 @@ Control {
     padding: 0
     hoverEnabled: true
     focusPolicy: Qt.TabFocus
-    Accessible.name: eventData.summary || "Untitled event"
-    Accessible.description: stateText
+    Accessible.name: eventData.summary || qsTr("Untitled event")
+    Accessible.description: stateLabel
     Accessible.role: Accessible.Button
     Keys.onReturnPressed: root.activated(root.eventData)
     Keys.onEnterPressed: root.activated(root.eventData)
@@ -140,7 +153,7 @@ Control {
 
                 Text {
                     Layout.fillWidth: true
-                    text: root.eventData.summary || "Untitled event"
+                    text: root.eventData.summary || qsTr("Untitled event")
                     color: Theme.text
                     font.pixelSize: Theme.smallFontSize
                     font.weight: Font.DemiBold
@@ -157,7 +170,7 @@ Control {
                 Text {
                     visible: root.stateText.length > 0 && root.visualHeight >= 58
                     Layout.fillWidth: true
-                    text: root.stateText
+                    text: root.stateLabel
                     color: root.stateText === "Conflict" || root.stateText === "Failed"
                           ? Theme.danger
                           : Theme.mutedText

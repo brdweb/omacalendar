@@ -28,6 +28,19 @@ ItemDelegate {
             return "Read only"
         return ""
     }
+    readonly property string displayStateLabel: {
+        if (stateLabel === "Conflict")
+            return qsTr("Conflict")
+        if (stateLabel === "Retrying")
+            return qsTr("Retrying")
+        if (stateLabel === "Failed")
+            return qsTr("Failed")
+        if (stateLabel === "Pending")
+            return qsTr("Pending")
+        if (stateLabel === "Read only")
+            return qsTr("Read only")
+        return ""
+    }
     signal editRequested(var eventData)
 
     width: ListView.view ? ListView.view.width : 400
@@ -35,7 +48,7 @@ ItemDelegate {
     padding: 0
     onClicked: editRequested(eventData)
     ToolTip.visible: generatedInstance && hovered
-    ToolTip.text: "Recurring event — choose an occurrence scope when editing"
+    ToolTip.text: qsTr("Recurring event — choose an occurrence scope when editing")
     ToolTip.delay: 450
 
     background: Rectangle {
@@ -66,7 +79,7 @@ ItemDelegate {
             spacing: 3
             Text {
                 Layout.fillWidth: true
-                text: root.eventData.summary || "Untitled event"
+                text: root.eventData.summary || qsTr("Untitled event")
                 color: Theme.text
                 font.pixelSize: Theme.fontSize
                 font.weight: Font.DemiBold
@@ -79,7 +92,7 @@ ItemDelegate {
                             ? Qt.formatDate(root.eventDate(root.eventData), "ddd, MMM d") + "  ·  "
                             : ""
                     if (root.eventData.allDay)
-                        return prefix + "All day"
+                        return prefix + qsTr("All day")
                     const start = new Date(root.eventData.displayStartLocal
                                            || root.eventData.startUtc)
                     const end = new Date(root.eventData.displayEndLocal
@@ -87,7 +100,7 @@ ItemDelegate {
                     return prefix + Qt.formatTime(start, root.timePattern()) + " – "
                            + Qt.formatTime(end, root.timePattern())
                            + (root.eventData.location ? "  ·  " + root.eventData.location : "")
-                           + (root.generatedInstance ? "  ·  Recurring" : "")
+                           + (root.generatedInstance ? qsTr("  ·  Recurring") : "")
                 }
                 color: Theme.mutedText
                 font.pixelSize: Theme.smallFontSize
@@ -101,7 +114,7 @@ ItemDelegate {
                 Layout.fillWidth: true
                 text: root.continuationText.length > 0
                       ? root.continuationText
-                      : "Organized by " + (root.eventData.organizer.displayName
+                      : qsTr("Organized by ") + (root.eventData.organizer.displayName
                                            || root.eventData.organizer.email)
                 color: Theme.alpha(Theme.mutedText, 0.82)
                 font.pixelSize: Theme.microFontSize
@@ -111,7 +124,7 @@ ItemDelegate {
         StatusBadge {
             visible: root.stateLabel.length > 0
             Layout.rightMargin: 13
-            text: root.stateLabel
+            text: root.displayStateLabel
             tone: root.stateLabel === "Conflict" || root.stateLabel === "Failed"
                   ? "danger"
                                                   : root.stateLabel === "Retrying"

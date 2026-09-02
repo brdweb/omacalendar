@@ -7,7 +7,7 @@ ColumnLayout {
     id: root
 
     property string iconText: "○"
-    property string title: "Nothing here"
+    property string title: qsTr("Nothing here")
     property string description: ""
     property string actionText: ""
     signal actionRequested()
