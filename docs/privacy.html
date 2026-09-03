@@ -8,7 +8,7 @@
 </head>
 <body>
   <main>
-    <div class="eyebrow">Effective August 31, 2026</div>
+    <div class="eyebrow">Effective September 2, 2026</div>
     <h1>Privacy Policy</h1>
     <p>OmaCalendar is a local-first, open-source Linux application. It has no OmaCalendar-operated cloud backend, advertising, analytics, or sale of personal data.</p>
 
@@ -18,6 +18,11 @@
     <h2>How information is used and stored</h2>
     <p>Calendar information is used only to display and manage your calendars and synchronize changes you request. Event data is cached in a local SQLite database on your device for offline and responsive use. OAuth refresh tokens and CalDAV credentials are stored in the Linux desktop Secret Service rather than in the calendar database.</p>
     <p>Calendar information is exchanged only between your device and the provider you configure, such as Google or your CalDAV server. The project does not operate an intermediary service that receives your calendar data.</p>
+
+    <h2>How sensitive data is protected</h2>
+    <p>OmaCalendar sends Google Calendar data directly between your device and Google's HTTPS API endpoints, which protects the data in transit with TLS. The Google authorization flow uses a loopback redirect, a unique state value, and PKCE-S256 to protect the authorization response and code exchange.</p>
+    <p>Google OAuth refresh tokens and other provider credentials are stored through the Linux desktop Secret Service, which restricts access to the signed-in user and applies the protection provided by that user's keyring. Tokens and passwords are excluded from the SQLite calendar cache, application logs, interprocess messages, and diagnostic exports. OmaCalendar restricts its local data directories and SQLite database files to the operating-system user.</p>
+    <p>The local SQLite calendar cache is not separately encrypted by OmaCalendar. Its protection therefore also depends on the security of your operating-system account, keyring, filesystem, and device. Device encryption and a strong login password are recommended, especially on shared or portable computers.</p>
 
     <h2>Sharing and retention</h2>
     <p>OmaCalendar does not sell or share your calendar information with advertisers or data brokers. Disconnecting an account removes its stored credentials. The disconnect dialog retains downloaded calendar data by default for offline reference and offers an explicit option to remove that account's cached data instead. Other local data remains until you remove it or clear the application's data. Your calendar provider may retain data according to its own policies.</p>
