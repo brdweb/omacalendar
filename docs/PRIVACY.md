@@ -1,7 +1,7 @@
 # Privacy and local data handling
 
 The canonical public policy is the
-[OmaCalendar privacy policy](https://brdweb.github.io/omacalendar/privacy.html).
+[OmaCalendar privacy policy](https://omacalendar.brdweb.com/privacy.html).
 This document explains the implementation-facing data flow.
 
 OmaCalendar has no project-operated synchronization backend, analytics,
@@ -21,6 +21,29 @@ SQLite database so views work offline.
 OAuth tokens and CalDAV/subscription passwords are stored through the desktop
 Secret Service. They are not stored in SQLite. Provider requests necessarily
 send the fields required for the calendar operation to that provider.
+
+## Sensitive-data protections
+
+- Google authorization uses a loopback redirect, unique per-request state, and
+  PKCE-S256. Google Calendar API and token traffic goes directly to Google's
+  HTTPS endpoints and is protected in transit with TLS.
+- Refresh tokens and provider passwords are stored through the Linux desktop
+  Secret Service, which restricts access to the signed-in user and applies the
+  protection provided by that user's keyring. Access tokens are held in process
+  memory rather than persisted in the calendar database.
+- Application data, cache, configuration, and runtime directories are created
+  with owner-only permissions. The SQLite database and its sidecar files are
+  also restricted to the operating-system user.
+- Credentials are omitted from SQLite, logs, persisted IPC state, IPC
+  presentation data, and diagnostic exports. A CalDAV or subscription password
+  entered during account setup travels once over the owner-only local IPC
+  socket to the daemon for storage in Secret Service; it is not retained in an
+  interprocess message.
+
+The SQLite calendar cache is not separately encrypted by OmaCalendar. Its
+protection also depends on the operating-system account, keyring, filesystem,
+and device. Device encryption and a strong login password are recommended,
+especially on shared or portable computers.
 
 ## Local disclosure controls
 
