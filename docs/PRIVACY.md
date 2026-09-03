@@ -34,8 +34,11 @@ send the fields required for the calendar operation to that provider.
 - Application data, cache, configuration, and runtime directories are created
   with owner-only permissions. The SQLite database and its sidecar files are
   also restricted to the operating-system user.
-- Credentials are omitted from SQLite, logs, IPC presentation data, and
-  diagnostic exports.
+- Credentials are omitted from SQLite, logs, persisted IPC state, IPC
+  presentation data, and diagnostic exports. A CalDAV or subscription password
+  entered during account setup travels once over the owner-only local IPC
+  socket to the daemon for storage in Secret Service; it is not retained in an
+  interprocess message.
 
 The SQLite calendar cache is not separately encrypted by OmaCalendar. Its
 protection also depends on the operating-system account, keyring, filesystem,
