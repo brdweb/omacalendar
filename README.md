@@ -61,8 +61,9 @@ The candidate passes all 22 local GCC tests, including the reference-hardware
 performance gate. Clean hosted GCC Debug, Clang RelWithDebInfo, ASan/UBSan,
 and current-Arch package baseline jobs also pass. QML lint is clean and desktop
 smoke tests pass at scale factors 1, 1.25, and 2. The enforced 100,000-event
-reference-Omarchy run measured p95 latency of 45.183 ms for agenda, 5.158 ms for
-indexed search, 84.941 ms for a full widget snapshot, and 0.455 ms for an
+reference-Omarchy run of the downloaded candidate measured p95 latency of
+42.968 ms for agenda, 5.571 ms for indexed search, 76.101 ms for a full widget
+snapshot, and 0.737 ms for an
 unchanged snapshot. Exact commits and workflow links are recorded in the
 [beta acceptance record](docs/releases/1.0.0-beta.1.md).
 
