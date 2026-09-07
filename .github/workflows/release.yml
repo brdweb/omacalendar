@@ -108,6 +108,7 @@ jobs:
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_INSTALL_PREFIX=/usr \
             -DOMACALENDAR_ENABLE_WERROR=ON \
+            -DOMACALENDAR_ENABLE_HARDWARE_PERF_TESTS=ON \
             -DOMACALENDAR_REQUIRE_GOOGLE_OAUTH_CONFIG=ON \
             -DOMACALENDAR_VERSION_SUFFIX=${{ steps.version.outputs.suffix }}
 

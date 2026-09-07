@@ -112,12 +112,15 @@ ItemDelegate {
             color: root.eventColor
         }
         Text {
+            textFormat: Text.PlainText
             visible: root.showTime && root.timeText.length > 0
             text: root.timeText
             color: Theme.mutedText
             font.pixelSize: root.compact ? Theme.microFontSize : Theme.smallFontSize
         }
         Text {
+            textFormat: Text.PlainText
+            objectName: "eventChipSummary"
             Layout.fillWidth: true
             text: root.eventData.summary || qsTr("Untitled event")
             color: Theme.text
@@ -137,6 +140,7 @@ ItemDelegate {
                                                  : Theme.mutedText
         }
         Text {
+            textFormat: Text.PlainText
             visible: root.stateText.length > 0 && !root.compact
             text: root.stateLabel
             color: root.stateText === "Conflict" ? Theme.danger : Theme.mutedText

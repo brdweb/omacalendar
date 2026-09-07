@@ -34,6 +34,7 @@ SpinBox {
                                   : control.up.hovered ? Theme.surfaceAlt : "transparent"
         radius: Theme.smallRadius
         Text {
+            textFormat: Text.PlainText
             anchors.centerIn: parent
             text: "⌃"
             color: control.enabled ? Theme.mutedText : Theme.alpha(Theme.mutedText, 0.5)
@@ -50,6 +51,7 @@ SpinBox {
                                     : control.down.hovered ? Theme.surfaceAlt : "transparent"
         radius: Theme.smallRadius
         Text {
+            textFormat: Text.PlainText
             anchors.centerIn: parent
             text: "⌄"
             color: control.enabled ? Theme.mutedText : Theme.alpha(Theme.mutedText, 0.5)

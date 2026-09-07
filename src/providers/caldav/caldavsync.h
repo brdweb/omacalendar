@@ -12,6 +12,8 @@
 #include "sync/provider.h"
 #include "sync/retrypolicy.h"
 
+class CalDavHardeningTest;
+
 namespace omacalendar::caldav {
 
 struct CalDavResource;
@@ -40,6 +42,32 @@ class CalDavSync final : public Provider {
   [[nodiscard]] QJsonObject status(const QString& accountId = {}) const override;
 
  private:
+  friend class ::CalDavHardeningTest;
+
+  struct ResourceBudget final {
+    explicit ResourceBudget(qsizetype uniqueResourceLimit = 20000,
+                            qsizetype requestLimit = 256,
+                            qint64 responseByteLimit = 64LL * 1024 * 1024)
+        : maximumUniqueResources(uniqueResourceLimit),
+          maximumRequests(requestLimit),
+          maximumResponseBytes(responseByteLimit) {}
+
+    bool deduplicateHrefs(const QUrl& calendarUrl, const QStringList& hrefs,
+                          QStringList* uniqueHrefs, QString* errorCode,
+                          QString* errorMessage);
+    bool reserveResource(const QString& canonicalResourceId, QString* errorCode,
+                         QString* errorMessage);
+    bool beginRequest(QString* errorCode, QString* errorMessage);
+    bool consumeResponse(qint64 bytes, QString* errorCode, QString* errorMessage);
+
+    qsizetype maximumUniqueResources;
+    qsizetype maximumRequests;
+    qint64 maximumResponseBytes;
+    QSet<QString> canonicalResources;
+    qsizetype requestCount = 0;
+    qint64 responseBytes = 0;
+  };
+
   struct SyncJob;
   struct FutureCapabilityProbe;
 
@@ -57,6 +85,8 @@ class CalDavSync final : public Provider {
       std::function<void(QList<CalDavResource>, QString, QString)>;
   void fetchResourceBatches(SyncJob* job, const QUrl& calendarUrl,
                             const QStringList& hrefs, ResourceBatchCallback callback);
+  void readResource(SyncJob* job, const QUrl& resourceUrl,
+                    CalDavClient::Callback callback);
   void applyCalendarResponse(SyncJob* job, const DavResponse& response, bool fullSync);
   void applyCalendarResources(SyncJob* job, const QList<CalDavResource>& resources,
                               const QString& responseSyncToken, bool fullSync);
@@ -110,6 +140,7 @@ class CalDavSync final : public Provider {
   Database* m_database = nullptr;
   AsyncSecretStore m_secrets;
   CalDavClient m_client;
+  ResourceBudget m_resourceBudgetLimits;
   RetryPolicy m_retryPolicy;
   QTimer m_pollTimer;
   QHash<QString, SyncJob*> m_jobs;

@@ -16,12 +16,14 @@ ColumnLayout {
     spacing: 9
 
     Text {
+        textFormat: Text.PlainText
         Layout.alignment: Qt.AlignHCenter
         text: root.iconText
         color: Theme.alpha(Theme.mutedText, 0.72)
         font.pixelSize: 30
     }
     Text {
+        textFormat: Text.PlainText
         Layout.fillWidth: true
         text: root.title
         color: Theme.text
@@ -31,6 +33,7 @@ ColumnLayout {
         wrapMode: Text.Wrap
     }
     Text {
+        textFormat: Text.PlainText
         visible: text.length > 0
         Layout.fillWidth: true
         text: root.description

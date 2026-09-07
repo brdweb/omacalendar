@@ -154,12 +154,14 @@ Drawer {
                 Layout.fillWidth: true
                 spacing: 1
                 Text {
+                    textFormat: Text.PlainText
                     text: qsTr("Accounts & settings")
                     color: Theme.text
                     font.pixelSize: Theme.titleFontSize
                     font.weight: Font.Bold
                 }
                 Text {
+                    textFormat: Text.PlainText
                     text: qsTr("Credentials stay in your desktop keyring.")
                     color: Theme.mutedText
                     font.pixelSize: Theme.smallFontSize
@@ -224,6 +226,7 @@ Drawer {
                                     Layout.fillWidth: true
                                     spacing: 2
                                     Text {
+                                        textFormat: Text.PlainText
                                         Layout.fillWidth: true
                                         text: accountCard.modelData.displayName
                                               || accountCard.modelData.principal
@@ -234,6 +237,7 @@ Drawer {
                                         elide: Text.ElideRight
                                     }
                                     Text {
+                                        textFormat: Text.PlainText
                                         Layout.fillWidth: true
                                         text: String(accountCard.modelData.provider || qsTr("calendar")).toUpperCase()
                                               + " · "
@@ -322,6 +326,7 @@ Drawer {
                             anchors.margins: 14
                             spacing: 9
                             Text {
+                                textFormat: Text.PlainText
                                 Layout.fillWidth: true
                                 text: qsTr("Authorization opens in your browser and returns through a secure local callback. OmaCalendar requests calendar and event access only.")
                                 color: Theme.mutedText
@@ -523,6 +528,7 @@ Drawer {
                                     Layout.fillWidth: true
                                     spacing: 2
                                     Text {
+                                        textFormat: Text.PlainText
                                         Layout.fillWidth: true
                                         text: setCard.modelData.name || qsTr("Calendar set")
                                         color: Theme.text
@@ -530,6 +536,7 @@ Drawer {
                                         elide: Text.ElideRight
                                     }
                                     Text {
+                                        textFormat: Text.PlainText
                                         text: (setCard.modelData.calendarIds || []).length
                                               + qsTr(" calendar(s)")
                                         color: Theme.mutedText
@@ -591,6 +598,7 @@ Drawer {
                                 Layout.fillWidth: true
                                 spacing: 3
                                 Text {
+                                    textFormat: Text.PlainText
                                     Layout.fillWidth: true
                                     text: qsTr("Default calendar")
                                     color: Theme.text
@@ -598,6 +606,7 @@ Drawer {
                                     font.weight: Font.DemiBold
                                 }
                                 Text {
+                                    textFormat: Text.PlainText
                                     Layout.fillWidth: true
                                     text: qsTr("Used automatically for new events in the app and widget.")
                                     color: Theme.mutedText
@@ -694,6 +703,7 @@ Drawer {
                                 color: Theme.accent
 
                                 Text {
+                                    textFormat: Text.PlainText
                                     anchors.centerIn: parent
                                     width: parent.width - 20
                                     text: qsTr("Drop ")
@@ -729,6 +739,7 @@ Drawer {
                                         Accessible.role: Accessible.Button
 
                                         Text {
+                                            textFormat: Text.PlainText
                                             z: 1
                                             anchors.centerIn: parent
                                             text: "≡"
@@ -788,6 +799,7 @@ Drawer {
                                                                || Theme.accent
                                                     }
                                                     Text {
+                                                        textFormat: Text.PlainText
                                                         Layout.fillWidth: true
                                                         text: calendarCard.modelData.name
                                                               || qsTr("Calendar")
@@ -797,6 +809,7 @@ Drawer {
                                                         elide: Text.ElideRight
                                                     }
                                                     Text {
+                                                        textFormat: Text.PlainText
                                                         text: qsTr("Move")
                                                         color: Theme.accent
                                                         font.pixelSize: Theme.microFontSize
@@ -816,6 +829,7 @@ Drawer {
                                                || Theme.accent
                                     }
                                     Text {
+                                        textFormat: Text.PlainText
                                         Layout.fillWidth: true
                                         text: calendarCard.modelData.name || qsTr("Calendar")
                                         color: Theme.text
@@ -963,9 +977,32 @@ Drawer {
                                 onActivated: root.preferenceChanged("defaultDuration",
                                                                     currentValue)
                             }
+                            AppComboBox {
+                                id: notificationPrivacyBox
+                                objectName: "notificationPrivacy"
+                                Layout.fillWidth: true
+                                model: [
+                                    {"text": qsTr("Notifications: Private"),
+                                     "value": "generic"},
+                                    {"text": qsTr("Notifications: Event title"),
+                                     "value": "title_only"},
+                                    {"text": qsTr("Notifications: Full details"),
+                                     "value": "full_details"}
+                                ]
+                                textRole: "text"
+                                valueRole: "value"
+                                currentIndex: Math.max(0, ["generic", "title_only",
+                                                           "full_details"].indexOf(
+                                                              String(root.preferences.notificationPrivacy
+                                                                     || "generic")))
+                                Accessible.name: qsTr("Notification privacy")
+                                onActivated: root.preferenceChanged("notificationPrivacy",
+                                                                     currentValue)
+                            }
                             RowLayout {
                                 Layout.fillWidth: true
                                 Text {
+                                    textFormat: Text.PlainText
                                     text: qsTr("Work hours")
                                     color: Theme.mutedText
                                     font.pixelSize: Theme.smallFontSize
@@ -978,7 +1015,7 @@ Drawer {
                                     onValueModified: root.preferenceChanged("workDayStart",
                                                                              value)
                                 }
-                                Text { text: qsTr("to"); color: Theme.mutedText }
+                                Text { textFormat: Text.PlainText; text: qsTr("to"); color: Theme.mutedText }
                                 AppSpinBox {
                                     from: 1
                                     to: 24
@@ -1033,6 +1070,7 @@ Drawer {
         onAccepted: root.removeCalendarRequested(
                         String(calendarData.id || ""))
         contentItem: Text {
+            textFormat: Text.PlainText
             width: 380
             text: {
                 const value = localCalendarRemoveConfirm.calendarData
@@ -1139,6 +1177,7 @@ Drawer {
                 accessibleName: qsTr("Calendar set name")
             }
             Text {
+                textFormat: Text.PlainText
                 Layout.fillWidth: true
                 text: qsTr("Select calendars. Use the arrows to control their order.")
                 color: Theme.mutedText
@@ -1241,6 +1280,7 @@ Drawer {
         contentItem: ColumnLayout {
             spacing: 10
             Text {
+                textFormat: Text.PlainText
                 Layout.fillWidth: true
                 text: credentialDialog.isIcs
                       ? qsTr("Enter both fields to authenticate this feed, or leave both empty to use it without credentials.")
@@ -1307,6 +1347,7 @@ Drawer {
         contentItem: ColumnLayout {
             spacing: 10
             Text {
+                textFormat: Text.PlainText
                 Layout.fillWidth: true
                 text: qsTr("Disconnect ") + (removeConfirm.accountData.displayName
                                         || removeConfirm.accountData.principal

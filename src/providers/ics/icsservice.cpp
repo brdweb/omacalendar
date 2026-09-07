@@ -23,6 +23,7 @@ constexpr int kMinimumRefreshSeconds = 60;
 constexpr int kDefaultRefreshSeconds = 3600;
 constexpr int kMaximumRedirects = 5;
 constexpr int kNetworkTimeoutMs = 30000;
+constexpr qint64 kNetworkReadBufferBytes = 64 * 1024;
 
 QString publicNetworkError(const int status, const QNetworkReply::NetworkError error) {
   if (status == 401 || status == 403) {
@@ -592,6 +593,40 @@ bool IcsService::sameOrigin(const QUrl& first, const QUrl& second) {
          port(first) == port(second);
 }
 
+QString IcsService::redirectErrorCode(const QUrl& origin, const QUrl& target,
+                                      const bool includeCredentials) {
+  if (sameOrigin(origin, target)) {
+    return {};
+  }
+  return includeCredentials ? QStringLiteral("credential_redirect_blocked")
+                            : QStringLiteral("cross_origin_redirect_blocked");
+}
+
+bool IcsService::consumeReplyBytes(QIODevice* source, QByteArray* destination) {
+  if (source == nullptr || destination == nullptr) {
+    return false;
+  }
+  if (destination->size() > kMaximumIcsBytes) {
+    destination->clear();
+    return false;
+  }
+  while (source->bytesAvailable() > 0) {
+    const qint64 remaining = kMaximumIcsBytes - destination->size();
+    const qint64 readSize =
+        qMin(kNetworkReadBufferBytes, qMin(source->bytesAvailable(), remaining + 1));
+    const QByteArray chunk = source->read(readSize);
+    if (chunk.isEmpty()) {
+      break;
+    }
+    if (chunk.size() > remaining) {
+      destination->clear();
+      return false;
+    }
+    destination->append(chunk);
+  }
+  return true;
+}
+
 void IcsService::beginFetch(const std::shared_ptr<FetchContext>& context,
                             const QUrl& url, const bool includeCredentials) {
   QNetworkRequest request(url);
@@ -619,6 +654,7 @@ void IcsService::beginFetch(const std::shared_ptr<FetchContext>& context,
   }
 
   QNetworkReply* reply = m_network.get(request);
+  reply->setReadBufferSize(kNetworkReadBufferBytes);
   auto* timeout = new QTimer(reply);
   timeout->setSingleShot(true);
   timeout->start(kNetworkTimeoutMs);
@@ -626,9 +662,18 @@ void IcsService::beginFetch(const std::shared_ptr<FetchContext>& context,
     context->timedOut = true;
     reply->abort();
   });
+  connect(reply, &QNetworkReply::metaDataChanged, this, [context, reply]() {
+    bool validLength = false;
+    const qint64 declaredLength =
+        reply->header(QNetworkRequest::ContentLengthHeader).toLongLong(&validLength);
+    if (validLength && declaredLength > kMaximumIcsBytes) {
+      context->tooLarge = true;
+      context->body.clear();
+      reply->abort();
+    }
+  });
   connect(reply, &QIODevice::readyRead, this, [context, reply]() {
-    context->body.append(reply->readAll());
-    if (context->body.size() > kMaximumIcsBytes) {
+    if (!context->tooLarge && !consumeReplyBytes(reply, &context->body)) {
       context->tooLarge = true;
       reply->abort();
     }
@@ -636,7 +681,9 @@ void IcsService::beginFetch(const std::shared_ptr<FetchContext>& context,
   connect(
       reply, &QNetworkReply::finished, this,
       [this, context, reply, url, includeCredentials]() {
-        context->body.append(reply->readAll());
+        if (!context->tooLarge && !consumeReplyBytes(reply, &context->body)) {
+          context->tooLarge = true;
+        }
         const int status =
             reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
         const QUrl redirect =
@@ -671,17 +718,12 @@ void IcsService::beginFetch(const std::shared_ptr<FetchContext>& context,
             finishFetch(context, QStringLiteral("unsafe_redirect"), urlError);
             return;
           }
-          if (includeCredentials && !sameOrigin(url, normalized)) {
-            finishFetch(
-                context, QStringLiteral("credential_redirect_blocked"),
-                QStringLiteral(
-                    "A credentialed calendar feed redirected to another origin"));
+          const QString redirectError =
+              redirectErrorCode(url, normalized, includeCredentials);
+          if (!redirectError.isEmpty()) {
+            finishFetch(context, redirectError,
+                        QStringLiteral("A calendar feed redirected to another origin"));
             return;
-          }
-          if (!sameOrigin(url, normalized)) {
-            // Validators are opaque provider metadata and may themselves be
-            // sensitive. Never forward them to a different origin.
-            context->includeValidators = false;
           }
           context->body.clear();
           beginFetch(context, normalized, includeCredentials);

@@ -146,6 +146,8 @@ class AppController final : public QObject {
   Q_INVOKABLE void activateCalendarSet(const QString& setId);
   Q_INVOKABLE void setCurrentView(const QString& view);
   Q_INVOKABLE void undoLastMutation();
+  Q_INVOKABLE bool canOpenExternalEventUrl(const QString& value) const;
+  Q_INVOKABLE void openExternalEventUrl(const QString& value);
   Q_INVOKABLE void installWidget();
   Q_INVOKABLE void restoreOmarchyClock();
   Q_INVOKABLE void previewDiagnostics();

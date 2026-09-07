@@ -1826,6 +1826,282 @@ class DatabaseTest final : public QObject {
     QVERIFY(db.eventByRemoteId(calendar.id, pruned.remoteId).id.isEmpty());
   }
 
+  void providerResourcesAreNormalizedAndHydrated() {
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const QString path = directory.filePath(QStringLiteral("resources.sqlite"));
+    Database db;
+    QString error;
+    QVERIFY2(db.open(path, &error), qPrintable(error));
+
+    Account caldavAccount =
+        makeAccount(QStringLiteral("resource-account"), QStringLiteral("CalDAV"));
+    caldavAccount.provider = ProviderKind::CalDav;
+    QVERIFY2(db.upsertAccount(caldavAccount, &error), qPrintable(error));
+    Calendar calendar =
+        makeCalendar(QStringLiteral("resource-calendar"), caldavAccount.id);
+    QVERIFY2(db.upsertCalendar(calendar, &error), qPrintable(error));
+
+    const QString resourceId =
+        QStringLiteral("https://calendar.example.test/dav/team/series.ics");
+    const QString payload = QStringLiteral(
+        "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\n"
+        "UID:resource-series\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n");
+    Event master = makeRemoteEvent(calendar.id, QStringLiteral("resource-master"), 0);
+    master.uid = QStringLiteral("resource-series");
+    master.remoteId = resourceId;
+    Event exception = master;
+    exception.id = QStringLiteral("resource-exception");
+    exception.remoteId = resourceId + QStringLiteral("#20260202T080000Z");
+    exception.recurrenceId = QStringLiteral("20260202T080000Z");
+    exception.startUtc = master.startUtc.addDays(1);
+    exception.endUtc = master.endUtc.addDays(1);
+    const QString unrelatedResourceId =
+        QStringLiteral("https://calendar.example.test/dav/team/unrelated.ics");
+    const QString unrelatedPayload = QStringLiteral(
+        "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\n"
+        "UID:unrelated-series\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n");
+    Event unrelated =
+        makeRemoteEvent(calendar.id, QStringLiteral("unrelated-event"), 3);
+    unrelated.uid = QStringLiteral("unrelated-series");
+    unrelated.remoteId = unrelatedResourceId;
+    const QList<ProviderResource> resources = {
+        {calendar.id, resourceId, QStringLiteral("etag-v1"),
+         QStringLiteral("text/calendar"), payload},
+        {calendar.id, unrelatedResourceId, QStringLiteral("etag-unrelated"),
+         QStringLiteral("text/calendar"), unrelatedPayload}};
+    QVERIFY2(db.applyRemoteSyncBatch(calendar, {master, exception, unrelated}, {}, {},
+                                     &error, resources),
+             qPrintable(error));
+    QCOMPARE(db.event(master.id, &error).rawPayload, payload);
+    QCOMPARE(db.event(exception.id, &error).rawPayload, payload);
+    const QList<Event> series = db.eventsByUid(calendar.id, master.uid, &error);
+    QCOMPARE(series.size(), 2);
+    QVERIFY(std::all_of(series.cbegin(), series.cend(), [&payload](const Event& event) {
+      return event.rawPayload == payload;
+    }));
+
+    Account googleAccount =
+        makeAccount(QStringLiteral("json-account"), QStringLiteral("Google"));
+    QVERIFY2(db.upsertAccount(googleAccount, &error), qPrintable(error));
+    Calendar googleCalendar =
+        makeCalendar(QStringLiteral("json-calendar"), googleAccount.id);
+    QVERIFY2(db.upsertCalendar(googleCalendar, &error), qPrintable(error));
+    Event googleEvent =
+        makeRemoteEvent(googleCalendar.id, QStringLiteral("google-payload"), 0);
+    googleEvent.rawPayload = QStringLiteral("{\"id\":\"google-payload\"}");
+    googleEvent.rawFormat = QStringLiteral("google-json");
+    QVERIFY2(db.applyRemoteSyncBatch(googleCalendar, {googleEvent}, {}, {}, &error),
+             qPrintable(error));
+    db.close();
+
+    const QString connection =
+        QStringLiteral("resource-storage-%1")
+            .arg(QUuid::createUuid().toString(QUuid::WithoutBraces));
+    {
+      QSqlDatabase verify =
+          QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), connection);
+      verify.setDatabaseName(path);
+      QVERIFY(verify.open());
+      QSqlQuery query(verify);
+      QVERIFY(query.exec(QStringLiteral(
+          "SELECT COUNT(*),COALESCE(SUM(length(raw_payload)),0) FROM events "
+          "WHERE calendar_id='resource-calendar'")));
+      QVERIFY(query.next());
+      QCOMPARE(query.value(0).toInt(), 3);
+      QCOMPARE(query.value(1).toInt(), 0);
+      QVERIFY(
+          query.exec(QStringLiteral("SELECT COUNT(*) FROM provider_resources "
+                                    "WHERE calendar_id='resource-calendar'")));
+      QVERIFY(query.next());
+      QCOMPARE(query.value(0).toInt(), 2);
+      QVERIFY(query.exec(
+          QStringLiteral("SELECT raw_payload FROM provider_resources "
+                         "WHERE calendar_id='resource-calendar' AND canonical_key="
+                         "'https://calendar.example.test/dav/team/series.ics'")));
+      QVERIFY(query.next());
+      QCOMPARE(query.value(0).toString(), payload);
+      QVERIFY(query.exec(
+          QStringLiteral("SELECT raw_payload FROM events WHERE id='google-payload'")));
+      QVERIFY(query.next());
+      QCOMPARE(query.value(0).toString(), googleEvent.rawPayload);
+      verify.close();
+    }
+    QSqlDatabase::removeDatabase(connection);
+
+    Database reopened;
+    QVERIFY2(reopened.open(path, &error), qPrintable(error));
+    QCOMPARE(reopened.event(master.id, &error).rawPayload, payload);
+    QCOMPARE(reopened.event(exception.id, &error).rawPayload, payload);
+    const QList<Event> reopenedSeries =
+        reopened.eventsByUid(calendar.id, master.uid, &error);
+    QCOMPARE(reopenedSeries.size(), 2);
+    QVERIFY(std::all_of(
+        reopenedSeries.cbegin(), reopenedSeries.cend(),
+        [&payload](const Event& event) { return event.rawPayload == payload; }));
+  }
+
+  void conflictedExceptionRetainsBaseWhileCleanSiblingAdvances() {
+    QTemporaryDir directory;
+    const QString path =
+        directory.filePath(QStringLiteral("conflict-resources.sqlite"));
+    Database db;
+    QString error;
+    QVERIFY2(db.open(path, &error), qPrintable(error));
+    Account account = makeAccount(QStringLiteral("account"), QStringLiteral("CalDAV"));
+    account.provider = ProviderKind::CalDav;
+    QVERIFY(db.upsertAccount(account, &error));
+    Calendar calendar = makeCalendar(QStringLiteral("calendar"), account.id);
+    QVERIFY(db.upsertCalendar(calendar, &error));
+    Event master = makeRemoteEvent(calendar.id, QStringLiteral("master"), 0);
+    master.remoteId = QStringLiteral("https://example.test/calendar/series.ics");
+    master.etag = QStringLiteral("e1");
+    Event exception = master;
+    exception.id = QStringLiteral("exception");
+    exception.recurrenceId = QStringLiteral("20260202T080000Z");
+    exception.remoteId += QStringLiteral("#20260202T080000Z");
+    ProviderResource resource{calendar.id, master.remoteId, QStringLiteral("e1"),
+                              QStringLiteral("text/calendar"),
+                              QStringLiteral("old-base")};
+    QVERIFY2(db.applyRemoteSyncBatch(calendar, {master, exception}, {}, {}, &error,
+                                     {resource}),
+             qPrintable(error));
+    Event dirty = db.event(exception.id, &error);
+    dirty.summary = QStringLiteral("Local edit");
+    QVERIFY2(db.saveLocalEvent(&dirty, OutboxOperation::Update, &error),
+             qPrintable(error));
+    master.etag = QStringLiteral("e2");
+    master.summary = QStringLiteral("Remote master changed");
+    exception.etag = QStringLiteral("e2");
+    resource.remoteRevision = QStringLiteral("e2");
+    resource.rawPayload = QStringLiteral("new-base");
+    QVERIFY2(db.applyRemoteSyncBatch(calendar, {master, exception}, {}, {}, &error,
+                                     {resource}),
+             qPrintable(error));
+    QCOMPARE(db.event(master.id).rawPayload, QStringLiteral("new-base"));
+    QCOMPARE(db.event(master.id).etag, QStringLiteral("e2"));
+    QCOMPARE(db.event(exception.id).rawPayload, QStringLiteral("old-base"));
+    QCOMPARE(db.event(exception.id).etag, QStringLiteral("e1"));
+    QVERIFY(db.event(exception.id).dirty);
+    db.close();
+    QVERIFY2(db.open(path, &error), qPrintable(error));
+    QCOMPARE(db.event(master.id).rawPayload, QStringLiteral("new-base"));
+    QCOMPARE(db.event(exception.id).rawPayload, QStringLiteral("old-base"));
+  }
+
+  void schema2NormalizesLegacyCalDavPayloads() {
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const QString path = directory.filePath(QStringLiteral("legacy-resources.sqlite"));
+    Database db;
+    QString error;
+    QVERIFY2(db.open(path, &error), qPrintable(error));
+    Account account = makeAccount(QStringLiteral("legacy-resource-account"),
+                                  QStringLiteral("CalDAV"));
+    account.provider = ProviderKind::CalDav;
+    QVERIFY2(db.upsertAccount(account, &error), qPrintable(error));
+    Calendar calendar =
+        makeCalendar(QStringLiteral("legacy-resource-calendar"), account.id);
+    QVERIFY2(db.upsertCalendar(calendar, &error), qPrintable(error));
+    const QString resourceId = QStringLiteral("https://example.test/dav/legacy.ics");
+    const QString payload = QStringLiteral("legacy-vcalendar-payload");
+    Event master = makeRemoteEvent(calendar.id, QStringLiteral("legacy-master"), 0);
+    master.uid = QStringLiteral("legacy-series");
+    master.remoteId = resourceId;
+    master.rawPayload = payload;
+    master.rawFormat = QStringLiteral("text/calendar");
+    Event exception = master;
+    exception.id = QStringLiteral("legacy-exception");
+    exception.remoteId = resourceId + QStringLiteral("#20260202T080000Z");
+    exception.recurrenceId = QStringLiteral("20260202T080000Z");
+    QVERIFY2(db.applyRemoteEvent(master, &error), qPrintable(error));
+    QVERIFY2(db.applyRemoteEvent(exception, &error), qPrintable(error));
+    db.close();
+
+    const QString connection =
+        QStringLiteral("legacy-resource-%1")
+            .arg(QUuid::createUuid().toString(QUuid::WithoutBraces));
+    {
+      QSqlDatabase legacy =
+          QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), connection);
+      legacy.setDatabaseName(path);
+      QVERIFY(legacy.open());
+      QSqlQuery query(legacy);
+      QVERIFY(query.exec(QStringLiteral("DROP TABLE provider_resources")));
+      legacy.close();
+    }
+    QSqlDatabase::removeDatabase(connection);
+
+    Database migrated;
+    QVERIFY2(migrated.open(path, &error), qPrintable(error));
+    QCOMPARE(migrated.event(master.id, &error).rawPayload, payload);
+    QCOMPARE(migrated.event(exception.id, &error).rawPayload, payload);
+    migrated.close();
+
+    const QString verifyConnection =
+        QStringLiteral("legacy-resource-verify-%1")
+            .arg(QUuid::createUuid().toString(QUuid::WithoutBraces));
+    {
+      QSqlDatabase verify =
+          QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), verifyConnection);
+      verify.setDatabaseName(path);
+      QVERIFY(verify.open());
+      QSqlQuery query(verify);
+      QVERIFY(query.exec(
+          QStringLiteral("SELECT COALESCE(SUM(length(raw_payload)),0) FROM events "
+                         "WHERE calendar_id='legacy-resource-calendar'")));
+      QVERIFY(query.next());
+      QCOMPARE(query.value(0).toInt(), 0);
+      QVERIFY(query.exec(
+          QStringLiteral("SELECT COUNT(*),raw_payload FROM provider_resources "
+                         "WHERE calendar_id='legacy-resource-calendar'")));
+      QVERIFY(query.next());
+      QCOMPARE(query.value(0).toInt(), 1);
+      QCOMPARE(query.value(1).toString(), payload);
+      verify.close();
+    }
+    QSqlDatabase::removeDatabase(verifyConnection);
+  }
+
+  void recurrenceMaterializationRejectsTruncatedReplacements() {
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    Database db;
+    QString error;
+    QVERIFY2(db.open(directory.filePath(QStringLiteral("recurrence.sqlite")), &error),
+             qPrintable(error));
+    Account account =
+        makeAccount(QStringLiteral("recurrence-account"), QStringLiteral("Recurrence"));
+    QVERIFY2(db.upsertAccount(account, &error), qPrintable(error));
+    Calendar calendar = makeCalendar(QStringLiteral("recurrence-calendar"), account.id);
+    QVERIFY2(db.upsertCalendar(calendar, &error), qPrintable(error));
+
+    Event baseline = makeRemoteEvent(calendar.id, QStringLiteral("bounded-series"), 0);
+    baseline.startUtc = QDateTime::currentDateTimeUtc().addSecs(-1);
+    baseline.endUtc = baseline.startUtc.addSecs(1);
+    baseline.startDate = baseline.startUtc.date();
+    baseline.endDate = baseline.endUtc.date();
+    baseline.recurrenceRule = QStringLiteral("FREQ=DAILY;COUNT=2");
+    baseline.reminders = QJsonArray{10};
+    QVERIFY2(db.applyRemoteSyncBatch(calendar, {baseline}, {}, {}, &error),
+             qPrintable(error));
+
+    Event excessiveInstances = baseline;
+    excessiveInstances.recurrenceRule = QStringLiteral("FREQ=SECONDLY;COUNT=12000");
+    excessiveInstances.reminders = {};
+    error.clear();
+    QVERIFY(!db.applyRemoteSyncBatch(calendar, {excessiveInstances}, {}, {}, &error));
+    QVERIFY(error.contains(QStringLiteral("instance expansion")));
+    QCOMPARE(db.event(baseline.id).recurrenceRule, baseline.recurrenceRule);
+
+    Event excessiveReminders = baseline;
+    excessiveReminders.recurrenceRule = QStringLiteral("FREQ=SECONDLY;COUNT=5000");
+    error.clear();
+    QVERIFY(!db.applyRemoteSyncBatch(calendar, {excessiveReminders}, {}, {}, &error));
+    QVERIFY(error.contains(QStringLiteral("Reminder expansion")));
+    QCOMPARE(db.event(baseline.id).recurrenceRule, baseline.recurrenceRule);
+  }
+
   void scopedAcknowledgementAndCanonicalRangeAreAtomic() {
     QTemporaryDir directory;
     QVERIFY(directory.isValid());
@@ -1883,6 +2159,9 @@ class DatabaseTest final : public QObject {
     canonicalRange.rawFormat = QStringLiteral("text/calendar");
     canonicalRange.dirty = false;
     canonicalRange.syncState = QStringLiteral("clean");
+    const QList<ProviderResource> canonicalResources = {
+        {calendar.id, master.remoteId, canonicalMaster.etag,
+         QStringLiteral("text/calendar"), canonicalMaster.rawPayload}};
 
     // This invalid staged sibling represents a failure at the old crash
     // boundary: completion has run inside the transaction, but canonical
@@ -1892,7 +2171,8 @@ class DatabaseTest final : public QObject {
     error.clear();
     QVERIFY(!db.completeOutboxWithRemoteSyncBatch(
         ready.first().id, &canonicalRange, calendar,
-        {canonicalMaster, canonicalRange, invalid}, {}, {}, &error));
+        {canonicalMaster, canonicalRange, invalid}, {}, {}, &error,
+        canonicalResources));
     QVERIFY(!error.isEmpty());
     const auto pendingAfterFailure = db.outboxItems(10, &error);
     QCOMPARE(pendingAfterFailure.size(), 1);
@@ -1903,7 +2183,7 @@ class DatabaseTest final : public QObject {
     error.clear();
     QVERIFY2(db.completeOutboxWithRemoteSyncBatch(
                  ready.first().id, &canonicalRange, calendar,
-                 {canonicalMaster, canonicalRange}, {}, {}, &error),
+                 {canonicalMaster, canonicalRange}, {}, {}, &error, canonicalResources),
              qPrintable(error));
 
     Event futureRemoval = db.event(future.id, &error);
@@ -1927,10 +2207,14 @@ class DatabaseTest final : public QObject {
     canonicalCancellation.status = QStringLiteral("cancelled");
     canonicalCancellation.deleted = false;
     canonicalCancellation.rawPayload = QStringLiteral("canonical-range-cancellation");
-    QVERIFY2(db.completeOutboxWithRemoteSyncBatch(
-                 removalIt->id, nullptr, calendar,
-                 {canonicalMaster, canonicalCancellation}, {}, {}, &error),
-             qPrintable(error));
+    const QList<ProviderResource> cancellationResources = {
+        {calendar.id, master.remoteId, canonicalCancellation.etag,
+         QStringLiteral("text/calendar"), canonicalCancellation.rawPayload}};
+    QVERIFY2(
+        db.completeOutboxWithRemoteSyncBatch(removalIt->id, nullptr, calendar,
+                                             {canonicalMaster, canonicalCancellation},
+                                             {}, {}, &error, cancellationResources),
+        qPrintable(error));
     db.close();
 
     Database reopened;

@@ -86,12 +86,14 @@ Drawer {
                 Layout.fillWidth: true
                 spacing: 2
                 Text {
+                    textFormat: Text.PlainText
                     text: qsTr("Activity center")
                     color: Theme.text
                     font.pixelSize: Theme.fontSize + 4
                     font.weight: Font.Bold
                 }
                 Text {
+                    textFormat: Text.PlainText
                     text: root.connected ? root.statusText : qsTr("Calendar service offline")
                     color: Theme.mutedText
                     font.pixelSize: Theme.microFontSize
@@ -265,6 +267,7 @@ Drawer {
                             RowLayout {
                                 Layout.fillWidth: true
                                 Text {
+                                    textFormat: Text.PlainText
                                     Layout.fillWidth: true
                                     text: invitationCard.modelData.summary
                                           || qsTr("Untitled invitation")
@@ -280,6 +283,7 @@ Drawer {
                                 }
                             }
                             Text {
+                                textFormat: Text.PlainText
                                 Layout.fillWidth: true
                                 text: root.invitationDescription(invitationCard.modelData)
                                 color: Theme.mutedText
@@ -332,6 +336,7 @@ Drawer {
                                 }
                             }
                             Text {
+                                textFormat: Text.PlainText
                                 visible: !root.invitationResponseSupported(
                                              invitationCard.modelData)
                                 Layout.fillWidth: true
@@ -385,6 +390,7 @@ Drawer {
                             RowLayout {
                                 Layout.fillWidth: true
                                 Text {
+                                    textFormat: Text.PlainText
                                     Layout.fillWidth: true
                                     text: conflictCard.modelData.summary
                                           || conflictCard.modelData.eventSummary
@@ -397,6 +403,7 @@ Drawer {
                                 StatusBadge { text: qsTr("Needs review"); tone: "danger" }
                             }
                             Text {
+                                textFormat: Text.PlainText
                                 Layout.fillWidth: true
                                 text: conflictCard.modelData.message
                                       || qsTr("This event changed both locally and remotely. Choose which version to keep.")
@@ -468,6 +475,7 @@ Drawer {
                                 Layout.fillWidth: true
                                 spacing: 1
                                 Text {
+                                    textFormat: Text.PlainText
                                     text: root.syncing ? qsTr("Synchronizing")
                                                        : root.connected ? qsTr("Calendar service connected")
                                                                         : qsTr("Working offline")
@@ -476,6 +484,7 @@ Drawer {
                                     font.weight: Font.DemiBold
                                 }
                                 Text {
+                                    textFormat: Text.PlainText
                                     Layout.fillWidth: true
                                     text: root.statusText
                                     color: Theme.mutedText
@@ -529,6 +538,7 @@ Drawer {
                                     Layout.fillWidth: true
                                     spacing: 1
                                     Text {
+                                        textFormat: Text.PlainText
                                         Layout.fillWidth: true
                                         text: root.operationTitle(operationCard.modelData)
                                         color: Theme.text
@@ -537,6 +547,7 @@ Drawer {
                                         elide: Text.ElideRight
                                     }
                                     Text {
+                                        textFormat: Text.PlainText
                                         Layout.fillWidth: true
                                         text: operationCard.modelData.errorMessage
                                               || String(operationCard.modelData.state || qsTr("pending")).replace(/_/g, " ")
@@ -591,6 +602,7 @@ Drawer {
         contentItem: ColumnLayout {
             spacing: 12
             Text {
+                textFormat: Text.PlainText
                 Layout.fillWidth: true
                 text: qsTr("Choose which part of the recurring invitation receives this response.")
                 color: Theme.text

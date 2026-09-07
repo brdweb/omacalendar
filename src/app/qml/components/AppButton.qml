@@ -41,6 +41,7 @@ Button {
             anchors.centerIn: parent
             spacing: control.iconText.length > 0 && control.text.length > 0 ? 7 : 0
             Text {
+                textFormat: Text.PlainText
                 visible: control.iconText.length > 0
                 text: control.iconText
                 color: control.primary ? Theme.accentText
@@ -49,6 +50,7 @@ Button {
                 verticalAlignment: Text.AlignVCenter
             }
             Text {
+                textFormat: Text.PlainText
                 visible: control.text.length > 0
                 text: control.text
                 color: control.primary ? Theme.accentText

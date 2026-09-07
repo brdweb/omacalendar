@@ -1,23 +1,28 @@
 # Getting started
 
-OmaCalendar `1.0.0-alpha` is an evaluation release for Omarchy Linux. Back up
-important calendar data before testing it, and do not make the alpha your only
+OmaCalendar `1.0.0-beta.1` is a public-testing release for Omarchy Linux. Back up
+important calendar data before testing it, and do not make the beta your only
 copy of an important device-only calendar.
 
-## Install a future beta package from GitHub
+## Install the beta package from GitHub
 
-When `v1.0.0-beta.1` is published, its GitHub release will provide a native
-package for current Omarchy on x86-64. In an empty directory, download and
-verify it before installation:
+The `v1.0.0-beta.1` GitHub release provides a native package for current
+Omarchy on x86-64. In an empty directory, download and verify it before
+installation:
 
 ```bash
-curl -LO https://github.com/brdweb/omacalendar/releases/download/v1.0.0-beta.1/omacalendar-1.0.0beta1-1-x86_64.pkg.tar.zst
-curl -LO https://github.com/brdweb/omacalendar/releases/download/v1.0.0-beta.1/SHA256SUMS
+set -euo pipefail
+curl -fLO https://github.com/brdweb/omacalendar/releases/download/v1.0.0-beta.1/omacalendar-1.0.0beta1-1-x86_64.pkg.tar.zst
+curl -fLO https://github.com/brdweb/omacalendar/releases/download/v1.0.0-beta.1/SHA256SUMS
 grep ' omacalendar-1.0.0beta1-1-x86_64.pkg.tar.zst$' SHA256SUMS | sha256sum --check
 gh attestation verify ./omacalendar-1.0.0beta1-1-x86_64.pkg.tar.zst \
-  --repo brdweb/omacalendar
+  --repo brdweb/omacalendar \
+  --source-ref refs/tags/v1.0.0-beta.1 \
+  --signer-workflow brdweb/omacalendar/.github/workflows/release.yml
 gh attestation verify ./omacalendar-1.0.0beta1-1-x86_64.pkg.tar.zst \
   --repo brdweb/omacalendar \
+  --source-ref refs/tags/v1.0.0-beta.1 \
+  --signer-workflow brdweb/omacalendar/.github/workflows/release.yml \
   --predicate-type https://spdx.dev/Document/v2.3
 yay -U ./omacalendar-1.0.0beta1-1-x86_64.pkg.tar.zst
 systemctl --user daemon-reload
@@ -36,7 +41,8 @@ Clone the exact app release qualified with the current widget beta, install the
 build dependencies, and compile the application:
 
 ```bash
-git clone --branch v1.0.0-alpha --depth 1 \
+set -euo pipefail
+git clone --branch v1.0.0-beta.1 --depth 1 \
   https://github.com/brdweb/omacalendar.git
 cd omacalendar
 omarchy pkg add cmake ninja gcc qt6-base qt6-declarative \
@@ -51,13 +57,11 @@ systemctl --user daemon-reload
 systemctl --user enable --now omacalendard.socket
 ```
 
-Google Calendar access is currently in Google's OAuth verification stage. A
-release package contains the public Desktop client configuration and requires
-no credential setup by a tester. Until Google approves unrestricted public
-use, public Google testing remains restricted and Google may show its
-unverified-app warning. Source builds may instead use a separate Google Desktop
-OAuth client as described in the test guide. The rest of the application and
-widget can be evaluated without a Google account.
+Google has approved OmaCalendar's OAuth branding and requested Calendar scopes.
+A release package contains the public Desktop client configuration and requires
+no credential setup by a tester. Source builds may instead use a separate
+Google Desktop OAuth client as described in the test guide. The rest of the
+application and widget can be evaluated without a Google account.
 
 Start OmaCalendar from the Omarchy application launcher or run:
 

@@ -3,7 +3,8 @@
 
 The command deliberately has no implicit plugin source.  A caller must pass an
 absolute local path or the canonical OmaCalendar widget repository URL after
-the user has consented to installation.
+the user has consented to installation.  Network installs also require the
+approved release tag and its independently verified full commit identifier.
 """
 
 from __future__ import annotations
@@ -38,6 +39,8 @@ OFFICIAL_NETWORK_SOURCES = {
     "https://github.com/brdweb/omacalendar-widget",
     "https://github.com/brdweb/omacalendar-widget.git",
 }
+OFFICIAL_NETWORK_REF = "v0.1.0-beta.1"
+GIT_COMMIT_PATTERN = re.compile(r"^[0-9a-f]{40}$")
 EXIT_USAGE = 2
 EXIT_VALIDATION = 3
 EXIT_ROLLED_BACK = 4
@@ -401,6 +404,49 @@ def source_kind(source: str) -> tuple[str, str | Path]:
     return "local", validate_local_source(source)
 
 
+def prepare_source(
+    source: str, source_ref: str | None, source_commit: str | None
+) -> tuple[str, str | Path, dict[str, str]]:
+    kind, resolved = source_kind(source)
+    if kind == "local":
+        if source_ref or source_commit:
+            raise WidgetCtlError(
+                "source_revision_not_applicable",
+                "--source-ref and --source-commit apply only to the official network source",
+                EXIT_USAGE,
+            )
+        return kind, resolved, {"sourceKind": kind}
+
+    if not source_ref:
+        raise WidgetCtlError(
+            "source_ref_required",
+            f"The official network source requires --source-ref {OFFICIAL_NETWORK_REF}",
+            EXIT_USAGE,
+        )
+    if source_ref != OFFICIAL_NETWORK_REF:
+        raise WidgetCtlError(
+            "untrusted_source_ref",
+            f"The official network source is restricted to {OFFICIAL_NETWORK_REF}",
+        )
+    if not source_commit:
+        raise WidgetCtlError(
+            "source_commit_required",
+            "The official network source requires --source-commit with the verified commit",
+            EXIT_USAGE,
+        )
+    commit = source_commit.lower()
+    if source_commit != source_commit.strip() or not GIT_COMMIT_PATTERN.fullmatch(commit):
+        raise WidgetCtlError(
+            "invalid_source_commit",
+            "--source-commit must be exactly 40 hexadecimal characters",
+        )
+    return kind, resolved, {
+        "sourceKind": kind,
+        "sourceRef": source_ref,
+        "sourceCommit": commit,
+    }
+
+
 def reject_source_symlinks(source: Path) -> None:
     for root, directories, files in os.walk(source, followlinks=False):
         root_path = Path(root)
@@ -419,12 +465,48 @@ def copy_local_source(source: Path, destination: Path) -> None:
     shutil.copytree(source, destination, symlinks=False, ignore=ignored)
 
 
-def clone_network_source(source: str, destination: Path, runner: CommandRunner) -> None:
+def clone_network_source(
+    source: str,
+    source_ref: str,
+    expected_commit: str,
+    destination: Path,
+    runner: CommandRunner,
+) -> str:
     runner.run(
-        ["git", "clone", "--depth", "1", "--", source, str(destination)],
+        [
+            "git",
+            "clone",
+            "--depth",
+            "1",
+            "--single-branch",
+            "--branch",
+            source_ref,
+            "--",
+            source,
+            str(destination),
+        ],
         "source_clone_failed",
         "Could not clone the official widget repository",
     )
+    resolved_commit = runner.run(
+        ["git", "-C", str(destination), "rev-parse", "HEAD^{commit}"],
+        "source_commit_unavailable",
+        "Could not resolve the cloned widget commit",
+    ).stdout.strip().lower()
+    if not GIT_COMMIT_PATTERN.fullmatch(resolved_commit):
+        raise WidgetCtlError(
+            "source_commit_unavailable",
+            "The cloned widget source did not resolve to an exact commit",
+        )
+    if resolved_commit != expected_commit:
+        raise WidgetCtlError(
+            "source_commit_mismatch",
+            f"The widget tag resolved to {resolved_commit}, not {expected_commit}",
+        )
+    git_metadata = destination / ".git"
+    if git_metadata.is_dir():
+        shutil.rmtree(git_metadata)
+    return resolved_commit
 
 
 def validate_manifest(plugin_dir: Path) -> dict[str, Any]:
@@ -718,26 +800,75 @@ def initial_result(command: str, dry_run: bool = False) -> dict[str, Any]:
 
 
 def stage_source(
-    source: str,
+    kind: str,
+    resolved: str | Path,
+    source_metadata: dict[str, str],
     destination: Path,
     runner: CommandRunner,
-) -> dict[str, Any]:
-    kind, resolved = source_kind(source)
+) -> tuple[dict[str, Any], dict[str, str]]:
+    metadata = dict(source_metadata)
     if kind == "network":
-        clone_network_source(str(resolved), destination, runner)
+        metadata["resolvedCommit"] = clone_network_source(
+            str(resolved),
+            metadata["sourceRef"],
+            metadata["sourceCommit"],
+            destination,
+            runner,
+        )
     else:
         copy_local_source(Path(resolved), destination)
-    return validate_manifest(destination)
+    return validate_manifest(destination), metadata
 
 
 def install(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
     result = initial_result("install", args.dry_run)
     paths = build_paths(args)
     runner = CommandRunner(paths)
+    source = str(args.source or "")
+    if not source:
+        raise WidgetCtlError(
+            "source_required",
+            "Install requires --source with the trusted official URL or an absolute local path",
+            EXIT_USAGE,
+        )
     state = load_state(paths)
     if state is not None:
         if state.get("phase") == "active":
-            result.update(status="already_installed", source=state.get("source"))
+            recorded_source = str(state.get("source") or "")
+            network_install = (
+                state.get("sourceKind") == "network"
+                or "://" in recorded_source
+                or "://" in source
+            )
+            if network_install:
+                kind, resolved, requested_metadata = prepare_source(
+                    source, args.source_ref, args.source_commit
+                )
+                verified = (
+                    kind == "network"
+                    and recorded_source.rstrip("/") in OFFICIAL_NETWORK_SOURCES
+                    and str(resolved) in OFFICIAL_NETWORK_SOURCES
+                    and state.get("sourceKind") == "network"
+                    and state.get("sourceRef") == requested_metadata["sourceRef"]
+                    and state.get("sourceCommit") == requested_metadata["sourceCommit"]
+                    and state.get("resolvedCommit") == requested_metadata["sourceCommit"]
+                )
+                if not verified:
+                    raise WidgetCtlError(
+                        "installed_source_unverified",
+                        "The installed network widget has no matching verified source revision; restore before reinstalling",
+                        EXIT_CONFLICT,
+                    )
+                result.update(
+                    status="already_installed",
+                    source=recorded_source,
+                    **requested_metadata,
+                    resolvedCommit=state.get("resolvedCommit"),
+                )
+            else:
+                if args.source_ref or args.source_commit:
+                    prepare_source(source, args.source_ref, args.source_commit)
+                result.update(status="already_installed", source=recorded_source)
             return result, 0
         raise WidgetCtlError(
             "recovery_required",
@@ -751,15 +882,10 @@ def install(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
             EXIT_CONFLICT,
         )
 
-    source = str(args.source or "")
-    if not source:
-        raise WidgetCtlError(
-            "source_required",
-            "Install requires --source with the trusted official URL or an absolute local path",
-            EXIT_USAGE,
-        )
     # Validate trust before creating a staging directory.
-    source_kind(source)
+    kind, resolved, source_metadata = prepare_source(
+        source, args.source_ref, args.source_commit
+    )
 
     temp_parent: Path | None = None
     if args.dry_run:
@@ -772,7 +898,9 @@ def install(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
         temporary = None
 
     try:
-        manifest = stage_source(source, stage, runner)
+        manifest, source_metadata = stage_source(
+            kind, resolved, source_metadata, stage, runner
+        )
         validate_environment(paths, runner, manifest, stage)
 
         shell_data, shell_existed, shell_mode = shell_source(paths)
@@ -799,6 +927,7 @@ def install(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
         result.update(
             status="would_install" if args.dry_run else "prepared",
             source=source,
+            **source_metadata,
             actions=planned,
             details={
                 "clockSection": shell_metadata["section"],
@@ -820,6 +949,7 @@ def install(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
             "activationId": activation_id,
             "phase": "prepared",
             "source": source,
+            **source_metadata,
             "createdAt": utc_now(),
             "shell": {
                 "existed": shell_existed,
@@ -850,6 +980,7 @@ def install(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
             "activationId": activation_id,
             "installedAt": utc_now(),
             "source": source,
+            **source_metadata,
         }
         atomic_write(paths.plugin_target / MARKER_NAME, json_bytes(marker), 0o600)
         state["plugin"]["installed"] = True
@@ -1147,8 +1278,24 @@ def status(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
         "managed": True,
         "phase": state.get("phase"),
         "source": state.get("source"),
+        "sourceKind": state.get("sourceKind"),
+        "sourceRef": state.get("sourceRef"),
+        "sourceCommit": state.get("sourceCommit"),
+        "resolvedCommit": state.get("resolvedCommit"),
         "pluginDirectoryPresent": target_exists,
     }
+    recorded_source = str(state.get("source") or "")
+    if state.get("sourceKind") == "network" or "://" in recorded_source:
+        details["sourceVerified"] = (
+            recorded_source.rstrip("/") in OFFICIAL_NETWORK_SOURCES
+            and state.get("sourceKind") == "network"
+            and state.get("sourceRef") == OFFICIAL_NETWORK_REF
+            and isinstance(state.get("sourceCommit"), str)
+            and GIT_COMMIT_PATTERN.fullmatch(state["sourceCommit"]) is not None
+            and state.get("resolvedCommit") == state.get("sourceCommit")
+        )
+    else:
+        details["sourceVerified"] = True
     shell_data = read_bytes(paths.shell_config)
     if shell_data is not None:
         try:
@@ -1170,6 +1317,7 @@ def status(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
         and details.get("clockEntries") == 0
         and details.get("centerAnchor") == PLUGIN_ID
         and details["shortcutManaged"]
+        and details["sourceVerified"]
     )
     result.update(
         status="installed" if healthy else "recovery_required",
@@ -1198,6 +1346,14 @@ def make_parser() -> JsonArgumentParser:
         "--source",
         required=True,
         help="Canonical official repository URL or absolute trusted local plugin path",
+    )
+    install_parser.add_argument(
+        "--source-ref",
+        help=f"Required immutable release tag for network installs ({OFFICIAL_NETWORK_REF})",
+    )
+    install_parser.add_argument(
+        "--source-commit",
+        help="Required verified 40-character commit for network installs",
     )
     install_parser.add_argument(
         "--dry-run", action="store_true", help="Validate and report without changing user config"

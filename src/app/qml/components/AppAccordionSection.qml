@@ -28,6 +28,7 @@ ColumnLayout {
         contentItem: RowLayout {
             spacing: 10
             Text {
+                textFormat: Text.PlainText
                 text: root.expanded ? "⌄" : "›"
                 color: Theme.accent
                 font.pixelSize: Theme.fontSize + 3
@@ -35,6 +36,7 @@ ColumnLayout {
                 horizontalAlignment: Text.AlignHCenter
             }
             Text {
+                textFormat: Text.PlainText
                 Layout.fillWidth: true
                 text: root.title
                 color: Theme.text
@@ -43,6 +45,7 @@ ColumnLayout {
                 elide: Text.ElideRight
             }
             Text {
+                textFormat: Text.PlainText
                 visible: root.detail.length > 0
                 text: root.detail
                 color: Theme.mutedText

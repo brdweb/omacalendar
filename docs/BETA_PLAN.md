@@ -21,16 +21,17 @@ the work; the acceptance record decides whether the exact commit may be tagged.
   source repository under one consistent OmaCalendar identity.
 - [x] Request only the three Calendar scopes used by the application and
   document why each is necessary.
-- [ ] Verify the Google Auth Platform branding and authorized domain.
+- [x] Verify the Google Auth Platform branding and authorized domain.
 - [x] Reconcile the Cloud Console's OAuth-client secret warning. Google's
   Desktop client currently requires its generated shared value during token
   exchange. Treat the client ID and that value as extractable public
   application configuration, while PKCE protects each authorization code.
-- [ ] Record a privacy-safe demonstration of browser consent, account
+- [x] Record a privacy-safe demonstration of browser consent, account
   connection, calendar discovery, event CRUD, and secondary-calendar
-  management.
-- [ ] Submit branding and data-access verification, then record Google's
-  approval and confirm that a new external user sees no unverified-app bypass.
+  management for Google's review.
+- [x] Submit branding and data-access verification and record Google's approval.
+- [ ] Confirm that a new external user who was not allowlisted as a test user
+  sees no unverified-app bypass and completes the post-approval acceptance flow.
 
 The scope descriptions and recording checklist are in
 [`GOOGLE_OAUTH_VERIFICATION.md`](GOOGLE_OAUTH_VERIFICATION.md). Browser success

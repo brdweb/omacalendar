@@ -1032,7 +1032,6 @@ ICalendarParseResult ICalendarCodec::parse(const QByteArray& payload) {
     return result;
   }
 
-  const QString rawPayload = QString::fromUtf8(payload);
   for (qsizetype index = 0; index < components.size(); ++index) {
     icalcomponent* component = components.at(index);
     Event event;
@@ -1156,8 +1155,6 @@ ICalendarParseResult ICalendarCodec::parse(const QByteArray& payload) {
         event.reminders.append(*reminder);
       }
     }
-    event.rawPayload = rawPayload;
-    event.rawFormat = QStringLiteral("text/calendar");
     result.events.append(event);
   }
 

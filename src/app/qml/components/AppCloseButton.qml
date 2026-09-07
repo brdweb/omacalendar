@@ -20,6 +20,7 @@ Button {
     ToolTip.delay: 450
 
     contentItem: Text {
+        textFormat: Text.PlainText
         text: "×"
         color: control.down ? Theme.accentText : Theme.text
         font.pixelSize: 24

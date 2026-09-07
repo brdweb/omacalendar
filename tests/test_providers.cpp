@@ -847,8 +847,8 @@ void ProviderTest::calDavICalendarParsing() {
   QCOMPARE(allDay.status, QStringLiteral("tentative"));
   QCOMPARE(allDay.transparency, QStringLiteral("transparent"));
   QCOMPARE(allDay.sequence, 2);
-  QCOMPARE(allDay.rawPayload, QString::fromUtf8(payload));
-  QCOMPARE(allDay.rawFormat, QStringLiteral("text/calendar"));
+  QVERIFY(allDay.rawPayload.isEmpty());
+  QVERIFY(allDay.rawFormat.isEmpty());
 
   const Event timed = parsed.events.at(1);
   QVERIFY(!timed.allDay);

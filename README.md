@@ -6,11 +6,11 @@ booking services, natural-language entry, or an OmaCalendar cloud service. An
 optional Quickshell companion is developed and released independently.
 
 > [!WARNING]
-> `1.0.0-alpha` is an unsupported evaluation prerelease. Automated suites
+> `1.0.0-beta.1` is an unsupported public-testing prerelease. Automated suites
 > exercise the local database, provider mutation machinery, desktop, IPC,
 > and reminders, but the full live-provider and stable owner-acceptance
 > matrices are not complete. Use test or disposable calendars and never make an
-> alpha build the only copy of important calendar data.
+> beta build the only copy of important calendar data.
 
 ## 1.0 scope
 
@@ -47,9 +47,9 @@ events; no maintainer account or calendar data is included.
 
 ![OmaCalendar event editor](docs/screenshots/event-editor.png)
 
-## Alpha status
+## Beta status
 
-The app is being qualified as `1.0.0-alpha` using IPC 2 and database schema 2.
+The app is being qualified as `1.0.0-beta.1` using IPC 2 and database schema 2.
 Local automated coverage currently includes the schema transition,
 daemon and provider contracts, local event/calendar workflows, reminders,
 recurrence, search, import/export, conflict handling, and desktop models. A
@@ -73,12 +73,11 @@ the final owner acceptance pass remain open.
 The detailed evidence and unchecked gates are maintained in [the implementation
 plan](docs/PLAN.md).
 
-Google Calendar access is currently in Google's OAuth verification stage and
-has not yet been approved for unrestricted public use. Until Google completes
-that review, authorization may be limited to configured test users and Google
-may display its unverified-app warning. Local calendars, CalDAV, ICS, and the
-widget's connection to the local OmaCalendar daemon do not depend on Google
-approval.
+Google has approved OmaCalendar's OAuth branding and requested Calendar scopes.
+The release gate still requires a post-approval authorization, write, token
+persistence, and restart pass with a new external account. Local calendars,
+CalDAV, ICS, and the widget's connection to the local OmaCalendar daemon do not
+depend on Google authorization.
 
 ## Architecture
 
@@ -142,7 +141,7 @@ development package installation configured for `/usr`:
 cmake -S . -B build-release -G Ninja \
   -DCMAKE_BUILD_TYPE=Release \
   -DCMAKE_INSTALL_PREFIX=/usr \
-  -DOMACALENDAR_VERSION_SUFFIX=-alpha
+  -DOMACALENDAR_VERSION_SUFFIX=-beta.1
 cmake --build build-release --parallel
 DESTDIR="$PWD/stage" cmake --install build-release
 packaging/release/verify-install.sh "$PWD/stage"
@@ -207,14 +206,14 @@ shell history. Live-provider suites must use dedicated test accounts.
 - [Changelog](CHANGELOG.md)
 
 The release workflow produces checksummed archives, an SPDX SBOM, and GitHub
-artifact attestations. `1.0.0-alpha` uses its own non-production gate and is
-always marked as a GitHub prerelease; stable `1.0.0` remains blocked until every
-stable release gate and the owner acceptance pass are complete.
+artifact attestations. `1.0.0-beta.1` is always marked as a GitHub prerelease;
+stable `1.0.0` remains blocked until every stable release gate and the owner
+acceptance pass are complete.
 
 ## Project website
 
-- [OmaCalendar project site](https://brdweb.github.io/omacalendar/)
-- [Privacy policy](https://brdweb.github.io/omacalendar/privacy.html)
-- [Terms of use](https://brdweb.github.io/omacalendar/terms.html)
+- [OmaCalendar project site](https://omacalendar.brdweb.com/)
+- [Privacy policy](https://omacalendar.brdweb.com/privacy.html)
+- [Terms of use](https://omacalendar.brdweb.com/terms.html)
 
 OmaCalendar is released under the [MIT License](LICENSE).

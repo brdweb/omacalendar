@@ -9,6 +9,7 @@
 #include <QTimeZone>
 #include <algorithm>
 #include <memory>
+#include <optional>
 
 namespace omacalendar {
 namespace {
@@ -29,15 +30,35 @@ struct RecurrenceComponent {
   bool hasRecurrence = false;
 };
 
-struct Collector {
-  const Event* master = nullptr;
-  const QDateTime* startUtc = nullptr;
-  const QDateTime* endUtc = nullptr;
-  qsizetype limit = 0;
-  QList<Event> occurrences;
-  QSet<QString> seenStarts;
-  bool truncated = false;
+struct RecurrenceIteratorDeleter {
+  void operator()(icalrecur_iterator* iterator) const {
+    if (iterator != nullptr) {
+      icalrecur_iterator_free(iterator);
+    }
+  }
 };
+
+using RecurrenceIteratorPtr =
+    std::unique_ptr<icalrecur_iterator, RecurrenceIteratorDeleter>;
+
+struct WorkBudget {
+  qsizetype remaining = 0;
+  bool exhausted = false;
+
+  bool spend() {
+    if (remaining <= 0) {
+      exhausted = true;
+      return false;
+    }
+    --remaining;
+    return true;
+  }
+};
+
+constexpr qsizetype kMaximumComponentTraversal = 4096;
+constexpr int kMaximumComponentDepth = 64;
+
+void sortOccurrences(QList<Event>* events);
 
 bool isCancelled(const Event& event) {
   return event.deleted ||
@@ -158,40 +179,48 @@ QString googleRecurringParentId(const Event& event) {
              : QString();
 }
 
-bool belongsToMaster(const Event& exception, const Event& master) {
-  if (exception.calendarId != master.calendarId) {
-    return false;
-  }
-  const QString parentId = googleRecurringParentId(exception);
-  if (!parentId.isEmpty()) {
-    return parentId == master.remoteId;
-  }
-  return !exception.uid.isEmpty() && exception.uid == master.uid;
+QString parentKey(const QString& kind, const QString& calendarId,
+                  const QString& identity) {
+  return identity.isEmpty()
+             ? QString()
+             : kind + QLatin1Char('\n') + calendarId + QLatin1Char('\n') + identity;
 }
 
-icalcomponent* findMasterComponent(icalcomponent* component, const QByteArray& uid) {
-  if (component == nullptr) {
+icalcomponent* findMasterComponent(icalcomponent* root, const QByteArray& uid,
+                                   bool* traversalExceeded) {
+  if (root == nullptr) {
     return nullptr;
   }
-  if (icalcomponent_isa(component) == ICAL_VEVENT_COMPONENT) {
-    icalproperty* uidProperty =
-        icalcomponent_get_first_property(component, ICAL_UID_PROPERTY);
-    icalproperty* recurrenceId =
-        icalcomponent_get_first_property(component, ICAL_RECURRENCEID_PROPERTY);
-    const char* componentUid =
-        uidProperty == nullptr ? nullptr : icalproperty_get_uid(uidProperty);
-    if (recurrenceId == nullptr && componentUid != nullptr && uid == componentUid) {
-      return component;
+  QList<QPair<icalcomponent*, int>> pending{{root, 0}};
+  qsizetype visited = 0;
+  while (!pending.isEmpty()) {
+    const auto [component, depth] = pending.takeLast();
+    if (++visited > kMaximumComponentTraversal || depth > kMaximumComponentDepth) {
+      *traversalExceeded = true;
+      return nullptr;
     }
-    return nullptr;
-  }
+    if (icalcomponent_isa(component) == ICAL_VEVENT_COMPONENT) {
+      icalproperty* uidProperty =
+          icalcomponent_get_first_property(component, ICAL_UID_PROPERTY);
+      icalproperty* recurrenceId =
+          icalcomponent_get_first_property(component, ICAL_RECURRENCEID_PROPERTY);
+      const char* componentUid =
+          uidProperty == nullptr ? nullptr : icalproperty_get_uid(uidProperty);
+      if (recurrenceId == nullptr && componentUid != nullptr && uid == componentUid) {
+        return component;
+      }
+      continue;
+    }
 
-  for (icalcomponent* child =
-           icalcomponent_get_first_component(component, ICAL_ANY_COMPONENT);
-       child != nullptr;
-       child = icalcomponent_get_next_component(component, ICAL_ANY_COMPONENT)) {
-    if (icalcomponent* match = findMasterComponent(child, uid)) {
-      return match;
+    for (icalcomponent* child =
+             icalcomponent_get_first_component(component, ICAL_ANY_COMPONENT);
+         child != nullptr;
+         child = icalcomponent_get_next_component(component, ICAL_ANY_COMPONENT)) {
+      if (pending.size() >= kMaximumComponentTraversal) {
+        *traversalExceeded = true;
+        return nullptr;
+      }
+      pending.append({child, depth + 1});
     }
   }
   return nullptr;
@@ -267,7 +296,16 @@ RecurrenceComponent componentFor(const Event& master, QStringList* warnings) {
       !master.rawPayload.isEmpty()) {
     const QByteArray payload = master.rawPayload.toUtf8();
     result.owner.reset(icalcomponent_new_from_string(payload.constData()));
-    result.event = findMasterComponent(result.owner.get(), master.uid.toUtf8());
+    bool traversalExceeded = false;
+    result.event = findMasterComponent(result.owner.get(), master.uid.toUtf8(),
+                                       &traversalExceeded);
+    if (traversalExceeded) {
+      warnings->append(
+          QStringLiteral("recurrence_component_limit_exceeded:%1").arg(master.id));
+      result.owner.reset();
+      result.event = nullptr;
+      return result;
+    }
     result.hasRecurrence = hasRecurrenceProperties(result.event);
     if (result.event != nullptr && result.hasRecurrence) {
       return result;
@@ -337,51 +375,167 @@ RecurrenceComponent componentFor(const Event& master, QStringList* warnings) {
   return result;
 }
 
-void collectOccurrence(icalcomponent*, const icaltime_span* span, void* data) {
-  auto* collector = static_cast<Collector*>(data);
-  if (span == nullptr || collector == nullptr || collector->master == nullptr) {
+void applyPropertyTimeZone(icalproperty* property, icaltimetype* value) {
+  const char* zoneName = icalproperty_get_parameter_as_string(property, "TZID");
+  if (zoneName == nullptr || *zoneName == '\0' || icaltime_is_utc(*value)) {
     return;
   }
-  if (collector->occurrences.size() >= collector->limit) {
-    collector->truncated = true;
-    return;
+  if (icaltimezone* zone = zoneFor(QString::fromUtf8(zoneName))) {
+    icaltime_set_timezone(value, zone);
   }
+}
 
-  Event occurrence = *collector->master;
-  if (occurrence.allDay) {
-    const QDate start =
-        QDateTime::fromSecsSinceEpoch(static_cast<qint64>(span->start), QTimeZone::UTC)
-            .date();
-    const qint64 durationDays =
-        occurrence.endDate.isValid()
-            ? std::max<qint64>(1, occurrence.startDate.daysTo(occurrence.endDate))
+QDateTime occurrenceUtc(const icaltimetype& value, const Event& master) {
+  if (icaltime_is_null_time(value) || !icaltime_is_valid_time(value)) {
+    return {};
+  }
+  const icaltimezone* valueZone = icaltime_get_timezone(value);
+  icaltimezone* fallback = nullptr;
+  if (valueZone == nullptr) {
+    const QString zoneName = master.startTimeZone.isEmpty()
+                                 ? QString::fromUtf8(QTimeZone::systemTimeZoneId())
+                                 : master.startTimeZone;
+    fallback = zoneFor(zoneName);
+  }
+  if (valueZone == nullptr && fallback == nullptr) {
+    fallback = icaltimezone_get_utc_timezone();
+  }
+  const icaltime_t seconds = icaltime_as_timet_with_zone(
+      value, const_cast<icaltimezone*>(valueZone == nullptr ? fallback : valueZone));
+  return QDateTime::fromSecsSinceEpoch(static_cast<qint64>(seconds), QTimeZone::UTC);
+}
+
+Event occurrenceFrom(const Event& master, const icaltimetype& start,
+                     const std::optional<icaltimetype>& explicitEnd = std::nullopt,
+                     const std::optional<qint64>& explicitDuration = std::nullopt) {
+  Event occurrence = master;
+  if (master.allDay || icaltime_is_date(start)) {
+    occurrence.allDay = true;
+    occurrence.startDate = QDate(start.year, start.month, start.day);
+    qint64 durationDays =
+        master.endDate.isValid()
+            ? std::max<qint64>(1, master.startDate.daysTo(master.endDate))
             : INT64_C(1);
-    occurrence.startDate = start;
-    occurrence.endDate = start.addDays(durationDays);
+    if (explicitEnd.has_value() && icaltime_is_date(*explicitEnd)) {
+      const QDate end(explicitEnd->year, explicitEnd->month, explicitEnd->day);
+      durationDays = std::max<qint64>(1, occurrence.startDate.daysTo(end));
+    } else if (explicitDuration.has_value()) {
+      durationDays = std::max<qint64>(1, *explicitDuration / (24 * 60 * 60));
+    }
+    occurrence.endDate = occurrence.startDate.addDays(durationDays);
   } else {
-    occurrence.startUtc =
-        QDateTime::fromSecsSinceEpoch(static_cast<qint64>(span->start), QTimeZone::UTC);
-    occurrence.endUtc =
-        QDateTime::fromSecsSinceEpoch(static_cast<qint64>(span->end), QTimeZone::UTC);
+    occurrence.allDay = false;
+    occurrence.startUtc = occurrenceUtc(start, master);
+    const qint64 masterDuration =
+        master.endUtc.isValid()
+            ? std::max<qint64>(0, master.startUtc.secsTo(master.endUtc))
+            : 0;
+    if (explicitEnd.has_value()) {
+      occurrence.endUtc = occurrenceUtc(*explicitEnd, master);
+    } else {
+      occurrence.endUtc =
+          occurrence.startUtc.addSecs(explicitDuration.value_or(masterDuration));
+    }
   }
   occurrence.recurrenceId =
       occurrence.allDay ? occurrence.startDate.toString(Qt::ISODate)
                         : occurrence.startUtc.toUTC().toString(Qt::ISODateWithMs);
-  const QString key = occurrenceKey(occurrence);
-  if (key.isEmpty() || collector->seenStarts.contains(key)) {
-    return;
+  return occurrence;
+}
+
+bool enumerateRule(icalproperty* property, const icaltimetype& dtstart,
+                   const icaltimetype& from, const icaltimetype& until,
+                   const Event& master, WorkBudget* budget, QList<Event>* output) {
+  if (!budget->spend()) {
+    return false;
   }
-  collector->seenStarts.insert(key);
-  if (overlaps(occurrence, *collector->startUtc, *collector->endUtc)) {
-    collector->occurrences.append(std::move(occurrence));
+  icalrecurrencetype* rule = icalproperty_isa(property) == ICAL_EXRULE_PROPERTY
+                                 ? icalproperty_get_exrule(property)
+                                 : icalproperty_get_rrule(property);
+  RecurrenceIteratorPtr iterator(
+      rule == nullptr ? nullptr : icalrecur_iterator_new(rule, dtstart));
+  if (!iterator) {
+    return true;
+  }
+  icalrecur_iterator_set_end(iterator.get(), until);
+  if (rule->count == 0 && icaltime_compare(from, dtstart) > 0) {
+    icalrecur_iterator_set_start(iterator.get(), from);
+  }
+  while (true) {
+    if (!budget->spend()) {
+      return false;
+    }
+    const icaltimetype next = icalrecur_iterator_next(iterator.get());
+    if (icaltime_is_null_time(next)) {
+      return true;
+    }
+    if (icaltime_compare(next, from) >= 0 && icaltime_compare(next, until) < 0) {
+      output->append(occurrenceFrom(master, next));
+    }
   }
 }
 
+bool enumerateDateProperties(icalcomponent* component, const icalproperty_kind kind,
+                             const Event& master, WorkBudget* budget,
+                             QList<Event>* output) {
+  for (icalproperty* property = icalcomponent_get_first_property(component, kind);
+       property != nullptr;
+       property = icalcomponent_get_next_property(component, kind)) {
+    if (!budget->spend()) {
+      return false;
+    }
+    const char* encoded = icalproperty_get_value_as_string(property);
+    const QList<QByteArray> values =
+        encoded == nullptr ? QList<QByteArray>{} : QByteArray(encoded).split(',');
+    for (const QByteArray& rawValue : values) {
+      if (!budget->spend()) {
+        return false;
+      }
+      const QByteArray value = rawValue.trimmed();
+      if (value.isEmpty()) {
+        continue;
+      }
+      if (kind == ICAL_RDATE_PROPERTY && value.contains('/')) {
+        icalperiodtype period = icalperiodtype_from_string(value.constData());
+        if (!icalperiodtype_is_valid_period(period)) {
+          continue;
+        }
+        applyPropertyTimeZone(property, &period.start);
+        if (!icaltime_is_null_time(period.end)) {
+          applyPropertyTimeZone(property, &period.end);
+          output->append(occurrenceFrom(master, period.start, period.end));
+        } else {
+          output->append(occurrenceFrom(
+              master, period.start, std::nullopt,
+              static_cast<qint64>(icaldurationtype_as_seconds(period.duration))));
+        }
+        continue;
+      }
+      icaltimetype time = icaltime_from_string(value.constData());
+      if (icaltime_is_null_time(time) || !icaltime_is_valid_time(time)) {
+        continue;
+      }
+      applyPropertyTimeZone(property, &time);
+      output->append(occurrenceFrom(master, time));
+    }
+  }
+  return true;
+}
+
 QList<Event> expandMaster(const Event& master, const QDateTime& startUtc,
-                          const QDateTime& endUtc, qsizetype limit, bool* truncated,
-                          QStringList* warnings) {
+                          const QDateTime& endUtc, qsizetype limit, WorkBudget* budget,
+                          bool* truncated, QStringList* warnings) {
+  if (master.recurrenceRule.isEmpty() &&
+      (master.rawFormat != QStringLiteral("text/calendar") ||
+       master.rawPayload.isEmpty())) {
+    return overlaps(master, startUtc, endUtc) ? QList<Event>{master} : QList<Event>{};
+  }
   RecurrenceComponent component = componentFor(master, warnings);
-  if (component.event == nullptr || !component.hasRecurrence) {
+  if (component.event == nullptr) {
+    *truncated = true;
+    return {};
+  }
+  if (!component.hasRecurrence) {
     return overlaps(master, startUtc, endUtc) ? QList<Event>{master} : QList<Event>{};
   }
 
@@ -399,18 +553,68 @@ QList<Event> expandMaster(const Event& master, const QDateTime& startUtc,
   const icaltimetype until =
       icaltime_from_timet_with_zone(static_cast<icaltime_t>(endUtc.toSecsSinceEpoch()),
                                     false, icaltimezone_get_utc_timezone());
+  const icaltimetype dtstart = icalcomponent_get_dtstart(component.event);
 
-  Collector collector;
-  collector.master = &master;
-  collector.startUtc = &startUtc;
-  collector.endUtc = &endUtc;
-  collector.limit = std::max<qsizetype>(1, limit);
-  icalcomponent_foreach_recurrence(component.event, from, until, collectOccurrence,
-                                   &collector);
-  if (collector.truncated) {
-    *truncated = true;
+  QList<Event> excluded;
+  for (icalproperty* property =
+           icalcomponent_get_first_property(component.event, ICAL_EXRULE_PROPERTY);
+       property != nullptr; property = icalcomponent_get_next_property(
+                                component.event, ICAL_EXRULE_PROPERTY)) {
+    if (!enumerateRule(property, dtstart, from, until, master, budget, &excluded)) {
+      *truncated = true;
+      return {};
+    }
   }
-  return collector.occurrences;
+  if (!enumerateDateProperties(component.event, ICAL_EXDATE_PROPERTY, master, budget,
+                               &excluded)) {
+    *truncated = true;
+    return {};
+  }
+  QSet<QString> excludedKeys;
+  for (const Event& event : std::as_const(excluded)) {
+    excludedKeys.insert(occurrenceKey(event));
+  }
+
+  QList<Event> candidates;
+  if (!budget->spend()) {
+    *truncated = true;
+    return {};
+  }
+  candidates.append(occurrenceFrom(master, dtstart));
+  for (icalproperty* property =
+           icalcomponent_get_first_property(component.event, ICAL_RRULE_PROPERTY);
+       property != nullptr; property = icalcomponent_get_next_property(
+                                component.event, ICAL_RRULE_PROPERTY)) {
+    if (!enumerateRule(property, dtstart, from, until, master, budget, &candidates)) {
+      *truncated = true;
+      return {};
+    }
+  }
+  if (!enumerateDateProperties(component.event, ICAL_RDATE_PROPERTY, master, budget,
+                               &candidates)) {
+    *truncated = true;
+    return {};
+  }
+
+  sortOccurrences(&candidates);
+  QList<Event> occurrences;
+  QSet<QString> seenStarts;
+  for (Event& occurrence : candidates) {
+    const QString key = occurrenceKey(occurrence);
+    if (key.isEmpty() || seenStarts.contains(key) || excludedKeys.contains(key)) {
+      continue;
+    }
+    seenStarts.insert(key);
+    if (!overlaps(occurrence, startUtc, endUtc)) {
+      continue;
+    }
+    if (occurrences.size() >= std::max<qsizetype>(1, limit)) {
+      *truncated = true;
+      continue;
+    }
+    occurrences.append(std::move(occurrence));
+  }
+  return occurrences;
 }
 
 bool exceptionWins(const Event& candidate, const Event& current) {
@@ -442,20 +646,41 @@ void sortOccurrences(QList<Event>* events) {
 
 RecurrenceExpansionResult RecurrenceExpander::expand(
     const QList<Event>& events, const QDateTime& startUtc, const QDateTime& endUtc,
-    const qsizetype maximumOccurrences) {
+    const qsizetype maximumOccurrences, const qsizetype maximumExpansionSteps) {
   RecurrenceExpansionResult result;
   if (!startUtc.isValid() || !endUtc.isValid() || startUtc >= endUtc) {
     result.warnings.append(QStringLiteral("invalid_expansion_range"));
     return result;
   }
   const qsizetype limit = std::max<qsizetype>(1, maximumOccurrences);
+  WorkBudget budget{std::max<qsizetype>(1, maximumExpansionSteps)};
+  const auto markWorkLimit = [&result]() {
+    result.truncated = true;
+    if (!result.warnings.contains(QStringLiteral("recurrence_work_limit_exceeded"))) {
+      result.warnings.append(QStringLiteral("recurrence_work_limit_exceeded"));
+    }
+  };
 
   QList<qsizetype> masters;
   QList<qsizetype> exceptions;
+  QHash<QString, QList<qsizetype>> exceptionsByParent;
   for (qsizetype index = 0; index < events.size(); ++index) {
+    if (!budget.spend()) {
+      markWorkLimit();
+      result.occurrences.clear();
+      return result;
+    }
     const Event& event = events.at(index);
     if (!event.recurrenceId.isEmpty()) {
       exceptions.append(index);
+      const QString googleParent = googleRecurringParentId(event);
+      const QString key =
+          googleParent.isEmpty()
+              ? parentKey(QStringLiteral("uid"), event.calendarId, event.uid)
+              : parentKey(QStringLiteral("google"), event.calendarId, googleParent);
+      if (!key.isEmpty()) {
+        exceptionsByParent[key].append(index);
+      }
     } else if (!event.recurrenceRule.isEmpty()) {
       masters.append(index);
     } else if (!isCancelled(event) && overlaps(event, startUtc, endUtc)) {
@@ -469,18 +694,52 @@ RecurrenceExpansionResult RecurrenceExpander::expand(
 
   QSet<qsizetype> consumedExceptions;
   for (const qsizetype masterIndex : masters) {
+    if (!budget.spend()) {
+      markWorkLimit();
+      break;
+    }
+    if (result.occurrences.size() >= limit) {
+      result.truncated = true;
+      break;
+    }
     const Event& master = events.at(masterIndex);
     QList<qsizetype> matchingExceptions;
-    for (const qsizetype exceptionIndex : exceptions) {
-      if (!consumedExceptions.contains(exceptionIndex) &&
-          belongsToMaster(events.at(exceptionIndex), master)) {
-        matchingExceptions.append(exceptionIndex);
+    const QList<QString> keys{
+        parentKey(QStringLiteral("google"), master.calendarId, master.remoteId),
+        parentKey(QStringLiteral("uid"), master.calendarId, master.uid)};
+    for (const QString& key : keys) {
+      if (key.isEmpty()) {
+        continue;
       }
+      for (const qsizetype exceptionIndex : exceptionsByParent.value(key)) {
+        if (!budget.spend()) {
+          markWorkLimit();
+          break;
+        }
+        if (!consumedExceptions.contains(exceptionIndex)) {
+          matchingExceptions.append(exceptionIndex);
+        }
+      }
+      if (budget.exhausted) {
+        break;
+      }
+    }
+    if (budget.exhausted) {
+      break;
     }
 
     if (isCancelled(master)) {
       for (const qsizetype index : matchingExceptions) {
-        consumedExceptions.insert(index);
+        if (!budget.spend()) {
+          markWorkLimit();
+          break;
+        }
+        if (!consumedExceptions.contains(index)) {
+          consumedExceptions.insert(index);
+        }
+      }
+      if (budget.exhausted) {
+        break;
       }
       continue;
     }
@@ -488,50 +747,73 @@ RecurrenceExpansionResult RecurrenceExpander::expand(
     bool masterTruncated = false;
     QList<Event> generated =
         expandMaster(master, startUtc, endUtc,
-                     std::max<qsizetype>(1, limit - result.occurrences.size()),
+                     std::max<qsizetype>(1, limit - result.occurrences.size()), &budget,
                      &masterTruncated, &result.warnings);
     result.truncated = result.truncated || masterTruncated;
+    if (budget.exhausted) {
+      markWorkLimit();
+      break;
+    }
 
     QHash<QString, qsizetype> exceptionsByKey;
-    QList<QPair<QString, qsizetype>> rangeExceptions;
+    QHash<QString, qsizetype> rangeByKey;
     for (const qsizetype index : matchingExceptions) {
+      if (!budget.spend()) {
+        markWorkLimit();
+        break;
+      }
       const QString key = recurrenceKey(events.at(index), master);
       if (key.isEmpty()) {
         result.warnings.append(
             QStringLiteral("recurrence_id_invalid:%1").arg(events.at(index).id));
         continue;
       }
-      if (isThisAndFuture(events.at(index))) {
-        rangeExceptions.append({key, index});
-        consumedExceptions.insert(index);
-        continue;
-      }
-      const auto current = exceptionsByKey.constFind(key);
-      if (current == exceptionsByKey.cend() ||
+      QHash<QString, qsizetype>* target =
+          isThisAndFuture(events.at(index)) ? &rangeByKey : &exceptionsByKey;
+      const auto current = target->constFind(key);
+      if (current == target->cend() ||
           exceptionWins(events.at(index), events.at(current.value()))) {
-        exceptionsByKey.insert(key, index);
+        if (current != target->cend()) {
+          consumedExceptions.insert(current.value());
+        }
+        target->insert(key, index);
+      } else {
+        consumedExceptions.insert(index);
       }
+      if (target == &rangeByKey) {
+        consumedExceptions.insert(index);
+      }
+    }
+    if (budget.exhausted) {
+      break;
+    }
+    QList<QPair<QString, qsizetype>> rangeExceptions;
+    rangeExceptions.reserve(rangeByKey.size());
+    for (auto iterator = rangeByKey.cbegin(); iterator != rangeByKey.cend();
+         ++iterator) {
+      rangeExceptions.append({iterator.key(), iterator.value()});
     }
     std::sort(
         rangeExceptions.begin(), rangeExceptions.end(),
         [](const auto& left, const auto& right) { return left.first < right.first; });
 
     for (Event& occurrence : generated) {
+      if (!budget.spend()) {
+        markWorkLimit();
+        break;
+      }
       const QString key = occurrenceKey(occurrence);
       const auto exception = exceptionsByKey.constFind(key);
       if (exception == exceptionsByKey.cend()) {
-        qsizetype rangeIndex = -1;
-        QString rangeAnchor;
-        for (const auto& candidate : rangeExceptions) {
-          if (candidate.first > key) {
-            break;
-          }
-          rangeAnchor = candidate.first;
-          rangeIndex = candidate.second;
-        }
-        if (rangeIndex >= 0) {
-          const Event replacement =
-              applyRangeException(events.at(rangeIndex), rangeAnchor, occurrence);
+        const auto upper = std::upper_bound(
+            rangeExceptions.cbegin(), rangeExceptions.cend(), key,
+            [](const QString& value, const QPair<QString, qsizetype>& candidate) {
+              return value < candidate.first;
+            });
+        if (upper != rangeExceptions.cbegin()) {
+          const auto selected = std::prev(upper);
+          const Event replacement = applyRangeException(events.at(selected->second),
+                                                        selected->first, occurrence);
           if (!isCancelled(replacement) && overlaps(replacement, startUtc, endUtc)) {
             if (result.occurrences.size() < limit) {
               result.occurrences.append(replacement);
@@ -559,10 +841,17 @@ RecurrenceExpansionResult RecurrenceExpander::expand(
         }
       }
     }
+    if (budget.exhausted) {
+      break;
+    }
 
     // A moved exception can be inside this query even when its original start
     // was outside it and therefore no generated occurrence was visited.
     for (const qsizetype index : matchingExceptions) {
+      if (!budget.spend()) {
+        markWorkLimit();
+        break;
+      }
       if (consumedExceptions.contains(index)) {
         continue;
       }
@@ -576,18 +865,27 @@ RecurrenceExpansionResult RecurrenceExpander::expand(
         }
       }
     }
+    if (budget.exhausted) {
+      break;
+    }
   }
 
-  for (const qsizetype exceptionIndex : exceptions) {
-    if (consumedExceptions.contains(exceptionIndex)) {
-      continue;
-    }
-    const Event& exception = events.at(exceptionIndex);
-    if (!isCancelled(exception) && overlaps(exception, startUtc, endUtc)) {
-      if (result.occurrences.size() < limit) {
-        result.occurrences.append(exception);
-      } else {
-        result.truncated = true;
+  if (!budget.exhausted) {
+    for (const qsizetype exceptionIndex : exceptions) {
+      if (!budget.spend()) {
+        markWorkLimit();
+        break;
+      }
+      if (consumedExceptions.contains(exceptionIndex)) {
+        continue;
+      }
+      const Event& exception = events.at(exceptionIndex);
+      if (!isCancelled(exception) && overlaps(exception, startUtc, endUtc)) {
+        if (result.occurrences.size() < limit) {
+          result.occurrences.append(exception);
+        } else {
+          result.truncated = true;
+        }
       }
     }
   }

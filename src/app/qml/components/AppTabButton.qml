@@ -12,6 +12,7 @@ TabButton {
     hoverEnabled: true
 
     contentItem: Text {
+        textFormat: Text.PlainText
         text: control.text
         color: control.checked ? Theme.text : Theme.mutedText
         font: control.font

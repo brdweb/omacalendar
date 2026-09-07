@@ -1,3 +1,4 @@
+#include <QBuffer>
 #include <QElapsedTimer>
 #include <QFile>
 #include <QTemporaryDir>
@@ -48,7 +49,44 @@ class IcsServiceTest final : public QObject {
   void keepsSubscriptionMetadataPrivate();
   void rejectsMalformedPayloads();
   void credentialStorageDoesNotBlockEventLoop();
+  void rejectsCrossOriginRedirects();
+  void boundsNetworkPayloadBeforeAppend();
 };
+
+void IcsServiceTest::rejectsCrossOriginRedirects() {
+  const QUrl origin(QStringLiteral("https://calendar.example.test/feed.ics"));
+  const QUrl sameOrigin(QStringLiteral("https://CALENDAR.example.test:443/moved.ics"));
+  const QUrl otherHost(QStringLiteral("https://other.example.test/feed.ics"));
+  const QUrl otherPort(QStringLiteral("https://calendar.example.test:444/feed.ics"));
+  QVERIFY(ics::IcsService::redirectErrorCode(origin, sameOrigin, false).isEmpty());
+  QCOMPARE(ics::IcsService::redirectErrorCode(origin, otherHost, false),
+           QStringLiteral("cross_origin_redirect_blocked"));
+  QCOMPARE(ics::IcsService::redirectErrorCode(origin, otherPort, true),
+           QStringLiteral("credential_redirect_blocked"));
+}
+
+void IcsServiceTest::boundsNetworkPayloadBeforeAppend() {
+  constexpr qsizetype maximum = 16 * 1024 * 1024;
+  QByteArray destination(maximum - 2, 'a');
+  QByteArray finalBytes(2, 'b');
+  QBuffer exact(&finalBytes);
+  QVERIFY(exact.open(QIODevice::ReadOnly));
+  QVERIFY(ics::IcsService::consumeReplyBytes(&exact, &destination));
+  QCOMPARE(destination.size(), maximum);
+
+  QByteArray overflowByte(1, 'c');
+  QBuffer overflow(&overflowByte);
+  QVERIFY(overflow.open(QIODevice::ReadOnly));
+  QVERIFY(!ics::IcsService::consumeReplyBytes(&overflow, &destination));
+  QVERIFY(destination.isEmpty());
+
+  QByteArray oversizedBytes(maximum + 1, 'd');
+  QBuffer oversized(&oversizedBytes);
+  QVERIFY(oversized.open(QIODevice::ReadOnly));
+  QVERIFY(!ics::IcsService::consumeReplyBytes(&oversized, &destination));
+  QVERIFY(destination.isEmpty());
+  QCOMPARE(oversized.pos(), qint64(maximum + 1));
+}
 
 void IcsServiceTest::validatesSubscriptionUrls() {
   QUrl normalized;

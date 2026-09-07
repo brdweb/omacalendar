@@ -58,6 +58,7 @@ Rectangle {
                 }
             }
             Text {
+                textFormat: Text.PlainText
                 Layout.fillWidth: true
                 text: Qt.formatDate(root.monthDate, "MMMM yyyy")
                 color: Theme.text
@@ -82,6 +83,7 @@ Rectangle {
             Layout.fillWidth: true
             locale: Qt.locale()
             delegate: Text {
+                textFormat: Text.PlainText
                 required property string shortName
                 text: shortName.slice(0, 1)
                 color: Theme.mutedText
@@ -157,6 +159,7 @@ Rectangle {
                 text: qsTr("CALENDARS")
             }
             Text {
+                textFormat: Text.PlainText
                 text: root.modelCount(root.effectiveCalendarsModel)
                 color: Theme.mutedText
                 font.pixelSize: Theme.microFontSize
@@ -205,6 +208,7 @@ Rectangle {
                         border.width: 1
                         border.color: calendarDelegate.modelData.color || Theme.accent
                         Text {
+                            textFormat: Text.PlainText
                             visible: root.calendarIsVisible(calendarDelegate.modelData.id)
                             anchors.centerIn: parent
                             text: "✓"
@@ -214,6 +218,7 @@ Rectangle {
                         }
                     }
                     Text {
+                        textFormat: Text.PlainText
                         Layout.fillWidth: true
                         text: calendarDelegate.modelData.name || qsTr("Calendar")
                         color: root.calendarIsVisible(calendarDelegate.modelData.id)
@@ -222,6 +227,7 @@ Rectangle {
                         font.pixelSize: Theme.smallFontSize
                     }
                     Text {
+                        textFormat: Text.PlainText
                         visible: calendarDelegate.modelData.readOnly === true
                         text: qsTr("Read only")
                         color: Theme.mutedText
@@ -257,8 +263,9 @@ Rectangle {
                 icon.name: "mail-unread-symbolic"
                 onClicked: root.panelRequested("invitations")
                 contentItem: RowLayout {
-                    Text { text: "◇"; color: Theme.mutedText }
+                    Text { textFormat: Text.PlainText; text: "◇"; color: Theme.mutedText }
                     Text {
+                        textFormat: Text.PlainText
                         Layout.fillWidth: true
                         text: qsTr("Invitations")
                         color: Theme.text
@@ -276,8 +283,9 @@ Rectangle {
                 implicitHeight: 38
                 onClicked: root.settingsRequested()
                 contentItem: RowLayout {
-                    Text { text: "⚙"; color: Theme.mutedText }
+                    Text { textFormat: Text.PlainText; text: "⚙"; color: Theme.mutedText }
                     Text {
+                        textFormat: Text.PlainText
                         Layout.fillWidth: true
                         text: qsTr("Accounts & settings")
                         color: Theme.text

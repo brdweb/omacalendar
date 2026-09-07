@@ -90,12 +90,14 @@ ApplicationWindow {
             Row {
                 spacing: 4
                 Text {
+                    textFormat: Text.PlainText
                     text: "oma"
                     color: Theme.mutedText
                     font.pixelSize: Theme.fontSize + 4
                     font.weight: Font.Light
                 }
                 Text {
+                    textFormat: Text.PlainText
                     text: "calendar"
                     color: Theme.text
                     font.pixelSize: Theme.fontSize + 4
@@ -135,6 +137,7 @@ ApplicationWindow {
                 Layout.preferredWidth: 240
                 spacing: 0
                 Text {
+                    textFormat: Text.PlainText
                     Layout.fillWidth: true
                     text: window.periodTitle()
                     color: Theme.text
@@ -143,6 +146,7 @@ ApplicationWindow {
                     elide: Text.ElideRight
                 }
                 Text {
+                    textFormat: Text.PlainText
                     Layout.fillWidth: true
                     text: window.periodSubtitle()
                     color: Theme.mutedText
@@ -272,6 +276,7 @@ ApplicationWindow {
                         spacing: 10
                         StatusBadge { dotOnly: true; text: qsTr("Error"); tone: "danger" }
                         Text {
+                            textFormat: Text.PlainText
                             Layout.fillWidth: true
                             text: App.lastError
                             color: Theme.text
@@ -429,6 +434,7 @@ ApplicationWindow {
                         anchors.rightMargin: 12
                         spacing: 9
                         Text {
+                            textFormat: Text.PlainText
                             Layout.fillWidth: true
                             text: App.busy ? qsTr("Working…") : App.statusText
                             color: Theme.mutedText
@@ -436,6 +442,7 @@ ApplicationWindow {
                             elide: Text.ElideRight
                         }
                         Text {
+                            textFormat: Text.PlainText
                             text: window.visibleEvents.length + qsTr(" events loaded")
                             color: Theme.mutedText
                             font.pixelSize: Theme.microFontSize
@@ -446,6 +453,7 @@ ApplicationWindow {
                             color: Theme.divider
                         }
                         Text {
+                            textFormat: Text.PlainText
                             text: OmarchyTheme.sourceName
                             color: Theme.mutedText
                             font.pixelSize: Theme.microFontSize
@@ -464,7 +472,7 @@ ApplicationWindow {
         onRemoveRequested: (eventId, options) => window.removeEvent(eventId, options)
         onDuplicateRequested: value => window.duplicateEvent(value)
         onExportRequested: eventId => window.beginEventExport(eventId)
-        onJoinRequested: url => Qt.openUrlExternally(url)
+        onJoinRequested: url => App.openExternalEventUrl(url)
     }
 
     MutationConfirmationDialog {
@@ -490,6 +498,7 @@ ApplicationWindow {
         closePolicy: Popup.CloseOnEscape
 
         contentItem: Text {
+            textFormat: Text.PlainText
             width: crossAccountMoveDialog.availableWidth
             text: qsTr("OmaCalendar will create the destination event first. It will delete the original only after the destination provider acknowledges it.")
             color: Theme.text
@@ -712,6 +721,7 @@ ApplicationWindow {
                 spacing: 12
 
                 Text {
+                    textFormat: Text.PlainText
                     Layout.fillWidth: true
                     text: qsTr("Start from either saved version, then edit the final event. Provider identity and unsupported fields are preserved.")
                     color: Theme.mutedText
@@ -846,6 +856,7 @@ ApplicationWindow {
                     Accessible.name: qsTr("Merged event notes")
                 }
                 Text {
+                    textFormat: Text.PlainText
                     visible: conflictMergeDialog.validationError.length > 0
                     Layout.fillWidth: true
                     text: conflictMergeDialog.validationError
@@ -1012,6 +1023,7 @@ ApplicationWindow {
         contentItem: ColumnLayout {
             spacing: 12
             Text {
+                textFormat: Text.PlainText
                 Layout.fillWidth: true
                 text: window.localFileName(icsImportDialog.fileUrl)
                 color: Theme.text
@@ -1039,6 +1051,7 @@ ApplicationWindow {
                 Accessible.name: qsTr("Duplicate import handling")
             }
             Text {
+                textFormat: Text.PlainText
                 Layout.fillWidth: true
                 text: icsImportDialog.preview.count === undefined
                       ? qsTr("Preview the file before importing.")
@@ -1053,6 +1066,7 @@ ApplicationWindow {
                 Repeater {
                     model: (icsImportDialog.preview.events || []).slice(0, 6)
                     delegate: Text {
+                        textFormat: Text.PlainText
                         required property var modelData
                         Layout.fillWidth: true
                         text: "• " + (modelData.event.summary || qsTr("Untitled event"))
@@ -1139,7 +1153,7 @@ ApplicationWindow {
                     placeholderText: qsTr("YYYY-MM-DD")
                     accessibleName: qsTr("Export range start")
                 }
-                Text { text: qsTr("to"); color: Theme.mutedText }
+                Text { textFormat: Text.PlainText; text: qsTr("to"); color: Theme.mutedText }
                 AppTextField {
                     id: rangeEndField
                     Layout.fillWidth: true
@@ -1148,6 +1162,7 @@ ApplicationWindow {
                 }
             }
             Text {
+                textFormat: Text.PlainText
                 visible: exportScopeBox.currentIndex === 2
                          && window.localWritableCalendars.length === 0
                 Layout.fillWidth: true

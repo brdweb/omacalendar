@@ -55,6 +55,7 @@ ScrollView {
                                    ? Theme.alpha(Theme.text, 0.055) : "transparent"
                         }
                         contentItem: Text {
+                            textFormat: Text.PlainText
                             text: Qt.formatDate(monthCard.monthDate, "MMMM")
                             color: Theme.text
                             font.pixelSize: Theme.fontSize
@@ -66,6 +67,7 @@ ScrollView {
                         Layout.fillWidth: true
                         locale: Qt.locale()
                         delegate: Text {
+                            textFormat: Text.PlainText
                             required property string shortName
                             text: shortName.slice(0, 1)
                             color: Theme.mutedText

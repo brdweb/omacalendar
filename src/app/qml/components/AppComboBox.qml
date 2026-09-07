@@ -26,6 +26,7 @@ ComboBox {
         leftPadding: 10
         rightPadding: 10
         contentItem: Text {
+            textFormat: Text.PlainText
             text: control.textRole.length > 0 && optionDelegate.modelData
                   && optionDelegate.modelData[control.textRole] !== undefined
                   ? String(optionDelegate.modelData[control.textRole])
@@ -44,6 +45,7 @@ ComboBox {
     }
 
     contentItem: Text {
+        textFormat: Text.PlainText
         leftPadding: 0
         rightPadding: 0
         text: control.displayText
@@ -54,6 +56,7 @@ ComboBox {
     }
 
     indicator: Text {
+        textFormat: Text.PlainText
         x: control.width - width - 12
         y: Math.round((control.height - height) / 2)
         text: "⌄"

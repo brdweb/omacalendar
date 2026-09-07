@@ -167,7 +167,7 @@ QtObject {
         "displayTimeZone": "America/New_York",
         "defaultDuration": 60,
         "defaultCalendarId": "calendar-focus",
-        "notificationPrivacy": "full_details",
+        "notificationPrivacy": "generic",
         "currentView": "month",
         "widgetConsentDecision": "enabled"
     })
@@ -302,6 +302,7 @@ QtObject {
     function previewIcsImport(file, calendarId) { file; calendarId }
     function commitIcsImport(file, calendarId, policy) { file; calendarId; policy }
     function exportIcs(scope, destination) { scope; destination }
+    function openExternalEventUrl(value) { value }
     function isValidTimeZone(value) { return value && value.length > 0 }
     function wallTimeToUtc(dateText, timeText, timeZone) {
         timeZone

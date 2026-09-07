@@ -73,6 +73,7 @@ Item {
         z: 1
 
         Text {
+            textFormat: Text.PlainText
             anchors.centerIn: parent
             visible: parent.height >= implicitHeight + 6
             text: root.timeLabel(root.selectionStartMinute) + " – "

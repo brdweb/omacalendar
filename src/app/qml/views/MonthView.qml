@@ -37,6 +37,7 @@ Item {
             Repeater {
                 model: 7
                 delegate: Text {
+                    textFormat: Text.PlainText
                     required property int index
                     Layout.fillWidth: true
                     text: Qt.formatDate(root.addDays(root.gridStart, index), "ddd").toUpperCase()
@@ -117,6 +118,7 @@ Item {
                                 color: root.sameDate(dayCell.dateValue, new Date())
                                        ? Theme.accent : "transparent"
                                 Text {
+                                    textFormat: Text.PlainText
                                     anchors.fill: parent
                                     text: dayCell.dateValue.getDate()
                                     color: root.sameDate(dayCell.dateValue, new Date())
@@ -132,6 +134,7 @@ Item {
                             }
                             Item { Layout.fillWidth: true }
                             Text {
+                                textFormat: Text.PlainText
                                 visible: dayCell.dayEvents.length > 3
                                 text: dayCell.dayEvents.length
                                 color: Theme.mutedText
@@ -182,6 +185,7 @@ Item {
                                 overflowPopup.open()
                             }
                             contentItem: Text {
+                                textFormat: Text.PlainText
                                 text: overflowButton.text
                                 color: overflowButton.hovered ? Theme.text
                                                               : Theme.mutedText

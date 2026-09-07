@@ -18,6 +18,12 @@ namespace {
 
 constexpr auto kPasswordKind = "password";
 
+bool isSyncBudgetError(const QString& errorCode) {
+  return errorCode == QStringLiteral("sync_resource_limit") ||
+         errorCode == QStringLiteral("sync_request_limit") ||
+         errorCode == QStringLiteral("sync_response_budget_exceeded");
+}
+
 QJsonObject statusObject(const QString& state, const QString& errorCode = {},
                          const QString& message = {}, const QDateTime& lastSync = {}) {
   return {
@@ -266,7 +272,98 @@ struct CalDavSync::SyncJob final {
   QSet<QString> schedulingIdentities;
   bool futureProbeInProgress = false;
   bool cancelled = false;
+  ResourceBudget resourceBudget;
 };
+
+bool CalDavSync::ResourceBudget::deduplicateHrefs(const QUrl& calendarUrl,
+                                                  const QStringList& hrefs,
+                                                  QStringList* uniqueHrefs,
+                                                  QString* errorCode,
+                                                  QString* errorMessage) {
+  QStringList deduplicated;
+  QSet<QString> seenInInput;
+  QSet<QString> newlyObserved;
+  deduplicated.reserve(hrefs.size());
+  for (const QString& href : hrefs) {
+    const QString canonicalId = CalDavClient::canonicalResourceId(calendarUrl, href);
+    if (seenInInput.contains(canonicalId)) {
+      continue;
+    }
+    seenInInput.insert(canonicalId);
+    deduplicated.append(href);
+    if (!canonicalResources.contains(canonicalId)) {
+      newlyObserved.insert(canonicalId);
+    }
+  }
+  if (newlyObserved.size() > maximumUniqueResources - canonicalResources.size()) {
+    if (errorCode != nullptr) {
+      *errorCode = QStringLiteral("sync_resource_limit");
+    }
+    if (errorMessage != nullptr) {
+      *errorMessage =
+          QStringLiteral("The CalDAV sync exceeded its unique resource limit");
+    }
+    return false;
+  }
+  canonicalResources.unite(newlyObserved);
+  if (uniqueHrefs != nullptr) {
+    *uniqueHrefs = std::move(deduplicated);
+  }
+  return true;
+}
+
+bool CalDavSync::ResourceBudget::reserveResource(const QString& canonicalResourceId,
+                                                 QString* errorCode,
+                                                 QString* errorMessage) {
+  if (canonicalResources.contains(canonicalResourceId)) {
+    return true;
+  }
+  if (canonicalResources.size() >= maximumUniqueResources) {
+    if (errorCode != nullptr) {
+      *errorCode = QStringLiteral("sync_resource_limit");
+    }
+    if (errorMessage != nullptr) {
+      *errorMessage =
+          QStringLiteral("The CalDAV sync exceeded its unique resource limit");
+    }
+    return false;
+  }
+  canonicalResources.insert(canonicalResourceId);
+  return true;
+}
+
+bool CalDavSync::ResourceBudget::beginRequest(QString* errorCode,
+                                              QString* errorMessage) {
+  if (requestCount >= maximumRequests) {
+    if (errorCode != nullptr) {
+      *errorCode = QStringLiteral("sync_request_limit");
+    }
+    if (errorMessage != nullptr) {
+      *errorMessage =
+          QStringLiteral("The CalDAV sync exceeded its multiget request limit");
+    }
+    return false;
+  }
+  ++requestCount;
+  return true;
+}
+
+bool CalDavSync::ResourceBudget::consumeResponse(const qint64 bytes, QString* errorCode,
+                                                 QString* errorMessage) {
+  if (bytes < 0 || responseBytes > maximumResponseBytes ||
+      bytes > maximumResponseBytes - responseBytes) {
+    if (errorCode != nullptr) {
+      *errorCode = QStringLiteral("sync_response_budget_exceeded");
+    }
+    if (errorMessage != nullptr) {
+      *errorMessage =
+          QStringLiteral("The CalDAV sync exceeded its cumulative response limit");
+    }
+    return false;
+  }
+  responseBytes += bytes;
+  return true;
+}
 
 struct CalDavSync::FutureCapabilityProbe final {
   OutboxItem item;
@@ -564,6 +661,7 @@ void CalDavSync::syncAccount(const QString& accountId) {
     return;
   }
   auto* job = new SyncJob;
+  job->resourceBudget = m_resourceBudgetLimits;
   job->accountId = accountId;
   job->account = account;
   job->endpoint = QUrl(account.endpoint);
@@ -988,7 +1086,18 @@ void CalDavSync::fetchResourceBatches(SyncJob* job, const QUrl& calendarUrl,
     QList<CalDavResource> resources;
   };
   auto state = std::make_shared<BatchState>();
-  state->batches = CalDavClient::batchMultiGetHrefs(hrefs);
+  QStringList uniqueHrefs;
+  QString hrefBudgetErrorCode;
+  QString hrefBudgetErrorMessage;
+  if (job == nullptr || !job->resourceBudget.deduplicateHrefs(
+                            calendarUrl, hrefs, &uniqueHrefs, &hrefBudgetErrorCode,
+                            &hrefBudgetErrorMessage)) {
+    callback({}, job == nullptr ? QStringLiteral("cancelled") : hrefBudgetErrorCode,
+             job == nullptr ? QStringLiteral("The CalDAV sync was cancelled")
+                            : hrefBudgetErrorMessage);
+    return;
+  }
+  state->batches = CalDavClient::batchMultiGetHrefs(uniqueHrefs);
   auto step = std::make_shared<std::function<void()>>();
   const std::weak_ptr<std::function<void()>> weakStep = step;
   *step = [this, job, calendarUrl, callback = std::move(callback), state,
@@ -1003,6 +1112,13 @@ void CalDavSync::fetchResourceBatches(SyncJob* job, const QUrl& calendarUrl,
       return;
     }
     const QStringList batch = state->batches.at(state->index++);
+    QString requestBudgetErrorCode;
+    QString requestBudgetErrorMessage;
+    if (!job->resourceBudget.beginRequest(&requestBudgetErrorCode,
+                                          &requestBudgetErrorMessage)) {
+      callback({}, requestBudgetErrorCode, requestBudgetErrorMessage);
+      return;
+    }
     const auto continuation = weakStep.lock();
     if (!continuation) {
       callback({}, QStringLiteral("internal_error"),
@@ -1011,7 +1127,15 @@ void CalDavSync::fetchResourceBatches(SyncJob* job, const QUrl& calendarUrl,
     }
     m_client.calendarMultiGet(
         job->accountId, calendarUrl, batch,
-        [callback, state, continuation](const DavResponse& response) mutable {
+        [job, callback, state, continuation](const DavResponse& response) mutable {
+          QString responseBudgetErrorCode;
+          QString responseBudgetErrorMessage;
+          if (!job->resourceBudget.consumeResponse(response.body.size(),
+                                                   &responseBudgetErrorCode,
+                                                   &responseBudgetErrorMessage)) {
+            callback({}, responseBudgetErrorCode, responseBudgetErrorMessage);
+            return;
+          }
           if (!response.ok) {
             callback({}, response.errorCode, response.errorMessage);
             return;
@@ -1027,6 +1151,51 @@ void CalDavSync::fetchResourceBatches(SyncJob* job, const QUrl& calendarUrl,
         });
   };
   (*step)();
+}
+
+void CalDavSync::readResource(SyncJob* job, const QUrl& resourceUrl,
+                              CalDavClient::Callback callback) {
+  if (job == nullptr || job->cancelled) {
+    DavResponse cancelled;
+    cancelled.errorCode = QStringLiteral("cancelled");
+    cancelled.errorMessage = QStringLiteral("The CalDAV sync was cancelled");
+    QTimer::singleShot(0, this, [callback = std::move(callback), cancelled]() mutable {
+      callback(cancelled);
+    });
+    return;
+  }
+  QString requestBudgetErrorCode;
+  QString requestBudgetErrorMessage;
+  const QString resourceId =
+      CalDavClient::canonicalResourceId(resourceUrl, resourceUrl.toString());
+  if (!job->resourceBudget.reserveResource(resourceId, &requestBudgetErrorCode,
+                                           &requestBudgetErrorMessage) ||
+      !job->resourceBudget.beginRequest(&requestBudgetErrorCode,
+                                        &requestBudgetErrorMessage)) {
+    DavResponse failure;
+    failure.errorCode = requestBudgetErrorCode;
+    failure.errorMessage = requestBudgetErrorMessage;
+    callback(failure);
+    return;
+  }
+  const QString accountId = job->accountId;
+  m_client.readResource(accountId, resourceUrl,
+                        [this, job, accountId,
+                         callback = std::move(callback)](DavResponse response) mutable {
+                          if (m_jobs.value(accountId) != job) {
+                            return;
+                          }
+                          QString responseBudgetErrorCode;
+                          QString responseBudgetErrorMessage;
+                          if (!job->resourceBudget.consumeResponse(
+                                  response.body.size(), &responseBudgetErrorCode,
+                                  &responseBudgetErrorMessage)) {
+                            response = {};
+                            response.errorCode = responseBudgetErrorCode;
+                            response.errorMessage = responseBudgetErrorMessage;
+                          }
+                          callback(std::move(response));
+                        });
 }
 
 void CalDavSync::syncCalendarWithEtags(SyncJob* job, const QUrl& calendarUrl) {
@@ -1050,6 +1219,14 @@ void CalDavSync::syncCalendarWithEtags(SyncJob* job, const QUrl& calendarUrl) {
       [this, job, calendarUrl, fullQuery](const DavResponse& response) {
         if (job->cancelled) {
           finish(job);
+          return;
+        }
+        QString budgetCode;
+        QString budgetMessage;
+        if (!job->resourceBudget.beginRequest(&budgetCode, &budgetMessage) ||
+            !job->resourceBudget.consumeResponse(response.body.size(), &budgetCode,
+                                                 &budgetMessage)) {
+          finish(job, budgetCode, budgetMessage);
           return;
         }
         if (!response.ok) {
@@ -1095,6 +1272,11 @@ void CalDavSync::syncCalendarWithEtags(SyncJob* job, const QUrl& calendarUrl) {
           if (resourceId == calendarId) {
             continue;
           }
+          if (!job->resourceBudget.reserveResource(resourceId, &budgetCode,
+                                                   &budgetMessage)) {
+            finish(job, budgetCode, budgetMessage);
+            return;
+          }
           if (davResponse.etag.isEmpty()) {
             fullQuery();
             return;
@@ -1122,9 +1304,13 @@ void CalDavSync::syncCalendarWithEtags(SyncJob* job, const QUrl& calendarUrl) {
             job, calendarUrl, changedHrefs,
             [this, job, calendarUrl, changedHrefs, deletions = std::move(deletions),
              fullQuery](QList<CalDavResource> resources, const QString& errorCode,
-                        const QString&) mutable {
+                        const QString& errorMessage) mutable {
               if (job->cancelled) {
                 finish(job);
+                return;
+              }
+              if (isSyncBudgetError(errorCode)) {
+                finish(job, errorCode, errorMessage);
                 return;
               }
               if (!errorCode.isEmpty()) {
@@ -1157,6 +1343,14 @@ void CalDavSync::applyCalendarResponse(SyncJob* job, const DavResponse& response
     finish(job);
     return;
   }
+  QString budgetCode;
+  QString budgetMessage;
+  if (!job->resourceBudget.beginRequest(&budgetCode, &budgetMessage) ||
+      !job->resourceBudget.consumeResponse(response.body.size(), &budgetCode,
+                                           &budgetMessage)) {
+    finish(job, budgetCode, budgetMessage);
+    return;
+  }
   if (!response.ok) {
     finish(job, response.errorCode, response.errorMessage);
     return;
@@ -1171,6 +1365,12 @@ void CalDavSync::applyCalendarResponse(SyncJob* job, const DavResponse& response
   QList<CalDavResource> resources = CalDavXml::resources(parsed);
   QStringList missingHrefs;
   for (const CalDavResource& resource : resources) {
+    if (!job->resourceBudget.reserveResource(
+            CalDavClient::canonicalResourceId(calendarUrl, resource.href), &budgetCode,
+            &budgetMessage)) {
+      finish(job, budgetCode, budgetMessage);
+      return;
+    }
     if (!resource.deleted() && resource.calendarData.isEmpty()) {
       missingHrefs.append(resource.href);
     }
@@ -1235,6 +1435,7 @@ void CalDavSync::applyCalendarResources(SyncJob* job,
   QStringList retainedRemoteIds;
   QStringList deletedRemoteIds;
   QList<Event> stagedEvents;
+  QList<ProviderResource> stagedResources;
   bool observedThisAndFuture = false;
   for (const CalDavResource& resource : resources) {
     const QString resourceId =
@@ -1252,6 +1453,8 @@ void CalDavSync::applyCalendarResources(SyncJob* job,
       finish(job, decoded.error.code, decoded.error.message);
       return;
     }
+    stagedResources.append({job->currentCalendar.id, resourceId, resource.etag,
+                            QStringLiteral("text/calendar"), resource.calendarData});
     for (Event event : decoded.events) {
       observedThisAndFuture =
           observedThisAndFuture ||
@@ -1316,12 +1519,13 @@ void CalDavSync::applyCalendarResources(SyncJob* job,
                                              true);
   }
   const bool applied =
-      fullSync
-          ? m_database->applyRemoteRangeSyncBatch(
-                job->currentCalendar, stagedEvents, deletedRemoteIds, prunedRemoteIds,
-                job->queryStartUtc, job->queryEndUtc, &error, job->replaceCoverage)
-          : m_database->applyRemoteSyncBatch(job->currentCalendar, stagedEvents,
-                                             deletedRemoteIds, prunedRemoteIds, &error);
+      fullSync ? m_database->applyRemoteRangeSyncBatch(
+                     job->currentCalendar, stagedEvents, deletedRemoteIds,
+                     prunedRemoteIds, job->queryStartUtc, job->queryEndUtc, &error,
+                     job->replaceCoverage, stagedResources)
+               : m_database->applyRemoteSyncBatch(job->currentCalendar, stagedEvents,
+                                                  deletedRemoteIds, prunedRemoteIds,
+                                                  &error, stagedResources);
   if (!applied) {
     finish(job, QStringLiteral("database_error"), error);
     return;
@@ -1437,11 +1641,10 @@ void CalDavSync::startFutureCapabilityProbe(SyncJob* job, const OutboxItem& item
               }
               probe->created = true;
               probe->etag = response.etag;
-              m_client.readResource(
-                  job->accountId, probe->resourceUrl,
-                  [this, job, probe](const DavResponse& readResponse) {
-                    probeReadCreated(job, probe, readResponse);
-                  });
+              readResource(job, probe->resourceUrl,
+                           [this, job, probe](const DavResponse& readResponse) {
+                             probeReadCreated(job, probe, readResponse);
+                           });
             });
       });
 }
@@ -1476,10 +1679,10 @@ void CalDavSync::probeReadCreated(SyncJob* job,
         if (!updateResponse.etag.isEmpty()) {
           probe->etag = updateResponse.etag;
         }
-        m_client.readResource(job->accountId, probe->resourceUrl,
-                              [this, job, probe](const DavResponse& readResponse) {
-                                probeReadUpdated(job, probe, readResponse);
-                              });
+        readResource(job, probe->resourceUrl,
+                     [this, job, probe](const DavResponse& readResponse) {
+                       probeReadUpdated(job, probe, readResponse);
+                     });
       });
 }
 
@@ -1572,6 +1775,10 @@ void CalDavSync::finishFutureCapabilityProbe(
     }
     if (job->cancelled) {
       finish(job);
+      return;
+    }
+    if (isSyncBudgetError(code)) {
+      finish(job, code, message);
       return;
     }
     dispatchNextOutbox(job);
@@ -1886,8 +2093,8 @@ void CalDavSync::reconcileMoveTarget(SyncJob* job, const OutboxItem& item,
     return;
   }
   const QUrl targetCalendarUrl = targetResourceUrl.adjusted(QUrl::RemoveFilename);
-  m_client.readResource(
-      job->accountId, targetResourceUrl,
+  readResource(
+      job, targetResourceUrl,
       [this, job, item, targetEvent, sourceEvent, sourceResourceUrl, targetResourceUrl,
        targetCalendarUrl, targetPayload, scheduleReply, directMove,
        originalResponse](const DavResponse& lookupResponse) {
@@ -1947,8 +2154,8 @@ void CalDavSync::reconcileMoveTarget(SyncJob* job, const OutboxItem& item,
         }
 
         const QUrl sourceCalendarUrl = sourceResourceUrl.adjusted(QUrl::RemoveFilename);
-        m_client.readResource(
-            job->accountId, sourceResourceUrl,
+        readResource(
+            job, sourceResourceUrl,
             [this, job, item, targetEvent, sourceResourceUrl, sourceCalendarUrl,
              targetResourceUrl, targetPayload,
              target](const DavResponse& sourceLookup) {
@@ -2015,24 +2222,23 @@ void CalDavSync::hydrateMoveTarget(SyncJob* job, const OutboxItem& item,
     return;
   }
   const QUrl targetCalendarUrl = targetResourceUrl.adjusted(QUrl::RemoveFilename);
-  m_client.readResource(
-      job->accountId, targetResourceUrl,
-      [this, job, item, targetEvent, targetResourceUrl, targetCalendarUrl,
-       targetPayload](const DavResponse& response) {
-        if (job->cancelled) {
-          finish(job);
-          return;
-        }
-        const DavResponse target =
-            resourcePayload(response, targetCalendarUrl, targetResourceUrl);
-        if (!target.ok) {
-          handleMutationResult(job, item, targetEvent, targetResourceUrl, targetPayload,
-                               target);
-          return;
-        }
-        completeSuccessfulMutation(job, item, targetEvent, targetResourceUrl,
-                                   targetPayload, target);
-      });
+  readResource(job, targetResourceUrl,
+               [this, job, item, targetEvent, targetResourceUrl, targetCalendarUrl,
+                targetPayload](const DavResponse& response) {
+                 if (job->cancelled) {
+                   finish(job);
+                   return;
+                 }
+                 const DavResponse target =
+                     resourcePayload(response, targetCalendarUrl, targetResourceUrl);
+                 if (!target.ok) {
+                   handleMutationResult(job, item, targetEvent, targetResourceUrl,
+                                        targetPayload, target);
+                   return;
+                 }
+                 completeSuccessfulMutation(job, item, targetEvent, targetResourceUrl,
+                                            targetPayload, target);
+               });
 }
 
 void CalDavSync::handleMutationResult(SyncJob* job, const OutboxItem& item,
@@ -2049,8 +2255,8 @@ void CalDavSync::handleMutationResult(SyncJob* job, const OutboxItem& item,
                                  item.recurrenceScope != QStringLiteral("series");
     if (resourceRemains &&
         (response.etag.isEmpty() || item.recurrenceScope == QStringLiteral("future"))) {
-      m_client.readResource(
-          job->accountId, resourceUrl,
+      readResource(
+          job, resourceUrl,
           [this, job, item, localEvent, resourceUrl, sentPayload,
            response](const DavResponse& metadataResponse) {
             if (job->cancelled) {
@@ -2123,8 +2329,8 @@ void CalDavSync::handleMutationResult(SyncJob* job, const OutboxItem& item,
   }
 
   if (response.httpStatus == 409 || response.httpStatus == 412) {
-    m_client.readResource(
-        job->accountId, resourceUrl,
+    readResource(
+        job, resourceUrl,
         [this, job, item, localEvent, resourceUrl](const DavResponse& lookupResponse) {
           if (job->cancelled) {
             finish(job);
@@ -2201,6 +2407,8 @@ void CalDavSync::handleMutationResult(SyncJob* job, const OutboxItem& item,
                 remote.remoteId += QLatin1Char('#') + remote.recurrenceId;
               }
               remote.etag = resource.etag;
+              remote.rawPayload = resource.calendarData;
+              remote.rawFormat = QStringLiteral("text/calendar");
               if (!m_database->recordProviderConflict(item.id, &remote,
                                                       &databaseError)) {
                 finish(job, QStringLiteral("database_error"), databaseError);
@@ -2278,8 +2486,8 @@ void CalDavSync::reconcileAmbiguousCreate(SyncJob* job, const OutboxItem& item,
                                           const QUrl& resourceUrl,
                                           const QByteArray& sentPayload,
                                           const DavResponse& originalResponse) {
-  m_client.readResource(
-      job->accountId, resourceUrl,
+  readResource(
+      job, resourceUrl,
       [this, job, item, localEvent, resourceUrl, sentPayload,
        originalResponse](const DavResponse& lookupResponse) {
         if (job->cancelled) {
@@ -2441,9 +2649,12 @@ void CalDavSync::completeSuccessfulMutation(SyncJob* job, const OutboxItem& item
     const Event* acknowledged = item.operation == OutboxOperation::Remove
                                     ? nullptr
                                     : &stagedEvents.at(acknowledgedIndex);
-    if (calendar.id.isEmpty() ||
-        !m_database->completeOutboxWithRemoteSyncBatch(item.id, acknowledged, calendar,
-                                                       stagedEvents, {}, {}, &error)) {
+    const QList<ProviderResource> providerResources = {
+        {item.calendarId, resourceId, response.etag, QStringLiteral("text/calendar"),
+         QString::fromUtf8(acknowledgedPayload)}};
+    if (calendar.id.isEmpty() || !m_database->completeOutboxWithRemoteSyncBatch(
+                                     item.id, acknowledged, calendar, stagedEvents, {},
+                                     {}, &error, providerResources)) {
       finish(job, QStringLiteral("database_error"), error);
       return;
     }

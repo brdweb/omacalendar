@@ -297,6 +297,60 @@ Item {
             }
         }
 
+        function test_provider_markup_remains_literal() {
+            const marker = "<b>literal & event text</b>"
+            const location = "<img src='file:///etc/passwd'>"
+            const event = Object.assign({}, representativeEvents()[0], {
+                "summary": marker,
+                "location": location
+            })
+
+            const chip = createTemporaryObject(eventChipFactory, scene, {
+                "eventData": event,
+                "width": 360,
+                "height": 40,
+                "compact": false
+            })
+            verify(chip !== null)
+            const chipSummary = findChild(chip, "eventChipSummary")
+            verify(chipSummary !== null)
+            compare(chipSummary.text, marker)
+            compare(chipSummary.textFormat, Text.PlainText)
+            chip.destroy()
+            wait(0)
+
+            const timelineEvent = createTemporaryObject(timelineEventFactory, scene, {
+                "eventData": event,
+                "width": 320,
+                "height": 64,
+                "startMinute": 540,
+                "durationMinutes": 60
+            })
+            verify(timelineEvent !== null)
+            const timelineSummary = findChild(timelineEvent,
+                                              "timelineEventSummary")
+            const timelineLocation = findChild(timelineEvent,
+                                               "timelineEventLocation")
+            verify(timelineSummary !== null)
+            verify(timelineLocation !== null)
+            compare(timelineSummary.text, marker)
+            compare(timelineSummary.textFormat, Text.PlainText)
+            compare(timelineLocation.text, location)
+            compare(timelineLocation.textFormat, Text.PlainText)
+            timelineEvent.destroy()
+            wait(0)
+
+            const mutation = createTemporaryObject(mutationConfirmationFactory,
+                                                   scene, {"eventData": event})
+            verify(mutation !== null)
+            const mutationSummary = findChild(mutation, "mutationEventSummary")
+            verify(mutationSummary !== null)
+            compare(mutationSummary.text, marker)
+            compare(mutationSummary.textFormat, Text.PlainText)
+            mutation.destroy()
+            wait(0)
+        }
+
         function test_event_states_and_keyboard_activation() {
             const events = representativeEvents()
             const failedEvent = Object.assign({}, events[0], {
@@ -918,7 +972,8 @@ Item {
                     "timeFormat": "24h", "firstDayOfWeek": 1,
                     "displayTimeZone": "America/New_York", "defaultDuration": 60,
                     "workDayStart": 8, "workDayEnd": 18,
-                    "defaultCalendarId": "calendar-writable"
+                    "defaultCalendarId": "calendar-writable",
+                    "notificationPrivacy": "generic"
                 }
             })
             verify(settings !== null)
@@ -956,6 +1011,20 @@ Item {
                     "defaultCalendarId")
             compare(preferenceChangedSpy.signalArguments[0][1],
                     "calendar-google")
+
+            const notificationPrivacy = findChild(
+                        scene.Window.window.contentItem,
+                        "notificationPrivacy")
+            verify(notificationPrivacy !== null,
+                   "settings expose notification privacy")
+            compare(notificationPrivacy.currentValue, "generic")
+            notificationPrivacy.currentIndex = 2
+            notificationPrivacy.activated(2)
+            compare(preferenceChangedSpy.count, 2)
+            compare(preferenceChangedSpy.signalArguments[1][0],
+                    "notificationPrivacy")
+            compare(preferenceChangedSpy.signalArguments[1][1],
+                    "full_details")
             preferenceChangedSpy.target = null
 
             const calendarColorPicker = findChild(

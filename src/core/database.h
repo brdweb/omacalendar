@@ -36,6 +36,17 @@ struct SyncCoverage {
   QDateTime updatedAt;
 };
 
+// One lossless provider object shared by every normalized Event parsed from it.
+// CalDAV resources commonly contain a recurring master and many exceptions; the
+// raw VCALENDAR therefore belongs here rather than being copied into every row.
+struct ProviderResource {
+  QString calendarId;
+  QString canonicalKey;
+  QString remoteRevision;
+  QString format;
+  QString rawPayload;
+};
+
 struct EventSearchQuery {
   QString text;
   QStringList calendarIds;
@@ -97,7 +108,8 @@ class Database final {
   bool applyRemoteSyncBatch(const Calendar& calendar, const QList<Event>& events,
                             const QStringList& deletedRemoteIds,
                             const QStringList& prunedRemoteIds = {},
-                            QString* errorMessage = nullptr);
+                            QString* errorMessage = nullptr,
+                            const QList<ProviderResource>& providerResources = {});
   // Commits a bounded replacement and its completed coverage marker in one
   // savepoint. Failed parsing/database work therefore cannot make an
   // uncovered range look complete after restart.
@@ -107,7 +119,8 @@ class Database final {
                                  const QDateTime& coverageStartUtc,
                                  const QDateTime& coverageEndUtc,
                                  QString* errorMessage = nullptr,
-                                 bool replaceExistingCoverage = false);
+                                 bool replaceExistingCoverage = false,
+                                 const QList<ProviderResource>& providerResources = {});
   // Replaces one ICS feed cache and its success metadata as a single durable
   // unit. The outer savepoint also contains the remote-sync batch, so a
   // failure after event staging cannot expose new events with old validators
@@ -202,12 +215,11 @@ class Database final {
   // A provider acknowledgement that also returns a canonical resource snapshot
   // must commit both pieces of state together. If staging any parsed event fails,
   // the outbox item remains unacknowledged and startup recovery can safely retry.
-  bool completeOutboxWithRemoteSyncBatch(qint64 id, const Event* remoteEvent,
-                                         const Calendar& calendar,
-                                         const QList<Event>& events,
-                                         const QStringList& deletedRemoteIds = {},
-                                         const QStringList& prunedRemoteIds = {},
-                                         QString* errorMessage = nullptr);
+  bool completeOutboxWithRemoteSyncBatch(
+      qint64 id, const Event* remoteEvent, const Calendar& calendar,
+      const QList<Event>& events, const QStringList& deletedRemoteIds = {},
+      const QStringList& prunedRemoteIds = {}, QString* errorMessage = nullptr,
+      const QList<ProviderResource>& providerResources = {});
   bool discardOutbox(qint64 id, QString* errorMessage = nullptr);
 
   [[nodiscard]] QList<CalendarSet> calendarSets(QString* errorMessage = nullptr) const;
@@ -308,11 +320,22 @@ class Database final {
   bool ensureConflictUniquenessSchema(QString* errorMessage);
   bool ensureReminderDeliverySchema(QString* errorMessage);
   bool ensureSyncCoverageSchema(QString* errorMessage);
+  bool ensureProviderResourcesSchema(QString* errorMessage);
   bool ensureReadPerformanceIndexes(QString* errorMessage);
   bool archiveLegacyDatabase(const QString& path, QString* errorMessage);
   bool execute(const QString& sql, QString* errorMessage) const;
   bool bumpChangeRevision(QString* errorMessage = nullptr) const;
-  bool upsertEventRecord(const Event& event, QString* errorMessage);
+  bool upsertEventRecord(const Event& event, QString* errorMessage,
+                         bool omitProviderPayload = false);
+  bool applyRemoteEventInternal(Event event, QString* errorMessage, bool* conflicted,
+                                bool omitProviderPayload);
+  bool upsertProviderResource(const ProviderResource& resource, QString* errorMessage);
+  bool removeOrphanedProviderResources(const QString& calendarId,
+                                       QString* errorMessage);
+  bool hydrateProviderResource(Event* event, QString* errorMessage = nullptr) const;
+  bool hydrateProviderResources(QList<Event>* events,
+                                QString* errorMessage = nullptr) const;
+  [[nodiscard]] static QString providerResourceKey(const QString& remoteId);
   bool completeOutboxInternal(qint64 id, const Event* remoteEvent,
                               bool manageTransaction, QString* errorMessage);
   bool upsertUnresolvedConflict(const QString& eventId, qint64 mutationId,
