@@ -38,6 +38,9 @@ Versioning once public releases begin.
 
 ### Fixed
 
+- Dense-calendar widget snapshots first query a one-day Up Next window, with
+  the same 45-day fallback for sparse calendars, avoiding unnecessary event
+  hydration while preserving ongoing-event and lookahead boundary behavior.
 - Google authorization now completes code exchange with PKCE-S256, persists
   refresh tokens in Secret Service, discovers calendars, and reconnects after
   daemon restart with the packaged Desktop client configuration.

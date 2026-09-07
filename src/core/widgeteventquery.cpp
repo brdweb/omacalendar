@@ -85,31 +85,44 @@ WidgetEventQueryResult queryWidgetEvents(
 
   // Starting the overlap window at now still includes ongoing timed and
   // multi-day/all-day events because eventsBetween uses end > rangeStart.
-  // The fixed lookahead prevents a distant popup range from widening this
-  // query or turning it into an unbounded scan.
-  const QList<Event> nowEvents = database.eventsBetween(
-      nowUtc, nowUtc.addDays(kUpNextLookaheadDays), calendarIds, queryError);
+  // Probe one day first so dense calendars do not hydrate 45 days of events
+  // only to select the earliest one. Any eligible overlap in this window
+  // precedes every event that starts outside it; ongoing events are included.
+  // Sparse calendars retain the same fixed 45-day lookahead below.
+  QList<Event> nowEvents =
+      database.eventsBetween(nowUtc, nowUtc.addDays(1), calendarIds, queryError);
   if (!queryError->isEmpty()) {
     return result;
   }
 
-  for (const Event& event : nowEvents) {
-    const QDateTime start = eventStart(event);
-    const QDateTime end = eventEnd(event);
-    if (!start.isValid() || !end.isValid() || end <= nowUtc) {
-      continue;
+  const auto selectNowEvents = [&result, &nowUtc](const QList<Event>& events) {
+    for (const Event& event : events) {
+      const QDateTime start = eventStart(event);
+      const QDateTime end = eventEnd(event);
+      if (!start.isValid() || !end.isValid() || end <= nowUtc) {
+        continue;
+      }
+      // Match the widget's established "current event" semantics: all-day
+      // events remain eligible for Up Next but not for the NOW row.
+      if (!event.allDay && start <= nowUtc &&
+          isEarlierCurrentEvent(event, result.currentEvent)) {
+        result.currentEvent = event;
+      }
+      // Preserve the existing Up Next contract, where an ongoing event is
+      // eligible and the widget renders it with a "Now" label.
+      if (isEarlierUpNextEvent(event, result.upNext)) {
+        result.upNext = event;
+      }
     }
-    // Match the widget's established "current event" semantics: all-day
-    // events remain eligible for Up Next but not for the NOW row.
-    if (!event.allDay && start <= nowUtc &&
-        isEarlierCurrentEvent(event, result.currentEvent)) {
-      result.currentEvent = event;
+  };
+  selectNowEvents(nowEvents);
+  if (result.upNext.id.isEmpty()) {
+    nowEvents = database.eventsBetween(nowUtc, nowUtc.addDays(kUpNextLookaheadDays),
+                                       calendarIds, queryError);
+    if (!queryError->isEmpty()) {
+      return result;
     }
-    // Preserve the existing Up Next contract, where an ongoing event is
-    // eligible and the widget renders it with a "Now" label.
-    if (isEarlierUpNextEvent(event, result.upNext)) {
-      result.upNext = event;
-    }
+    selectNowEvents(nowEvents);
   }
   return result;
 }
