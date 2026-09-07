@@ -33,6 +33,11 @@ the work; the acceptance record decides whether the exact commit may be tagged.
 - [ ] Confirm that a new external user who was not allowlisted as a test user
   sees no unverified-app bypass and completes the post-approval acceptance flow.
 
+The owner confirmed external login and sync on 2026-09-06 using an account
+that was never a test user. The full exact-candidate write/restart acceptance
+is still tracked in the owner pass and release record; do not infer those
+additional checks from the narrower login/sync confirmation.
+
 The scope descriptions and recording checklist are in
 [`GOOGLE_OAUTH_VERIFICATION.md`](GOOGLE_OAUTH_VERIFICATION.md). Browser success
 alone is not acceptance: the app must exchange the code, persist the refresh
