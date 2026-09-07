@@ -49,7 +49,10 @@ events; no maintainer account or calendar data is included.
 
 ## Beta status
 
-The app is being qualified as `1.0.0-beta.1` using IPC 2 and database schema 2.
+[OmaCalendar `1.0.0-beta.1` is published](https://github.com/brdweb/omacalendar/releases/tag/v1.0.0-beta.1)
+using IPC 2 and database schema 2. The release includes verified native Arch,
+binary and source packages, checksums, SPDX SBOM, GitHub attestations, and a
+signed `RELEASE-ACCEPTANCE.md` receipt with the explicitly accepted beta limitations.
 Local automated coverage currently includes the schema transition,
 daemon and provider contracts, local event/calendar workflows, reminders,
 recurrence, search, import/export, conflict handling, and desktop models. A
@@ -76,8 +79,8 @@ plan](docs/PLAN.md).
 
 Google has approved OmaCalendar's OAuth branding and requested Calendar scopes.
 The owner reports successful post-approval external-account login and sync.
-The exact-candidate write, token-persistence, and restart checks remain part of
-the owner acceptance pass. Local calendars,
+The full exact-candidate write, token-persistence, and restart matrix remains
+unverified and is explicitly accepted as a first-beta limitation. Local calendars,
 CalDAV, ICS, and the widget's connection to the local OmaCalendar daemon do not
 depend on Google authorization.
 
