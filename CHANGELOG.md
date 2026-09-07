@@ -38,6 +38,9 @@ Versioning once public releases begin.
 
 ### Fixed
 
+- ICS subscription refreshes and imports retain the complete recurrence set
+  (RRULE, RDATE, EXDATE, and EXRULE), including folded properties and RDATE-only
+  events, across export and restart without duplicating complete feed bodies.
 - Dense-calendar widget snapshots first query a one-day Up Next window, with
   the same 45-day fallback for sparse calendars, avoiding unnecessary event
   hydration while preserving ongoing-event and lookahead boundary behavior.
