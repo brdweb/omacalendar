@@ -45,6 +45,16 @@ token in Secret Service, discover calendars, sync, and reconnect after restart.
 
 ## 2. Current-Omarchy owner acceptance
 
+For `1.0.0-beta.1` and widget `0.1.0-beta.1` only, the owner explicitly approved
+publication on 2026-09-07 with the remaining hands-on checks below recorded as
+unverified limitations. This exception includes direct host native-package and
+systemd socket checks: clean current-Arch package installation/removal plus
+current-Omarchy archive-runtime checks are required instead. No unperformed
+test is marked passed. The release acceptance record and attached final
+RELEASE-ACCEPTANCE.md receipts distinguish observed results from this owner
+decision. Artifact verification and critical/high defect gates are unchanged;
+the complete manual matrix remains required for stable 1.0.
+
 The maintainer's ongoing use of the alpha runtime counts as the real-world soak;
 there is no arbitrary new calendar-day delay and no telemetry requirement. The
 runtime tree on `main` was unchanged after the alpha tag as of 2026-08-31. The
@@ -173,9 +183,10 @@ documentation must say so plainly.
 Publish the app beta only when every required acceptance row contains concrete
 evidence and there is no unresolved critical/high issue, known corruption,
 duplicate-window, shutdown-crash, foreground-sync, or OAuth-approval regression.
-The owner performs a final acceptance pass against the immutable draft before
-publication. Anything still pending remains a blocker rather than being
-silently relabeled as a beta limitation.
+The owner normally performs a final acceptance pass against the immutable draft
+before publication. The explicit, documented first-beta exception in section 2
+applies to unperformed hands-on checks only. All other pending gates remain
+blockers; final post-tag evidence belongs in the release's attached receipt.
 
 ## Current references
 
