@@ -1,5 +1,11 @@
 # OmaCalendar beta release plan
 
+The [app `v1.0.0-beta.1` release](https://github.com/brdweb/omacalendar/releases/tag/v1.0.0-beta.1)
+was published on 2026-09-07. Its attached, separately signed
+`RELEASE-ACCEPTANCE.md` completes the immutable tagged pre-publication record.
+The plan below preserves the qualification process and outstanding stable/manual
+work; unchecked manual items are not silently converted into passing tests.
+
 The published alpha releases are the feature baseline:
 
 - OmaCalendar app: `v1.0.0-alpha`
