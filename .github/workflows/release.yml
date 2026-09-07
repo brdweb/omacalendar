@@ -98,6 +98,8 @@ jobs:
           } >>"${GITHUB_OUTPUT}"
 
       - name: Configure release
+        # PLAN.md assigns timing thresholds to release-reference Omarchy hardware.
+        # Hosted runners still execute the 100,000-event correctness/crash smoke.
         env:
           CC: gcc
           CXX: g++
@@ -108,7 +110,7 @@ jobs:
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_INSTALL_PREFIX=/usr \
             -DOMACALENDAR_ENABLE_WERROR=ON \
-            -DOMACALENDAR_ENABLE_HARDWARE_PERF_TESTS=ON \
+            -DOMACALENDAR_ENABLE_HARDWARE_PERF_TESTS=OFF \
             -DOMACALENDAR_REQUIRE_GOOGLE_OAUTH_CONFIG=ON \
             -DOMACALENDAR_VERSION_SUFFIX=${{ steps.version.outputs.suffix }}
 

@@ -9,7 +9,7 @@ optional Quickshell companion is developed and released independently.
 > `1.0.0-beta.1` is an unsupported public-testing prerelease. Automated suites
 > exercise the local database, provider mutation machinery, desktop, IPC,
 > and reminders, but the full live-provider and stable owner-acceptance
-> matrices are not complete. Use test or disposable calendars and never make an
+> matrices are not complete. Use test or disposable calendars and never make a
 > beta build the only copy of important calendar data.
 
 ## 1.0 scope
