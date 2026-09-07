@@ -240,7 +240,7 @@ set_tests_properties(release_performance_smoke PROPERTIES
 )
 
 option(OMACALENDAR_ENABLE_HARDWARE_PERF_TESTS
-       "Enable timing-enforced release tests for reference Omarchy hardware" OFF)
+       "Enable timing-enforced release performance tests" OFF)
 if(OMACALENDAR_ENABLE_HARDWARE_PERF_TESTS)
   add_test(NAME release_performance_hardware_gate
     COMMAND ${Python3_EXECUTABLE}
@@ -250,7 +250,7 @@ if(OMACALENDAR_ENABLE_HARDWARE_PERF_TESTS)
       --warmups 5
       --samples 15
       --enforce-gates
-      --build-label Release/reference-Omarchy
+      --build-label Release/hardware-gate
   )
   set_tests_properties(release_performance_hardware_gate PROPERTIES
     TIMEOUT 300

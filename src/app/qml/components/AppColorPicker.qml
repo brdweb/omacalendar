@@ -47,6 +47,7 @@ Item {
                 border.color: Theme.alpha(Theme.text, 0.32)
             }
             Text {
+                textFormat: Text.PlainText
                 Layout.fillWidth: true
                 text: root.buttonText
                 color: Theme.text
@@ -55,6 +56,7 @@ Item {
                 elide: Text.ElideRight
             }
             Text {
+                textFormat: Text.PlainText
                 text: "⌄"
                 color: Theme.mutedText
                 font.pixelSize: Theme.fontSize

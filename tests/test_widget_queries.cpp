@@ -48,6 +48,38 @@ class WidgetQueriesTest final : public QObject {
   Q_OBJECT
 
  private slots:
+  void sparseNowSelectionRetainsLookaheadAndBoundary() {
+    QTemporaryDir directory;
+    Database database;
+    QString error;
+    QVERIFY2(database.open(directory.filePath(QStringLiteral("store.sqlite")), &error),
+             qPrintable(error));
+    const QDateTime now = utc(2026, 9, 10, 12);
+    const auto select = [&]() {
+      return queryWidgetEvents(database, utc(2024, 1, 1), utc(2024, 1, 2), now,
+                               {QStringLiteral("local-default")}, {}, &error);
+    };
+    const Event beyond = timedEvent(QStringLiteral("beyond"), now.addDays(45), false);
+    QVERIFY2(database.applyRemoteEvent(beyond, &error), qPrintable(error));
+    QVERIFY(select().upNext.id.isEmpty());
+    QVERIFY2(error.isEmpty(), qPrintable(error));
+    const Event sparse = timedEvent(QStringLiteral("sparse"), now.addDays(44), false);
+    QVERIFY2(database.applyRemoteEvent(sparse, &error), qPrintable(error));
+    QCOMPARE(select().upNext.id, sparse.id);
+    QVERIFY2(error.isEmpty(), qPrintable(error));
+    const Event boundary =
+        timedEvent(QStringLiteral("boundary"), now.addDays(1), false);
+    QVERIFY2(database.applyRemoteEvent(boundary, &error), qPrintable(error));
+    QCOMPARE(select().upNext.id, boundary.id);
+    QVERIFY2(error.isEmpty(), qPrintable(error));
+    const Event near = timedEvent(QStringLiteral("near"), now.addSecs(3600), false);
+    QVERIFY2(database.applyRemoteEvent(near, &error), qPrintable(error));
+    const qint64 revisionBeforeRead = database.changeRevision();
+    QCOMPARE(select().upNext.id, near.id);
+    QVERIFY2(error.isEmpty(), qPrintable(error));
+    QCOMPARE(database.changeRevision(), revisionBeforeRead);
+  }
+
   void currentAndUpNextIgnorePastAndFutureBrowseRanges() {
     QTemporaryDir directory;
     QVERIFY(directory.isValid());

@@ -1,6 +1,6 @@
 # Support and current limitations
 
-`1.0.0-alpha` is an evaluation prerelease with no production support commitment.
+`1.0.0-beta.1` is a public-testing prerelease with no production support commitment.
 Calendar reading has been owner-tested. An isolated Radicale 3.7.8 development
 slice has also exercised writes, offline recovery, remote pull/delete,
 keep-remote conflict resolution, recurrence instances, and multiple alarms; a
@@ -9,7 +9,7 @@ checks only: the complete provider, invitation, import/export, and desktop
 acceptance matrices remain open. The optional Quickshell companion is supported
 and released separately by its own project.
 
-Use alpha builds only with test or disposable calendars. Do not use one as the
+Use beta builds only with test or disposable calendars. Do not use one as the
 only copy of important data. Keep provider
 backups where available and make a local backup before changing builds or
 schemas. See [backup and recovery](docs/BACKUP_AND_RECOVERY.md).

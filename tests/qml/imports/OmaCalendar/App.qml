@@ -54,6 +54,10 @@ QtObject {
         return typeof value === "string" && value.trim().length > 0
     }
 
+    function openExternalEventUrl(value) {
+        value
+    }
+
     function connectGoogleWithClientId(clientId, displayName) {
         clientId
         displayName

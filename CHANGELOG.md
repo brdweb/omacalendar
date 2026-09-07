@@ -6,6 +6,8 @@ Versioning once public releases begin.
 
 ## [Unreleased]
 
+## [1.0.0-beta.1] - 2026-09-06
+
 ### Added
 
 - IPC 2 stability and deprecation policy in `docs/IPC.md`, documenting
@@ -20,6 +22,49 @@ Versioning once public releases begin.
   (`VTODO`) fit schema 2. Recommends a sibling `tasks` table, added the same
   way existing additive schema-2 repairs are, so a first tasks release would
   not need a migration. No implementation.
+- A checksummed native Arch package for current Omarchy, deterministic source
+  and binary archives, an SPDX SBOM, and GitHub provenance/SBOM attestations.
+- Privacy-safe release screenshots, focused beta issue forms, and a public
+  Google OAuth verification package under the canonical OmaCalendar identity.
+
+### Changed
+
+- Release builds inject the public Google Desktop OAuth client configuration
+  from protected CI inputs without committing or logging it; source builds
+  remain credential-free.
+- Installed documentation now preserves the repository's `docs/` layout and
+  includes the beta install, Google testing, recovery, release, and uninstall
+  guides referenced by the packaged README.
+
+### Fixed
+
+- ICS subscription refreshes and imports retain the complete recurrence set
+  (RRULE, RDATE, EXDATE, and EXRULE), including folded properties and RDATE-only
+  events, across export and restart without duplicating complete feed bodies.
+- Dense-calendar widget snapshots first query a one-day Up Next window, with
+  the same 45-day fallback for sparse calendars, avoiding unnecessary event
+  hydration while preserving ongoing-event and lookahead boundary behavior.
+- Google authorization now completes code exchange with PKCE-S256, persists
+  refresh tokens in Secret Service, discovers calendars, and reconnects after
+  daemon restart with the packaged Desktop client configuration.
+- Release install/uninstall validation now covers the packaged
+  `omacalendar-widgetctl` integration helper as well as the app, daemon, CLI,
+  desktop metadata, and user units.
+
+### Security
+
+- Sensitive account, provider, and event fields are excluded from generic IPC
+  errors, diagnostics, and presentation-only widget snapshots.
+- Bound recurrence enumeration and index exception lookup; reject incomplete
+  expansions before replacing cached occurrences.
+- Store CalDAV resource payloads once per resource, and enforce cumulative
+  response, request, and unique-resource limits across synchronization.
+- Stream ICS responses within the size limit and reject cross-origin redirects.
+- Render provider text literally, restrict external event links to HTTP(S),
+  and default new notification preferences to generic text.
+- Pin the app's widget installer to the reviewed beta tag and exact commit.
+- Enable full ELF RELRO and make package verification instructions abort on
+  checksum or provenance failure.
 
 ## [1.0.0-alpha] - 2026-08-30
 
@@ -90,5 +135,6 @@ Versioning once public releases begin.
   and emits verifiable build provenance for tagged release candidates. The
   separately documented historical OAuth incident remains a pre-tag gate.
 
-[Unreleased]: https://github.com/brdweb/omacalendar/compare/v1.0.0-alpha...HEAD
+[Unreleased]: https://github.com/brdweb/omacalendar/compare/v1.0.0-beta.1...HEAD
+[1.0.0-beta.1]: https://github.com/brdweb/omacalendar/compare/v1.0.0-alpha...v1.0.0-beta.1
 [1.0.0-alpha]: https://github.com/brdweb/omacalendar/releases/tag/v1.0.0-alpha

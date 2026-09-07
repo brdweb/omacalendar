@@ -1,7 +1,9 @@
+#include <QBuffer>
 #include <QElapsedTimer>
 #include <QFile>
 #include <QTemporaryDir>
 #include <QtTest>
+#include <algorithm>
 
 #include "core/database.h"
 #include "providers/caldav/icalcodec.h"
@@ -48,7 +50,141 @@ class IcsServiceTest final : public QObject {
   void keepsSubscriptionMetadataPrivate();
   void rejectsMalformedPayloads();
   void credentialStorageDoesNotBlockEventLoop();
+  void rejectsCrossOriginRedirects();
+  void boundsNetworkPayloadBeforeAppend();
+  void preservesCompleteRecurrenceAcrossFeedRefreshAndImport();
 };
+
+void IcsServiceTest::preservesCompleteRecurrenceAcrossFeedRefreshAndImport() {
+  const QByteArray payload = QByteArrayLiteral(
+      "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\n"
+      "UID:recurrence-set@example.test\r\n"
+      "DTSTART:20260901T130000Z\r\nDTEND:20260901T140000Z\r\n"
+      "RRULE:FREQ=DAILY;COUNT=4\r\nEXDATE:20260902T130000Z\r\n"
+      "EXRULE:FREQ=DAILY;INTERVAL=2;COUNT=2\r\n"
+      "RDATE:20260908T130000Z,\r\n 20260909T130000Z\r\n"
+      "SUMMARY:Recurrence fixture\r\nEND:VEVENT\r\n"
+      "BEGIN:VEVENT\r\nUID:rdate-only@example.test\r\n"
+      "DTSTART;VALUE=DATE:20260905\r\nDTEND;VALUE=DATE:20260906\r\n"
+      "RDATE;VALUE=DATE:20260910\r\nSUMMARY:RDATE fixture\r\n"
+      "END:VEVENT\r\nEND:VCALENDAR\r\n");
+  QTemporaryDir directory;
+  const QString path = directory.filePath(QStringLiteral("calendar.sqlite"));
+  const auto verify = [](Database& database, const QString& calendarId) {
+    QString error;
+    const auto events = database.eventsBetween(
+        QDateTime::fromString(QStringLiteral("2026-09-01T00:00:00Z"), Qt::ISODate),
+        QDateTime::fromString(QStringLiteral("2026-09-12T00:00:00Z"), Qt::ISODate),
+        {calendarId}, &error);
+    QVERIFY2(error.isEmpty(), qPrintable(error));
+    QList<int> dates;
+    for (const auto& event : events) {
+      dates.append(event.allDay ? event.startDate.day() : event.startUtc.date().day());
+    }
+    std::sort(dates.begin(), dates.end());
+    QCOMPARE(dates, QList<int>({4, 5, 8, 9, 10}));
+  };
+  {
+    Database database;
+    QString error;
+    QVERIFY2(database.open(path, &error), qPrintable(error));
+    Account account;
+    account.id = QStringLiteral("recurrence-feed");
+    account.provider = ProviderKind::Ics;
+    QVERIFY(database.upsertAccount(account, &error));
+    Calendar calendar;
+    calendar.id = QStringLiteral("recurrence-feed-calendar");
+    calendar.accountId = account.id;
+    calendar.name = QStringLiteral("Recurrence fixture");
+    calendar.readOnly = true;
+    QVERIFY2(database.upsertCalendar(calendar, &error), qPrintable(error));
+    IcsSubscription subscription;
+    subscription.accountId = account.id;
+    subscription.url = QStringLiteral("https://calendar.example.test/fixture.ics");
+    QVERIFY(database.upsertIcsSubscription(subscription, &error));
+    ics::IcsService service(&database);
+    QVERIFY2(
+        service.applyFeed(subscription, payload, QStringLiteral("one"), {}, &error),
+        qPrintable(error));
+    verify(database, calendar.id);
+    QVERIFY2(
+        service.applyFeed(subscription, payload, QStringLiteral("two"), {}, &error),
+        qPrintable(error));
+    verify(database, calendar.id);
+    ics::IcsError operationError;
+    const auto imported = service.commitImport(payload, QStringLiteral("local-default"),
+                                               QStringLiteral("skip"), &operationError);
+    QVERIFY2(operationError.isEmpty(), qPrintable(operationError.message));
+    QCOMPARE(imported.value(QStringLiteral("imported")).toInt(), 2);
+    verify(database, QStringLiteral("local-default"));
+    const auto exported = service.exportCalendar(
+        {{QStringLiteral("calendarId"), QStringLiteral("local-default")}},
+        &operationError);
+    QVERIFY2(operationError.isEmpty(), qPrintable(operationError.message));
+    const auto reparsed = caldav::ICalendarCodec::parse(
+        exported.value(QStringLiteral("content")).toString().toUtf8());
+    QVERIFY(reparsed.ok());
+    QVERIFY(reparsed.events.first().recurrenceRule.contains(QStringLiteral("RDATE")));
+    Calendar roundTrip;
+    roundTrip.id = QStringLiteral("round-trip");
+    roundTrip.accountId = QStringLiteral("local-account");
+    roundTrip.name = QStringLiteral("Round trip");
+    QVERIFY2(database.upsertCalendar(roundTrip, &error), qPrintable(error));
+    const auto reimported = service.commitImport(
+        exported.value(QStringLiteral("content")).toString().toUtf8(), roundTrip.id,
+        QStringLiteral("skip"), &operationError);
+    QVERIFY2(operationError.isEmpty(), qPrintable(operationError.message));
+    QCOMPARE(reimported.value(QStringLiteral("imported")).toInt(), 2);
+    verify(database, roundTrip.id);
+    for (const auto& event : database.eventsForCalendars({calendar.id})) {
+      QVERIFY(event.rawPayload.isEmpty());
+    }
+    Event malformed = reparsed.events.first();
+    malformed.recurrenceRule = QStringLiteral("RRULE:FREQ=DAILY\nSUMMARY:injected");
+    QVERIFY(!caldav::ICalendarCodec::serialize(malformed).ok());
+  }
+  Database reopened;
+  QString error;
+  QVERIFY2(reopened.open(path, &error), qPrintable(error));
+  verify(reopened, QStringLiteral("recurrence-feed-calendar"));
+  verify(reopened, QStringLiteral("local-default"));
+  verify(reopened, QStringLiteral("round-trip"));
+}
+
+void IcsServiceTest::rejectsCrossOriginRedirects() {
+  const QUrl origin(QStringLiteral("https://calendar.example.test/feed.ics"));
+  const QUrl sameOrigin(QStringLiteral("https://CALENDAR.example.test:443/moved.ics"));
+  const QUrl otherHost(QStringLiteral("https://other.example.test/feed.ics"));
+  const QUrl otherPort(QStringLiteral("https://calendar.example.test:444/feed.ics"));
+  QVERIFY(ics::IcsService::redirectErrorCode(origin, sameOrigin, false).isEmpty());
+  QCOMPARE(ics::IcsService::redirectErrorCode(origin, otherHost, false),
+           QStringLiteral("cross_origin_redirect_blocked"));
+  QCOMPARE(ics::IcsService::redirectErrorCode(origin, otherPort, true),
+           QStringLiteral("credential_redirect_blocked"));
+}
+
+void IcsServiceTest::boundsNetworkPayloadBeforeAppend() {
+  constexpr qsizetype maximum = 16 * 1024 * 1024;
+  QByteArray destination(maximum - 2, 'a');
+  QByteArray finalBytes(2, 'b');
+  QBuffer exact(&finalBytes);
+  QVERIFY(exact.open(QIODevice::ReadOnly));
+  QVERIFY(ics::IcsService::consumeReplyBytes(&exact, &destination));
+  QCOMPARE(destination.size(), maximum);
+
+  QByteArray overflowByte(1, 'c');
+  QBuffer overflow(&overflowByte);
+  QVERIFY(overflow.open(QIODevice::ReadOnly));
+  QVERIFY(!ics::IcsService::consumeReplyBytes(&overflow, &destination));
+  QVERIFY(destination.isEmpty());
+
+  QByteArray oversizedBytes(maximum + 1, 'd');
+  QBuffer oversized(&oversizedBytes);
+  QVERIFY(oversized.open(QIODevice::ReadOnly));
+  QVERIFY(!ics::IcsService::consumeReplyBytes(&oversized, &destination));
+  QVERIFY(destination.isEmpty());
+  QCOMPARE(oversized.pos(), qint64(maximum + 1));
+}
 
 void IcsServiceTest::validatesSubscriptionUrls() {
   QUrl normalized;

@@ -20,7 +20,7 @@ option(OMACALENDAR_BUILD_TESTS "Build automated tests" ON)
 option(OMACALENDAR_ENABLE_WERROR "Treat compiler warnings as errors" OFF)
 option(OMACALENDAR_ENABLE_SANITIZERS
        "Enable AddressSanitizer and UndefinedBehaviorSanitizer" OFF)
-set(OMACALENDAR_VERSION_SUFFIX "-alpha" CACHE STRING
+set(OMACALENDAR_VERSION_SUFFIX "-beta.1" CACHE STRING
     "Suffix appended to the numeric project version (empty for a release)")
 set(OMACALENDAR_FULL_VERSION "${PROJECT_VERSION}${OMACALENDAR_VERSION_SUFFIX}")
 option(OMACALENDAR_REQUIRE_GOOGLE_OAUTH_CONFIG
@@ -76,6 +76,14 @@ if(OMACALENDAR_ENABLE_SANITIZERS)
   endif()
   add_compile_options(-fsanitize=address,undefined -fno-omit-frame-pointer)
   add_link_options(-fsanitize=address,undefined -fno-omit-frame-pointer)
+endif()
+
+# Provider data is processed in long-lived desktop and daemon executables.
+# Make the ELF relocation table read-only after startup in every Linux build,
+# including the prebuilt release payload that does not inherit makepkg flags.
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND
+   CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+  add_link_options("LINKER:-z,relro" "LINKER:-z,now")
 endif()
 
 find_package(Qt6 6.8 REQUIRED COMPONENTS
@@ -251,11 +259,13 @@ install(FILES LICENSE README.md CHANGELOG.md
   DESTINATION ${CMAKE_INSTALL_DOCDIR}
 )
 install(FILES SECURITY.md SUPPORT.md
-  docs/BACKUP_AND_RECOVERY.md
-  docs/COMPATIBILITY.md
-  docs/PRIVACY.md
-  docs/UNINSTALL.md
   DESTINATION ${CMAKE_INSTALL_DOCDIR}
+)
+install(DIRECTORY docs/
+  DESTINATION ${CMAKE_INSTALL_DOCDIR}/docs
+  FILES_MATCHING
+    PATTERN "*.md"
+    PATTERN "*.png"
 )
 
 if(OMACALENDAR_BUILD_TESTS)

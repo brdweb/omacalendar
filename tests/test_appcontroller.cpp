@@ -20,7 +20,10 @@ class AppControllerTest final : public QObject {
   void wallTimeConversionResolvesDstOverlapToStandardTime();
   void wallTimeConversionRejectsInvalidInput();
   void exposesSystemTimeZoneChoices();
+  void freshPreferencesDefaultToGenericNotifications();
   void browserGoogleFlowRejectsEmptyClientId();
+  void externalEventUrlValidation();
+  void rejectedExternalEventUrlIsUserVisible();
   void startupArgumentsRouteDeepLinks();
   void startupArgumentsRouteLocalIcsFiles();
   void startupArgumentsRejectUnsafeImportTargets();
@@ -86,12 +89,60 @@ void AppControllerTest::exposesSystemTimeZoneChoices() {
   QVERIFY(choices.contains(QStringLiteral("UTC")));
 }
 
+void AppControllerTest::freshPreferencesDefaultToGenericNotifications() {
+  AppController controller;
+  QCOMPARE(
+      controller.preferences().value(QStringLiteral("notificationPrivacy")).toString(),
+      QStringLiteral("generic"));
+}
+
 void AppControllerTest::browserGoogleFlowRejectsEmptyClientId() {
   AppController controller;
   controller.connectGoogleWithClientId(QStringLiteral("   "),
                                        QStringLiteral("Test account"));
   QCOMPARE(controller.lastError(),
            QStringLiteral("Enter a Google Desktop OAuth client ID"));
+}
+
+void AppControllerTest::externalEventUrlValidation() {
+  AppController controller;
+  const QStringList accepted{
+      QStringLiteral("https://meet.example.test/rooms/123?auth=a%20b#join"),
+      QStringLiteral("http://localhost:8080/conference"),
+      QStringLiteral("HTTPS://calendar.example.test/event"),
+  };
+  for (const QString& value : accepted) {
+    QVERIFY2(controller.canOpenExternalEventUrl(value), qPrintable(value));
+  }
+
+  const QStringList rejected{
+      QString(),
+      QStringLiteral(" https://example.test/meeting"),
+      QStringLiteral("https://example.test/meeting "),
+      QStringLiteral("https:example.test/meeting"),
+      QStringLiteral("https:///missing-host"),
+      QStringLiteral("//example.test/meeting"),
+      QStringLiteral("meeting-room"),
+      QStringLiteral("file:///etc/passwd"),
+      QStringLiteral("javascript:alert(1)"),
+      QStringLiteral("data:text/html,hello"),
+      QStringLiteral("mailto:host@example.test"),
+      QStringLiteral("tel:+15555550123"),
+      QStringLiteral("webcal://example.test/calendar"),
+      QStringLiteral("omacalendar://event/123"),
+      QStringLiteral("https://exa mple.test/meeting"),
+      QStringLiteral("https://example.test/%ZZ"),
+  };
+  for (const QString& value : rejected) {
+    QVERIFY2(!controller.canOpenExternalEventUrl(value), qPrintable(value));
+  }
+}
+
+void AppControllerTest::rejectedExternalEventUrlIsUserVisible() {
+  AppController controller;
+  controller.openExternalEventUrl(QStringLiteral("file:///etc/passwd"));
+  QCOMPARE(controller.lastError(),
+           QStringLiteral("Only valid HTTP or HTTPS event links can be opened"));
 }
 
 void AppControllerTest::startupArgumentsRouteDeepLinks() {

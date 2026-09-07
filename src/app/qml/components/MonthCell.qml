@@ -29,6 +29,7 @@ ItemDelegate {
                 border.width: root.selected && !root.isToday ? 1 : 0
                 border.color: Theme.focus
                 Text {
+                    textFormat: Text.PlainText
                     anchors.fill: parent
                     text: root.date.getDate()
                     color: root.isToday ? Theme.accentText

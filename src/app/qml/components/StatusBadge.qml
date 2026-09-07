@@ -41,6 +41,7 @@ Rectangle {
             color: root.toneColor
         }
         Text {
+            textFormat: Text.PlainText
             text: root.text
             color: Theme.text
             font.pixelSize: Theme.microFontSize

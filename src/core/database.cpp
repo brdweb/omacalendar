@@ -414,6 +414,7 @@ bool Database::migrate(QString* errorMessage) {
            ensureConflictUniquenessSchema(errorMessage) &&
            ensureReminderDeliverySchema(errorMessage) &&
            ensureSyncCoverageSchema(errorMessage) &&
+           ensureProviderResourcesSchema(errorMessage) &&
            ensureReadPerformanceIndexes(errorMessage);
   }
   if (!m_database.transaction()) {
@@ -794,6 +795,7 @@ bool Database::migrate(QString* errorMessage) {
          ensureConflictUniquenessSchema(errorMessage) &&
          ensureReminderDeliverySchema(errorMessage) &&
          ensureSyncCoverageSchema(errorMessage) &&
+         ensureProviderResourcesSchema(errorMessage) &&
          ensureReadPerformanceIndexes(errorMessage);
 }
 
@@ -1112,6 +1114,131 @@ bool Database::ensureSyncCoverageSchema(QString* errorMessage) {
                  errorMessage);
 }
 
+bool Database::ensureProviderResourcesSchema(QString* errorMessage) {
+  QSqlQuery savepoint(m_database);
+  if (!savepoint.exec(QStringLiteral("SAVEPOINT provider_resources_schema"))) {
+    if (errorMessage != nullptr) {
+      *errorMessage =
+          sqlError(savepoint, QStringLiteral("start provider resource schema repair"));
+    }
+    return false;
+  }
+  const auto fail = [this, errorMessage](const QString& fallback) {
+    if (errorMessage != nullptr && errorMessage->isEmpty()) {
+      *errorMessage = fallback;
+    }
+    QSqlQuery rollback(m_database);
+    rollback.exec(QStringLiteral("ROLLBACK TO provider_resources_schema"));
+    rollback.exec(QStringLiteral("RELEASE provider_resources_schema"));
+    return false;
+  };
+
+  if (!execute(QStringLiteral(R"SQL(
+        CREATE TABLE IF NOT EXISTS provider_resources (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          calendar_id TEXT NOT NULL REFERENCES calendars(id) ON DELETE CASCADE,
+          canonical_key TEXT NOT NULL,
+          remote_revision TEXT NOT NULL DEFAULT '',
+          format TEXT NOT NULL DEFAULT '',
+          acknowledged_json TEXT NOT NULL DEFAULT '{}',
+          raw_payload TEXT NOT NULL DEFAULT '',
+          sync_generation INTEGER NOT NULL DEFAULT 0,
+          UNIQUE(calendar_id, canonical_key)
+        )
+      )SQL"),
+               errorMessage) ||
+      !execute(QStringLiteral(R"SQL(
+        CREATE INDEX IF NOT EXISTS provider_resources_calendar_index
+        ON provider_resources(calendar_id, canonical_key)
+      )SQL"),
+               errorMessage)) {
+    return fail(QStringLiteral("Unable to repair provider resource storage"));
+  }
+
+  // Early schema-2 builds stored a full CalDAV VCALENDAR in every normalized
+  // event row. Preserve the newest copy per canonical resource before clearing
+  // those duplicates. Google JSON and every non-CalDAV payload remain per-event.
+  QSqlQuery legacy(m_database);
+  if (!legacy.exec(QStringLiteral(R"SQL(
+        SELECT e.calendar_id,
+          CASE WHEN instr(e.remote_id,'#')>0
+               THEN substr(e.remote_id,1,instr(e.remote_id,'#')-1)
+               ELSE e.remote_id END AS resource_key,
+          e.etag,e.raw_format,e.raw_payload
+        FROM events e
+        JOIN calendars c ON c.id=e.calendar_id
+        JOIN accounts a ON a.id=c.account_id
+        WHERE a.provider='caldav' AND e.remote_id<>''
+          AND e.raw_format='text/calendar' AND e.raw_payload<>''
+          AND NOT EXISTS (
+            SELECT 1 FROM provider_resources p WHERE p.calendar_id=e.calendar_id
+              AND p.canonical_key=CASE WHEN instr(e.remote_id,'#')>0
+                  THEN substr(e.remote_id,1,instr(e.remote_id,'#')-1)
+                  ELSE e.remote_id END
+          )
+        ORDER BY e.updated_at DESC,e.id DESC
+      )SQL"))) {
+    if (errorMessage != nullptr) {
+      *errorMessage = sqlError(legacy, QStringLiteral("load legacy CalDAV payloads"));
+    }
+    return fail(QStringLiteral("Unable to read legacy CalDAV payloads"));
+  }
+  QList<ProviderResource> resources;
+  QSet<QString> observed;
+  while (legacy.next()) {
+    ProviderResource resource;
+    resource.calendarId = legacy.value(0).toString();
+    resource.canonicalKey = legacy.value(1).toString();
+    resource.remoteRevision = legacy.value(2).toString();
+    resource.format = legacy.value(3).toString();
+    resource.rawPayload = legacy.value(4).toString();
+    const QString identity =
+        resource.calendarId + QLatin1Char('\n') + resource.canonicalKey;
+    if (resource.canonicalKey.isEmpty() || observed.contains(identity)) {
+      continue;
+    }
+    observed.insert(identity);
+    resources.append(std::move(resource));
+  }
+  legacy.finish();
+  for (const ProviderResource& resource : std::as_const(resources)) {
+    if (!upsertProviderResource(resource, errorMessage)) {
+      return fail(QStringLiteral("Unable to migrate a CalDAV provider resource"));
+    }
+  }
+
+  if (!execute(QStringLiteral(R"SQL(
+        UPDATE events SET raw_payload='',raw_format=''
+        WHERE raw_format='text/calendar' AND raw_payload<>'' AND dirty=0
+          AND EXISTS (
+            SELECT 1 FROM calendars c JOIN accounts a ON a.id=c.account_id
+            WHERE c.id=events.calendar_id AND a.provider='caldav'
+          )
+          AND EXISTS (
+            SELECT 1 FROM provider_resources pr
+            WHERE pr.calendar_id=events.calendar_id
+              AND pr.canonical_key=(
+                CASE WHEN instr(events.remote_id,'#')>0
+                     THEN substr(events.remote_id,1,instr(events.remote_id,'#')-1)
+                     ELSE events.remote_id END
+              )
+          )
+      )SQL"),
+               errorMessage)) {
+    return fail(QStringLiteral("Unable to normalize legacy CalDAV payloads"));
+  }
+
+  QSqlQuery release(m_database);
+  if (!release.exec(QStringLiteral("RELEASE provider_resources_schema"))) {
+    if (errorMessage != nullptr) {
+      *errorMessage =
+          sqlError(release, QStringLiteral("commit provider resource schema repair"));
+    }
+    return fail(QStringLiteral("Unable to commit provider resource schema repair"));
+  }
+  return true;
+}
+
 bool Database::ensureReadPerformanceIndexes(QString* errorMessage) {
   // Schema 2 remains the development schema, so install these idempotently for
   // both new and existing databases. The leading range columns support views
@@ -1188,6 +1315,22 @@ bool Database::upsertAccount(Account account, QString* errorMessage) {
 }
 
 bool Database::rebuildEventInstances(const Event& event, QString* errorMessage) {
+  QList<Event> occurrences{event};
+  if (!event.deleted && !event.recurrenceRule.isEmpty() &&
+      event.recurrenceId.isEmpty()) {
+    const QDateTime now = nowUtc();
+    const RecurrenceExpansionResult expansion =
+        RecurrenceExpander::expand({event}, now.addYears(-2), now.addYears(5), 10000);
+    if (expansion.truncated) {
+      if (errorMessage != nullptr) {
+        *errorMessage =
+            QStringLiteral("Event instance expansion exceeded its safe work limit");
+      }
+      return false;
+    }
+    occurrences = expansion.occurrences;
+  }
+
   QSqlQuery remove(m_database);
   remove.prepare(QStringLiteral("DELETE FROM event_instances WHERE event_id=?"));
   remove.addBindValue(event.id);
@@ -1199,14 +1342,6 @@ bool Database::rebuildEventInstances(const Event& event, QString* errorMessage) 
   }
   if (event.deleted) {
     return true;
-  }
-
-  QList<Event> occurrences{event};
-  if (!event.recurrenceRule.isEmpty() && event.recurrenceId.isEmpty()) {
-    const QDateTime now = nowUtc();
-    occurrences =
-        RecurrenceExpander::expand({event}, now.addYears(-2), now.addYears(5), 10000)
-            .occurrences;
   }
   for (const Event& occurrence : occurrences) {
     QString recurrenceId = occurrence.recurrenceId;
@@ -1245,6 +1380,22 @@ bool Database::rebuildEventInstances(const Event& event, QString* errorMessage) 
 }
 
 bool Database::rebuildReminderJobs(const Event& event, QString* errorMessage) {
+  QList<Event> occurrences{event};
+  if (!event.deleted && !event.reminders.isEmpty() && !event.recurrenceRule.isEmpty() &&
+      event.recurrenceId.isEmpty()) {
+    const QDateTime now = nowUtc();
+    const RecurrenceExpansionResult expansion =
+        RecurrenceExpander::expand({event}, now.addDays(-2), now.addYears(2), 2000);
+    if (expansion.truncated) {
+      if (errorMessage != nullptr) {
+        *errorMessage =
+            QStringLiteral("Reminder expansion exceeded its safe work limit");
+      }
+      return false;
+    }
+    occurrences = expansion.occurrences;
+  }
+
   QSqlQuery remove(m_database);
   remove.prepare(QStringLiteral(R"SQL(
     DELETE FROM reminder_jobs
@@ -1259,13 +1410,6 @@ bool Database::rebuildReminderJobs(const Event& event, QString* errorMessage) {
   }
   if (event.deleted || event.reminders.isEmpty()) {
     return true;
-  }
-  QList<Event> occurrences{event};
-  if (!event.recurrenceRule.isEmpty() && event.recurrenceId.isEmpty()) {
-    const QDateTime now = nowUtc();
-    occurrences =
-        RecurrenceExpander::expand({event}, now.addDays(-2), now.addYears(2), 2000)
-            .occurrences;
   }
   for (const Event& occurrence : occurrences) {
     const QDateTime eventStart =
@@ -1725,7 +1869,183 @@ Calendar Database::calendarByRemoteId(const QString& accountId, const QString& r
   return calendar(query.value(0).toString(), errorMessage);
 }
 
-bool Database::upsertEventRecord(const Event& event, QString* errorMessage) {
+QString Database::providerResourceKey(const QString& remoteId) {
+  const qsizetype fragment = remoteId.indexOf(QLatin1Char('#'));
+  return fragment < 0 ? remoteId : remoteId.left(fragment);
+}
+
+bool Database::upsertProviderResource(const ProviderResource& resource,
+                                      QString* errorMessage) {
+  if (resource.calendarId.isEmpty() || resource.canonicalKey.isEmpty()) {
+    if (errorMessage != nullptr) {
+      *errorMessage =
+          QStringLiteral("A provider resource needs a calendar and canonical key");
+    }
+    return false;
+  }
+  QSqlQuery query(m_database);
+  query.prepare(QStringLiteral(R"SQL(
+    INSERT INTO provider_resources
+      (calendar_id,canonical_key,remote_revision,format,acknowledged_json,
+       raw_payload,sync_generation)
+    VALUES (?,?,?,?,'{}',?,0)
+    ON CONFLICT(calendar_id,canonical_key) DO UPDATE SET
+      remote_revision=excluded.remote_revision,
+      format=excluded.format,
+      raw_payload=excluded.raw_payload
+  )SQL"));
+  query.addBindValue(resource.calendarId);
+  query.addBindValue(resource.canonicalKey);
+  query.addBindValue(nonNull(resource.remoteRevision));
+  query.addBindValue(nonNull(resource.format));
+  query.addBindValue(nonNull(resource.rawPayload));
+  if (query.exec()) {
+    return true;
+  }
+  if (errorMessage != nullptr) {
+    *errorMessage = sqlError(query, QStringLiteral("upsert provider resource"));
+  }
+  return false;
+}
+
+bool Database::removeOrphanedProviderResources(const QString& calendarId,
+                                               QString* errorMessage) {
+  QSqlQuery query(m_database);
+  query.prepare(QStringLiteral(R"SQL(
+    DELETE FROM provider_resources
+    WHERE calendar_id=? AND NOT EXISTS (
+      SELECT 1 FROM events e
+      WHERE e.calendar_id=provider_resources.calendar_id AND e.remote_id<>'' AND (
+        e.remote_id=provider_resources.canonical_key OR
+        substr(e.remote_id,1,length(provider_resources.canonical_key)+1)=
+          provider_resources.canonical_key || '#'
+      )
+    )
+  )SQL"));
+  query.addBindValue(calendarId);
+  if (query.exec()) {
+    return true;
+  }
+  if (errorMessage != nullptr) {
+    *errorMessage =
+        sqlError(query, QStringLiteral("remove orphaned provider resources"));
+  }
+  return false;
+}
+
+bool Database::hydrateProviderResource(Event* event, QString* errorMessage) const {
+  if (event == nullptr || !event->rawPayload.isEmpty() || event->calendarId.isEmpty() ||
+      event->remoteId.isEmpty()) {
+    return true;
+  }
+  QSqlQuery query(m_database);
+  query.prepare(QStringLiteral(R"SQL(
+    SELECT raw_payload,format FROM provider_resources
+    WHERE calendar_id=? AND canonical_key=? LIMIT 1
+  )SQL"));
+  query.addBindValue(event->calendarId);
+  query.addBindValue(providerResourceKey(event->remoteId));
+  if (!query.exec()) {
+    if (errorMessage != nullptr) {
+      *errorMessage = sqlError(query, QStringLiteral("load provider resource"));
+    }
+    return false;
+  }
+  if (query.next()) {
+    event->rawPayload = query.value(0).toString();
+    event->rawFormat = query.value(1).toString();
+  }
+  return true;
+}
+
+bool Database::hydrateProviderResources(QList<Event>* events,
+                                        QString* errorMessage) const {
+  if (events == nullptr || events->isEmpty()) {
+    return true;
+  }
+  QList<QPair<QString, QString>> wanted;
+  QSet<QString> observed;
+  for (const Event& event : std::as_const(*events)) {
+    if (!event.rawPayload.isEmpty() || event.calendarId.isEmpty() ||
+        event.remoteId.isEmpty()) {
+      continue;
+    }
+    const QString resourceKey = providerResourceKey(event.remoteId);
+    const QString identity = event.calendarId + QLatin1Char('\n') + resourceKey;
+    if (!observed.contains(identity)) {
+      observed.insert(identity);
+      wanted.append({event.calendarId, resourceKey});
+    }
+  }
+  if (wanted.isEmpty()) {
+    return true;
+  }
+  QHash<QString, QPair<QString, QString>> payloads;
+  constexpr qsizetype kLookupBatchSize = 200;
+  for (qsizetype offset = 0; offset < wanted.size(); offset += kLookupBatchSize) {
+    const qsizetype count = qMin(kLookupBatchSize, wanted.size() - offset);
+    QStringList predicates;
+    predicates.fill(QStringLiteral("(calendar_id=? AND canonical_key=?)"), count);
+    QSqlQuery query(m_database);
+    query.prepare(QStringLiteral(R"SQL(
+      SELECT calendar_id,canonical_key,raw_payload,format
+      FROM provider_resources WHERE %1
+    )SQL")
+                      .arg(predicates.join(QStringLiteral(" OR "))));
+    for (qsizetype index = 0; index < count; ++index) {
+      const auto& identity = wanted.at(offset + index);
+      query.addBindValue(identity.first);
+      query.addBindValue(identity.second);
+    }
+    if (!query.exec()) {
+      if (errorMessage != nullptr) {
+        *errorMessage = sqlError(query, QStringLiteral("load provider resources"));
+      }
+      return false;
+    }
+    while (query.next()) {
+      const QString identity =
+          query.value(0).toString() + QLatin1Char('\n') + query.value(1).toString();
+      payloads.insert(identity, {query.value(2).toString(), query.value(3).toString()});
+    }
+  }
+  for (Event& event : *events) {
+    if (!event.rawPayload.isEmpty() || event.calendarId.isEmpty() ||
+        event.remoteId.isEmpty()) {
+      continue;
+    }
+    const QString identity =
+        event.calendarId + QLatin1Char('\n') + providerResourceKey(event.remoteId);
+    const auto payload = payloads.constFind(identity);
+    if (payload != payloads.constEnd()) {
+      event.rawPayload = payload->first;
+      event.rawFormat = payload->second;
+    }
+  }
+  return true;
+}
+
+bool Database::upsertEventRecord(const Event& event, QString* errorMessage,
+                                 const bool omitProviderPayload) {
+  bool normalizedProviderPayload = omitProviderPayload;
+  if (!normalizedProviderPayload && !event.dirty && !event.remoteId.isEmpty() &&
+      event.rawFormat == QStringLiteral("text/calendar")) {
+    QSqlQuery resource(m_database);
+    resource.prepare(QStringLiteral(R"SQL(
+      SELECT 1 FROM provider_resources
+      WHERE calendar_id=? AND canonical_key=? LIMIT 1
+    )SQL"));
+    resource.addBindValue(event.calendarId);
+    resource.addBindValue(providerResourceKey(event.remoteId));
+    if (!resource.exec()) {
+      if (errorMessage != nullptr) {
+        *errorMessage =
+            sqlError(resource, QStringLiteral("check normalized provider resource"));
+      }
+      return false;
+    }
+    normalizedProviderPayload = resource.next();
+  }
   QSqlQuery query(m_database);
   query.prepare(QStringLiteral(R"SQL(
     INSERT INTO events
@@ -1802,8 +2122,10 @@ bool Database::upsertEventRecord(const Event& event, QString* errorMessage) {
   query.addBindValue(compactJson(event.organizer));
   query.addBindValue(compactJson(event.attendees));
   query.addBindValue(compactJson(event.reminders));
-  query.addBindValue(nonNull(event.rawPayload));
-  query.addBindValue(nonNull(event.rawFormat));
+  query.addBindValue(normalizedProviderPayload ? QStringLiteral("")
+                                               : nonNull(event.rawPayload));
+  query.addBindValue(normalizedProviderPayload ? QStringLiteral("")
+                                               : nonNull(event.rawFormat));
   query.addBindValue(event.dirty);
   query.addBindValue(event.deleted);
   query.addBindValue(event.localRevision);
@@ -1904,6 +2226,12 @@ bool Database::upsertUnresolvedConflict(
 }
 
 bool Database::applyRemoteEvent(Event event, QString* errorMessage, bool* conflicted) {
+  return applyRemoteEventInternal(std::move(event), errorMessage, conflicted, false);
+}
+
+bool Database::applyRemoteEventInternal(Event event, QString* errorMessage,
+                                        bool* conflicted,
+                                        const bool omitProviderPayload) {
   if (conflicted != nullptr) {
     *conflicted = false;
   }
@@ -1944,7 +2272,10 @@ bool Database::applyRemoteEvent(Event event, QString* errorMessage, bool* confli
   }
   Event existing;
   while (existingQuery.next()) {
-    const Event candidate = eventFromQuery(existingQuery);
+    Event candidate = eventFromQuery(existingQuery);
+    if (!hydrateProviderResource(&candidate, errorMessage)) {
+      return false;
+    }
     const bool sameIdentity =
         queryByProviderIdentity ||
         (event.recurrenceId.isEmpty()
@@ -1991,7 +2322,8 @@ bool Database::applyRemoteEvent(Event event, QString* errorMessage, bool* confli
   event.dirty = false;
   event.localRevision = qMax(event.localRevision, priorLocalRevision + 1);
   event.syncState = QStringLiteral("clean");
-  return upsertEventRecord(event, errorMessage) && bumpChangeRevision(errorMessage);
+  return upsertEventRecord(event, errorMessage, omitProviderPayload) &&
+         bumpChangeRevision(errorMessage);
 }
 
 bool Database::removeRemoteEvent(const QString& calendarId, const QString& remoteId,
@@ -2078,6 +2410,9 @@ bool Database::removeRemoteEventInternal(const QString& calendarId,
       existingEvents.append(eventFromQuery(detachedQuery));
     }
   }
+  if (!hydrateProviderResources(&existingEvents, errorMessage)) {
+    return false;
+  }
   if (existingEvents.isEmpty()) {
     return true;
   }
@@ -2140,7 +2475,8 @@ bool Database::applyRemoteSyncBatch(const Calendar& calendar,
                                     const QList<Event>& events,
                                     const QStringList& deletedRemoteIds,
                                     const QStringList& prunedRemoteIds,
-                                    QString* errorMessage) {
+                                    QString* errorMessage,
+                                    const QList<ProviderResource>& providerResources) {
   if (calendar.id.isEmpty()) {
     if (errorMessage != nullptr) {
       *errorMessage = QStringLiteral("A remote sync batch needs a calendar");
@@ -2164,13 +2500,55 @@ bool Database::applyRemoteSyncBatch(const Calendar& calendar,
     return false;
   };
 
+  QHash<QString, ProviderResource> stagedResources;
+  for (const ProviderResource& resource : providerResources) {
+    if (resource.calendarId != calendar.id || resource.canonicalKey.isEmpty()) {
+      return fail(
+          QStringLiteral("A staged provider resource belongs to another calendar"));
+    }
+    stagedResources.insert(resource.canonicalKey, resource);
+  }
   for (const Event& event : events) {
     if (event.calendarId != calendar.id) {
       return fail(QStringLiteral("A staged event belongs to another calendar"));
     }
+    Event stagedEvent = event;
+    const QString resourceKey = providerResourceKey(stagedEvent.remoteId);
+    const auto resource = stagedResources.constFind(resourceKey);
+    const bool hasProviderResource = resource != stagedResources.constEnd();
+    if (hasProviderResource) {
+      stagedEvent.rawPayload = resource->rawPayload;
+      stagedEvent.rawFormat = resource->format;
+    }
     bool conflicted = false;
-    if (!applyRemoteEvent(event, errorMessage, &conflicted)) {
+    if (!applyRemoteEventInternal(std::move(stagedEvent), errorMessage, &conflicted,
+                                  hasProviderResource)) {
       return fail(QStringLiteral("Unable to apply a staged remote event"));
+    }
+    if (conflicted && hasProviderResource) {
+      // A locally edited exception must keep its own acknowledged editing base,
+      // while clean siblings advance to the incoming resource revision. Only
+      // user-created dirty state needs this snapshot; remote rows share one blob.
+      const Event existing = eventByRemoteId(calendar.id, event.remoteId, errorMessage);
+      if (existing.id.isEmpty()) {
+        return fail(QStringLiteral("Unable to preserve a conflicted event base"));
+      }
+      QSqlQuery preserve(m_database);
+      preserve.prepare(QStringLiteral(
+          "UPDATE events SET raw_payload=?,raw_format=? WHERE id=? AND dirty=1"));
+      preserve.addBindValue(existing.rawPayload);
+      preserve.addBindValue(existing.rawFormat);
+      preserve.addBindValue(existing.id);
+      if (!preserve.exec()) {
+        return fail(
+            sqlError(preserve, QStringLiteral("preserve conflicted event base")));
+      }
+    }
+  }
+  for (auto resource = stagedResources.constBegin();
+       resource != stagedResources.constEnd(); ++resource) {
+    if (!upsertProviderResource(resource.value(), errorMessage)) {
+      return fail(QStringLiteral("Unable to stage a provider resource"));
     }
   }
 
@@ -2187,6 +2565,9 @@ bool Database::applyRemoteSyncBatch(const Calendar& calendar,
                                    false)) {
       return fail(QStringLiteral("Unable to apply a staged remote deletion"));
     }
+  }
+  if (!removeOrphanedProviderResources(calendar.id, errorMessage)) {
+    return fail(QStringLiteral("Unable to prune provider resources"));
   }
   if (!upsertCalendar(calendar, errorMessage)) {
     return fail(QStringLiteral("Unable to commit the staged calendar state"));
@@ -2205,7 +2586,8 @@ bool Database::applyRemoteRangeSyncBatch(
     const Calendar& calendar, const QList<Event>& events,
     const QStringList& deletedRemoteIds, const QStringList& prunedRemoteIds,
     const QDateTime& coverageStartUtc, const QDateTime& coverageEndUtc,
-    QString* errorMessage, const bool replaceExistingCoverage) {
+    QString* errorMessage, const bool replaceExistingCoverage,
+    const QList<ProviderResource>& providerResources) {
   if (!coverageStartUtc.isValid() || !coverageEndUtc.isValid() ||
       coverageStartUtc >= coverageEndUtc) {
     if (errorMessage != nullptr) {
@@ -2232,7 +2614,7 @@ bool Database::applyRemoteRangeSyncBatch(
   };
 
   if (!applyRemoteSyncBatch(calendar, events, deletedRemoteIds, prunedRemoteIds,
-                            errorMessage)) {
+                            errorMessage, providerResources)) {
     return fail(QStringLiteral("Unable to apply the bounded remote sync batch"));
   }
   if (replaceExistingCoverage) {
@@ -3210,7 +3592,8 @@ Event Database::event(const QString& eventId, QString* errorMessage) const {
     }
     return {};
   }
-  return eventFromQuery(query);
+  Event result = eventFromQuery(query);
+  return hydrateProviderResource(&result, errorMessage) ? result : Event{};
 }
 
 Event Database::eventByRemoteId(const QString& calendarId, const QString& remoteId,
@@ -3232,7 +3615,8 @@ Event Database::eventByRemoteId(const QString& calendarId, const QString& remote
     }
     return {};
   }
-  return eventFromQuery(query);
+  Event result = eventFromQuery(query);
+  return hydrateProviderResource(&result, errorMessage) ? result : Event{};
 }
 
 Event Database::eventByUid(const QString& calendarId, const QString& uid,
@@ -3252,16 +3636,16 @@ Event Database::eventByUid(const QString& calendarId, const QString& uid,
     return {};
   }
   while (query.next()) {
-    const Event candidate = eventFromQuery(query);
+    Event candidate = eventFromQuery(query);
     if (recurrenceId.isEmpty()) {
       if (candidate.recurrenceId.isEmpty()) {
-        return candidate;
+        return hydrateProviderResource(&candidate, errorMessage) ? candidate : Event{};
       }
       continue;
     }
     if (recurrenceIdentityEqual(recurrenceId, candidate.recurrenceId, candidate.allDay,
                                 candidate.timeKind, candidate.startTimeZone)) {
-      return candidate;
+      return hydrateProviderResource(&candidate, errorMessage) ? candidate : Event{};
     }
   }
   return {};
@@ -3287,7 +3671,7 @@ QList<Event> Database::eventsByUid(const QString& calendarId, const QString& uid
   while (query.next()) {
     result.append(eventFromQuery(query));
   }
-  return result;
+  return hydrateProviderResources(&result, errorMessage) ? result : QList<Event>{};
 }
 
 QList<Event> Database::eventsForCalendars(const QStringList& calendarIds,
@@ -3319,7 +3703,7 @@ QList<Event> Database::eventsForCalendars(const QStringList& calendarIds,
   while (query.next()) {
     result.append(eventFromQuery(query));
   }
-  return result;
+  return hydrateProviderResources(&result, errorMessage) ? result : QList<Event>{};
 }
 
 QList<Event> Database::eventsBetween(const QDateTime& startUtc, const QDateTime& endUtc,
@@ -3426,8 +3810,19 @@ QList<Event> Database::eventsBetweenInternal(const QDateTime& startUtc,
   while (query.next()) {
     candidates.append(eventFromQuery(query));
   }
-  const QList<Event> expanded =
-      RecurrenceExpander::expand(candidates, startUtc, endUtc).occurrences;
+  if (!hydrateProviderResources(&candidates, errorMessage)) {
+    return {};
+  }
+  const RecurrenceExpansionResult expansion =
+      RecurrenceExpander::expand(candidates, startUtc, endUtc);
+  if (expansion.truncated) {
+    if (errorMessage != nullptr) {
+      *errorMessage =
+          QStringLiteral("Calendar recurrence expansion exceeded its safe work limit");
+    }
+    return {};
+  }
+  const QList<Event>& expanded = expansion.occurrences;
   if (!invitationsOnly) {
     return expanded;
   }
@@ -3623,7 +4018,8 @@ bool Database::completeOutbox(const qint64 id, const Event* remoteEvent,
 bool Database::completeOutboxWithRemoteSyncBatch(
     const qint64 id, const Event* remoteEvent, const Calendar& calendar,
     const QList<Event>& events, const QStringList& deletedRemoteIds,
-    const QStringList& prunedRemoteIds, QString* errorMessage) {
+    const QStringList& prunedRemoteIds, QString* errorMessage,
+    const QList<ProviderResource>& providerResources) {
   if (!m_database.transaction()) {
     if (errorMessage != nullptr) {
       *errorMessage = m_database.lastError().text();
@@ -3632,7 +4028,7 @@ bool Database::completeOutboxWithRemoteSyncBatch(
   }
   if (!completeOutboxInternal(id, remoteEvent, false, errorMessage) ||
       !applyRemoteSyncBatch(calendar, events, deletedRemoteIds, prunedRemoteIds,
-                            errorMessage)) {
+                            errorMessage, providerResources)) {
     m_database.rollback();
     return false;
   }
@@ -3662,7 +4058,7 @@ bool Database::completeOutboxInternal(const qint64 id, const Event* remoteEvent,
   };
   QSqlQuery itemQuery(m_database);
   itemQuery.prepare(QStringLiteral(R"SQL(
-    SELECT o.event_id,o.operation,e.calendar_id,e.uid,e.recurrence_id
+    SELECT o.event_id,o.operation,e.calendar_id,e.uid,e.recurrence_id,e.remote_id
     FROM outbox o LEFT JOIN events e ON e.id=o.event_id WHERE o.id=?
   )SQL"));
   itemQuery.addBindValue(id);
@@ -3681,6 +4077,7 @@ bool Database::completeOutboxInternal(const qint64 id, const Event* remoteEvent,
   const QString eventCalendarId = itemQuery.value(2).toString();
   const QString eventUid = itemQuery.value(3).toString();
   const QString eventRecurrenceId = itemQuery.value(4).toString();
+  const QString eventRemoteId = itemQuery.value(5).toString();
 
   QSqlQuery finishQuery(m_database);
   finishQuery.prepare(
@@ -3739,6 +4136,11 @@ bool Database::completeOutboxInternal(const qint64 id, const Event* remoteEvent,
       if (errorMessage != nullptr) {
         *errorMessage = sqlError(removalQuery, QStringLiteral("finish removal"));
       }
+      rollback();
+      return false;
+    }
+    if (!eventCalendarId.isEmpty() && !eventRemoteId.isEmpty() &&
+        !removeOrphanedProviderResources(eventCalendarId, errorMessage)) {
       rollback();
       return false;
     }

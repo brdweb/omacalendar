@@ -21,6 +21,15 @@ rotation. PKCE protects each authorization code, and each user's refresh token
 is stored by the desktop Secret Service (`secret-tool`) rather than in the
 calendar database.
 
+## Production verification status
+
+Google approved OmaCalendar's production OAuth branding and requested Calendar
+scopes; Branding and Data Access both showed verified status when checked on
+2026-09-06. Before the beta is accepted, a new external account that was never
+on the test-user allowlist must still complete code exchange, calendar
+discovery, one event write, Secret Service token persistence, and app/daemon
+restart without an unverified-app bypass.
+
 ## 1. Project configuration
 
 In a disposable Google Cloud project, enable the Google Calendar API and
@@ -38,11 +47,12 @@ previously connected Google account must complete **Reauthorize** once.
 
 Google's current desktop-app setup is also described in its
 [Calendar quickstart](https://developers.google.com/workspace/calendar/api/quickstart/go).
-Google may limit refresh-token lifetime while an external consent screen is in
-Testing status, so account for that during a long-running acceptance pass.
-Add every acceptance-test Google account under **Google Auth Platform →
-Audience → Test users**. The unverified-app warning is expected while the app
-is in Testing; it does not indicate that the loopback callback failed.
+Google may limit refresh-token lifetime while a separate development consent
+screen is in Testing status, so account for that during a long-running
+development pass. Add development-project accounts under **Google Auth Platform
+→ Audience → Test users**. An unverified-app warning is expected only for such
+an unverified development project; it does not indicate that the loopback
+callback failed.
 
 ## 2. Build and launch OmaCalendar
 
@@ -83,7 +93,7 @@ The implementation follows Google's recommended
 [OAuth flow for installed desktop apps](https://developers.google.com/identity/protocols/oauth2/native-app).
 Do not paste the browser callback URL anywhere; the app handles it locally.
 
-## 4. Remove the unverified-app warning for a public release
+## 4. Production verification procedure
 
 The repository provides the public pages needed for Google's OAuth review:
 
@@ -91,9 +101,10 @@ The repository provides the public pages needed for Google's OAuth review:
 - privacy policy: `https://omacalendar.brdweb.com/privacy.html`
 - terms of use: `https://omacalendar.brdweb.com/terms.html`
 
-Before submitting, publish those pages, verify ownership of the authorized
-domain in Google Search Console, and make the product name, support email,
-homepage, privacy-policy URL, and requested scopes match the application.
+For a new or replacement OAuth project, publish those pages, verify ownership
+of the authorized domain in Google Search Console, and make the product name,
+support email, homepage, privacy-policy URL, and requested scopes match the
+application.
 Add all three scopes above under **Google Auth Platform → Data Access** before
 testing the updated consent flow.
 Because the Calendar scopes are sensitive, prepare a short screen-recording
@@ -104,8 +115,9 @@ provide the scope justifications and video, and submit it for Google review.
 
 The project owner must perform the Cloud Console submission from the account
 that owns the OAuth project. Google, not the application build, removes the
-warning after approval. Keep the app in Testing with explicitly listed test
-users until the public-facing pages and consent-screen details are live.
+warning after approval. OmaCalendar's production project has completed this
+review; repeat it if the public identity, client, or requested scopes materially
+change.
 
 ## 5. Test matrix
 

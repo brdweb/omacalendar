@@ -42,6 +42,29 @@ QString propertyText(icalcomponent* component, icalproperty_kind kind) {
   return fromIcal(icalproperty_get_value_as_string(property));
 }
 
+QString recurrenceProperties(icalcomponent* component) {
+  QStringList lines;
+  for (const auto kind : {ICAL_RRULE_PROPERTY, ICAL_RDATE_PROPERTY,
+                          ICAL_EXDATE_PROPERTY, ICAL_EXRULE_PROPERTY}) {
+    for (auto* property = icalcomponent_get_first_property(component, kind);
+         property != nullptr;
+         property = icalcomponent_get_next_property(component, kind)) {
+      char* encoded = icalproperty_as_ical_string_r(property);
+      if (encoded == nullptr) continue;
+      QString line = QString::fromUtf8(encoded);
+      icalmemory_free_buffer(encoded);
+      line.replace(QStringLiteral("\r\n "), QString());
+      line.replace(QStringLiteral("\r\n\t"), QString());
+      lines.append(line.trimmed());
+    }
+  }
+  // Preserve the historical representation for the common single-RRULE case.
+  if (lines.size() == 1 && lines.first().startsWith(QStringLiteral("RRULE:"))) {
+    return lines.first().mid(6);
+  }
+  return lines.join(QLatin1Char('\n'));
+}
+
 QString textProperty(icalcomponent* component, icalproperty_kind kind) {
   icalproperty* property = icalcomponent_get_first_property(component, kind);
   if (property == nullptr) {
@@ -1032,7 +1055,6 @@ ICalendarParseResult ICalendarCodec::parse(const QByteArray& payload) {
     return result;
   }
 
-  const QString rawPayload = QString::fromUtf8(payload);
   for (qsizetype index = 0; index < components.size(); ++index) {
     icalcomponent* component = components.at(index);
     Event event;
@@ -1148,7 +1170,9 @@ ICalendarParseResult ICalendarCodec::parse(const QByteArray& payload) {
       event.sequence = icalproperty_get_sequence(property);
     }
 
-    event.recurrenceRule = propertyText(component, ICAL_RRULE_PROPERTY);
+    // ICS caches and local imports intentionally discard the whole feed body.
+    // Retain the complete recurrence set without copying that body per event.
+    event.recurrenceRule = recurrenceProperties(component);
     event.recurrenceId = recurrenceId(component);
     for (icalcomponent* alarm : alarmComponents(component)) {
       const std::optional<QJsonObject> reminder = reminderFromAlarm(alarm);
@@ -1156,8 +1180,6 @@ ICalendarParseResult ICalendarCodec::parse(const QByteArray& payload) {
         event.reminders.append(*reminder);
       }
     }
-    event.rawPayload = rawPayload;
-    event.rawFormat = QStringLiteral("text/calendar");
     result.events.append(event);
   }
 
@@ -1302,17 +1324,32 @@ ICalendarSerializeResult ICalendarCodec::serialize(const Event& event,
   }
 
   if (!event.recurrenceRule.isEmpty()) {
-    QString rule = event.recurrenceRule.trimmed();
-    if (rule.startsWith(QStringLiteral("RRULE:"), Qt::CaseInsensitive)) {
-      rule.remove(0, 6);
-    }
-    icalproperty* property = icalproperty_new_from_string(
-        (QStringLiteral("RRULE:") + rule).toUtf8().constData());
-    if (!addProperty(component, property)) {
-      result.error =
-          serializationError(QStringLiteral("invalid_recurrence_rule"),
-                             QStringLiteral("RRULE is not valid RFC 5545 syntax"));
-      return result;
+    QString rules = event.recurrenceRule;
+    rules.replace(QStringLiteral("\r\n "), QString());
+    rules.replace(QStringLiteral("\r\n\t"), QString());
+    rules.replace(QStringLiteral("\r\n"), QStringLiteral("\n"));
+    for (QString line : rules.split(QLatin1Char('\n'), Qt::SkipEmptyParts)) {
+      line = line.trimmed();
+      if (line.startsWith(QStringLiteral("FREQ="), Qt::CaseInsensitive)) {
+        line.prepend(QStringLiteral("RRULE:"));
+      }
+      icalproperty* property = icalproperty_new_from_string(line.toUtf8().constData());
+      const auto kind =
+          property == nullptr ? ICAL_NO_PROPERTY : icalproperty_isa(property);
+      if (kind != ICAL_RRULE_PROPERTY && kind != ICAL_RDATE_PROPERTY &&
+          kind != ICAL_EXDATE_PROPERTY && kind != ICAL_EXRULE_PROPERTY) {
+        if (property != nullptr) icalproperty_free(property);
+        result.error = serializationError(
+            QStringLiteral("invalid_recurrence_rule"),
+            QStringLiteral("Recurrence set is not valid RFC 5545 syntax"));
+        return result;
+      }
+      if (!addProperty(component, property)) {
+        result.error =
+            serializationError(QStringLiteral("allocation_failed"),
+                               QStringLiteral("Unable to serialize recurrence"));
+        return result;
+      }
     }
   }
 

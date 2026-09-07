@@ -53,6 +53,7 @@ Item {
                 spacing: 10
 
                 Text {
+                    textFormat: Text.PlainText
                     Layout.preferredWidth: 54
                     text: qsTr("all-day\nspanning")
                     color: Theme.mutedText
@@ -105,6 +106,7 @@ Item {
                     color: Theme.alpha(Theme.accent, 0.24)
                     border.color: Theme.accent
                     Text {
+                        textFormat: Text.PlainText
                         anchors.centerIn: parent
                         text: qsTr("‹ day")
                         color: Theme.text
@@ -134,6 +136,7 @@ Item {
                     color: Theme.alpha(Theme.accent, 0.24)
                     border.color: Theme.accent
                     Text {
+                        textFormat: Text.PlainText
                         anchors.centerIn: parent
                         text: qsTr("day ›")
                         color: Theme.text
@@ -181,6 +184,7 @@ Item {
                         width: timeline.width
                         height: 1
                         Text {
+                            textFormat: Text.PlainText
                             width: 55
                             anchors.right: hourLine.left
                             anchors.rightMargin: 10

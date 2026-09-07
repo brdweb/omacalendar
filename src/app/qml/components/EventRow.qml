@@ -78,6 +78,7 @@ ItemDelegate {
             Layout.rightMargin: 12
             spacing: 3
             Text {
+                textFormat: Text.PlainText
                 Layout.fillWidth: true
                 text: root.eventData.summary || qsTr("Untitled event")
                 color: Theme.text
@@ -86,6 +87,7 @@ ItemDelegate {
                 elide: Text.ElideRight
             }
             Text {
+                textFormat: Text.PlainText
                 Layout.fillWidth: true
                 text: {
                     const prefix = root.showDate
@@ -107,6 +109,7 @@ ItemDelegate {
                 elide: Text.ElideRight
             }
             Text {
+                textFormat: Text.PlainText
                 visible: root.continuationText.length > 0
                          || Boolean(root.eventData.organizer
                                     && (root.eventData.organizer.displayName

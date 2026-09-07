@@ -67,6 +67,7 @@ Item {
                         anchors.centerIn: parent
                         spacing: 1
                         Text {
+                            textFormat: Text.PlainText
                             anchors.horizontalCenter: parent.horizontalCenter
                             text: Qt.formatDate(dayHeader.dateValue, "ddd").toUpperCase()
                             color: Theme.mutedText
@@ -74,6 +75,7 @@ Item {
                             font.weight: Font.DemiBold
                         }
                         Text {
+                            textFormat: Text.PlainText
                             anchors.horizontalCenter: parent.horizontalCenter
                             text: dayHeader.dateValue.getDate()
                             color: root.sameDate(dayHeader.dateValue, new Date())
@@ -109,6 +111,7 @@ Item {
                 anchors.rightMargin: root.rightGutter
                 spacing: 0
                 Text {
+                    textFormat: Text.PlainText
                     Layout.preferredWidth: 58
                     text: qsTr("all-day\nspanning")
                     color: Theme.mutedText
@@ -165,6 +168,7 @@ Item {
                                 }
                             }
                             Text {
+                                textFormat: Text.PlainText
                                 visible: allDayColumn.dayEvents.length > 2
                                 anchors.horizontalCenter: parent.horizontalCenter
                                 text: "+" + (allDayColumn.dayEvents.length - 2) + qsTr(" more")
@@ -196,6 +200,7 @@ Item {
                     color: Theme.alpha(Theme.accent, 0.24)
                     border.color: Theme.accent
                     Text {
+                        textFormat: Text.PlainText
                         anchors.centerIn: parent
                         text: qsTr("‹ week")
                         color: Theme.text
@@ -226,6 +231,7 @@ Item {
                     color: Theme.alpha(Theme.accent, 0.24)
                     border.color: Theme.accent
                     Text {
+                        textFormat: Text.PlainText
                         anchors.centerIn: parent
                         text: qsTr("week ›")
                         color: Theme.text
@@ -285,6 +291,7 @@ Item {
                         width: weekTimeline.width
                         height: 1
                         Text {
+                            textFormat: Text.PlainText
                             width: 50
                             anchors.right: hourRule.left
                             anchors.rightMargin: 8

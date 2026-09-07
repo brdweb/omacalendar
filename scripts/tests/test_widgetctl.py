@@ -17,11 +17,15 @@ REPOSITORY = Path(__file__).resolve().parents[2]
 WIDGETCTL = REPOSITORY / "scripts" / "omacalendar-widgetctl"
 PLUGIN_ID = "org.omacalendar.widget"
 CLOCK_ID = "omarchy.clock"
+OFFICIAL_SOURCE = "https://github.com/brdweb/omacalendar-widget.git"
+OFFICIAL_REF = "v0.1.0-beta.1"
+VERIFIED_COMMIT = "a" * 40
 
 
 FAKE_COMMAND = r'''#!/usr/bin/env python3
 import json
 import os
+import shutil
 import sys
 from pathlib import Path
 
@@ -89,6 +93,25 @@ elif name == "systemctl":
         pass
     else:
         fail("unexpected systemctl arguments: " + repr(sys.argv[1:]))
+elif name == "git":
+    arguments = sys.argv[1:]
+    if arguments and arguments[0] == "clone":
+        try:
+            source_ref = arguments[arguments.index("--branch") + 1]
+        except (ValueError, IndexError):
+            fail("clone did not specify an explicit branch or tag")
+        if source_ref != "v0.1.0-beta.1":
+            fail("unexpected source ref: " + source_ref)
+        source = Path(os.environ["FAKE_WIDGET_SOURCE"])
+        destination = Path(arguments[-1])
+        shutil.copytree(source, destination)
+        (destination / ".git").mkdir()
+    elif len(arguments) == 4 and arguments[0] == "-C" and arguments[2:] == [
+        "rev-parse", "HEAD^{commit}"
+    ]:
+        print(os.environ.get("FAKE_GIT_COMMIT", "a" * 40))
+    else:
+        fail("unexpected git arguments: " + repr(arguments))
 else:
     fail("unexpected fixture command: " + name)
 '''
@@ -173,13 +196,15 @@ class Fixture:
         fake = self.bin / "fixture-command"
         fake.write_text(FAKE_COMMAND)
         fake.chmod(0o755)
-        for command in ("omarchy", "omarchy-shell", "hyprctl", "systemctl"):
+        for command in ("omarchy", "omarchy-shell", "hyprctl", "systemctl", "git"):
             (self.bin / command).symlink_to(fake)
         self.environment = os.environ.copy()
         self.environment.update(
             HOME=str(self.home),
             OMARCHY_PATH=str(self.omarchy_path),
             PATH=str(self.bin) + os.pathsep + self.environment.get("PATH", ""),
+            FAKE_WIDGET_SOURCE=str(self.source),
+            FAKE_GIT_COMMIT=VERIFIED_COMMIT,
         )
         self.environment.pop("XDG_STATE_HOME", None)
 
@@ -223,6 +248,25 @@ class Fixture:
 
     def install(self, **kwargs) -> dict:
         payload, _ = self.run("install", "--source", str(self.source), **kwargs)
+        return payload
+
+    def install_network(
+        self,
+        *,
+        source_ref: str = OFFICIAL_REF,
+        source_commit: str = VERIFIED_COMMIT,
+        **kwargs,
+    ) -> dict:
+        payload, _ = self.run(
+            "install",
+            "--source",
+            OFFICIAL_SOURCE,
+            "--source-ref",
+            source_ref,
+            "--source-commit",
+            source_commit,
+            **kwargs,
+        )
         return payload
 
     def restore(self, **kwargs) -> dict:
@@ -334,6 +378,125 @@ class WidgetCtlTest(unittest.TestCase):
             "install", "--source", "https://example.test/fake-widget.git", expected=3
         )
         self.assertEqual(payload["error"]["code"], "untrusted_source")
+
+    def test_network_source_requires_exact_release_ref_and_commit(self) -> None:
+        fixture = Fixture()
+        self.addCleanup(fixture.close)
+        cases = (
+            ((), 2, "source_ref_required"),
+            (("--source-ref", OFFICIAL_REF), 2, "source_commit_required"),
+            (
+                (
+                    "--source-ref",
+                    "main",
+                    "--source-commit",
+                    VERIFIED_COMMIT,
+                ),
+                3,
+                "untrusted_source_ref",
+            ),
+            (
+                (
+                    "--source-ref",
+                    OFFICIAL_REF,
+                    "--source-commit",
+                    "abc123",
+                ),
+                3,
+                "invalid_source_commit",
+            ),
+        )
+        before_shell = fixture.shell.read_bytes()
+        before_bindings = fixture.bindings.read_bytes()
+        for arguments, exit_code, error_code in cases:
+            with self.subTest(error_code=error_code):
+                payload, _ = fixture.run(
+                    "install",
+                    "--source",
+                    OFFICIAL_SOURCE,
+                    *arguments,
+                    expected=exit_code,
+                )
+                self.assertEqual(payload["error"]["code"], error_code)
+                self.assertEqual(fixture.shell.read_bytes(), before_shell)
+                self.assertEqual(fixture.bindings.read_bytes(), before_bindings)
+                self.assertFalse(fixture.plugin.exists())
+                self.assertFalse(fixture.state.exists())
+
+    def test_network_source_verifies_and_records_exact_commit(self) -> None:
+        fixture = Fixture()
+        self.addCleanup(fixture.close)
+        payload = fixture.install_network()
+        self.assertEqual(payload["status"], "installed")
+        self.assertEqual(payload["sourceRef"], OFFICIAL_REF)
+        self.assertEqual(payload["sourceCommit"], VERIFIED_COMMIT)
+        self.assertEqual(payload["resolvedCommit"], VERIFIED_COMMIT)
+        self.assertFalse((fixture.plugin / ".git").exists())
+
+        marker = json.loads(
+            (fixture.plugin / ".omacalendar-widgetctl.json").read_text()
+        )
+        state = json.loads((fixture.state / "state.json").read_text())
+        for record in (marker, state):
+            self.assertEqual(record["sourceKind"], "network")
+            self.assertEqual(record["sourceRef"], OFFICIAL_REF)
+            self.assertEqual(record["sourceCommit"], VERIFIED_COMMIT)
+            self.assertEqual(record["resolvedCommit"], VERIFIED_COMMIT)
+
+        status, _ = fixture.run("status")
+        self.assertEqual(status["status"], "installed")
+        self.assertTrue(status["details"]["sourceVerified"])
+        self.assertEqual(status["details"]["resolvedCommit"], VERIFIED_COMMIT)
+
+        repeated = fixture.install_network()
+        self.assertEqual(repeated["status"], "already_installed")
+        self.assertEqual(repeated["resolvedCommit"], VERIFIED_COMMIT)
+
+    def test_network_source_rejects_commit_mismatch_before_activation(self) -> None:
+        fixture = Fixture()
+        self.addCleanup(fixture.close)
+        before_shell = fixture.shell.read_bytes()
+        before_bindings = fixture.bindings.read_bytes()
+        payload, _ = fixture.run(
+            "install",
+            "--source",
+            OFFICIAL_SOURCE,
+            "--source-ref",
+            OFFICIAL_REF,
+            "--source-commit",
+            VERIFIED_COMMIT,
+            expected=3,
+            environment={"FAKE_GIT_COMMIT": "b" * 40},
+        )
+        self.assertEqual(payload["error"]["code"], "source_commit_mismatch")
+        self.assertEqual(fixture.shell.read_bytes(), before_shell)
+        self.assertEqual(fixture.bindings.read_bytes(), before_bindings)
+        self.assertFalse(fixture.plugin.exists())
+        self.assertFalse(fixture.state.exists())
+
+    def test_network_install_without_recorded_provenance_requires_recovery(self) -> None:
+        fixture = Fixture()
+        self.addCleanup(fixture.close)
+        fixture.install_network()
+        state_path = fixture.state / "state.json"
+        state = json.loads(state_path.read_text())
+        del state["resolvedCommit"]
+        state_path.write_text(json.dumps(state) + "\n")
+
+        status, _ = fixture.run("status")
+        self.assertEqual(status["status"], "recovery_required")
+        self.assertFalse(status["details"]["sourceVerified"])
+        payload, _ = fixture.run(
+            "install",
+            "--source",
+            OFFICIAL_SOURCE,
+            "--source-ref",
+            OFFICIAL_REF,
+            "--source-commit",
+            VERIFIED_COMMIT,
+            expected=5,
+        )
+        self.assertEqual(payload["error"]["code"], "installed_source_unverified")
 
     def test_precondition_failures_do_not_touch_config(self) -> None:
         for name, fixture in (

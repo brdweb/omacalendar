@@ -31,8 +31,9 @@ struct ICalendarSerializeResult {
 };
 
 // Converts between the provider-neutral Event representation and RFC 5545
-// calendar resources. The raw source resource is retained on every parsed
-// event so a caller can persist or inspect the exact server representation.
+// calendar resources. Parsed Events deliberately do not own the raw source:
+// callers retain one lossless payload per provider resource and pass it
+// explicitly to patching operations.
 class ICalendarCodec final {
  public:
   [[nodiscard]] static ICalendarParseResult parse(const QByteArray& payload);

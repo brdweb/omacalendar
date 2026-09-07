@@ -2,7 +2,7 @@
 
 ## Supported versions
 
-`1.0.0-alpha` is an unsupported evaluation prerelease. Security fixes may be
+`1.0.0-beta.1` is an unsupported public-testing prerelease. Security fixes may be
 issued while it is evaluated, but it is not suitable for production or as the
 sole copy of calendar data. Stable support begins with 1.0; after that, only the
 latest minor release line receives security updates unless the compatibility

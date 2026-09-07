@@ -24,6 +24,7 @@ CheckBox {
                                           : control.checked ? Theme.accent : Theme.border
 
         Text {
+            textFormat: Text.PlainText
             anchors.centerIn: parent
             text: "✓"
             visible: control.checked
@@ -34,6 +35,7 @@ CheckBox {
     }
 
     contentItem: Text {
+        textFormat: Text.PlainText
         leftPadding: control.indicator.width + control.spacing
         text: control.text
         color: control.enabled ? Theme.text : Theme.alpha(Theme.mutedText, 0.65)

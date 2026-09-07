@@ -2,6 +2,7 @@
 
 #include <QByteArray>
 #include <QHash>
+#include <QIODevice>
 #include <QJsonObject>
 #include <QNetworkAccessManager>
 #include <QObject>
@@ -13,6 +14,8 @@
 #include "core/database.h"
 #include "core/secretstore.h"
 #include "sync/provider.h"
+
+class IcsServiceTest;
 
 namespace omacalendar::ics {
 
@@ -66,9 +69,14 @@ class IcsService final : public Provider {
                                            IcsError* error) const;
 
  private:
+  friend class ::IcsServiceTest;
+
   struct FetchContext;
 
   static bool sameOrigin(const QUrl& first, const QUrl& second);
+  static QString redirectErrorCode(const QUrl& origin, const QUrl& target,
+                                   bool includeCredentials);
+  static bool consumeReplyBytes(QIODevice* source, QByteArray* destination);
   static QString remoteIdentity(const Event& event);
   static QByteArray serializeEvents(const QList<Event>& events, IcsError* error);
   static QString safeFileName(const QString& value);

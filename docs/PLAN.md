@@ -68,9 +68,9 @@ The following evidence has passed in the current working tree. It is not a
 substitute for clean-checkout CI, live providers, a release-reference Omarchy
 VM, or the final owner pass.
 
-- Fresh warning-as-error builds pass the complete 20-test local matrix with GCC
+- Fresh warning-as-error builds pass the complete 21-test local matrix with GCC
   16.2.1 in Release mode and Clang 22.1.8 in RelWithDebInfo mode. A fresh Clang
-  22.1.8 Debug build with the desktop app target enabled also passes all 20
+  22.1.8 Debug build with the desktop app target enabled also passes the full
   tests under ASan and UBSan, with leak detection and halt-on-error enabled and
   no sanitizer diagnostics.
 - Database tests cover fresh/repeated schema 2 open, a schema 1 archive with

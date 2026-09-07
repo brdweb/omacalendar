@@ -540,12 +540,14 @@ Dialog {
                 Layout.fillWidth: true
                 spacing: 1
                 Text {
+                    textFormat: Text.PlainText
                     text: editor.editing ? qsTr("Event details") : qsTr("New event")
                     color: Theme.text
                     font.pixelSize: Theme.fontSize + 5
                     font.weight: Font.Bold
                 }
                 Text {
+                    textFormat: Text.PlainText
                     visible: editor.eventData.calendarName !== undefined
                     text: editor.eventData.calendarName || ""
                     color: Theme.mutedText
@@ -590,6 +592,7 @@ Dialog {
                     border.color: Theme.alpha(editor.eventData.conflict === true
                                               ? Theme.danger : Theme.info, 0.28)
                     Text {
+                        textFormat: Text.PlainText
                         id: stateMessage
                         anchors.fill: parent
                         anchors.margins: 10
@@ -640,6 +643,7 @@ Dialog {
                     rowSpacing: 8
 
                     Text {
+                        textFormat: Text.PlainText
                         text: qsTr("Starts")
                         color: Theme.mutedText
                         font.pixelSize: Theme.smallFontSize
@@ -663,6 +667,7 @@ Dialog {
                     Item { Layout.preferredWidth: 1 }
 
                     Text {
+                        textFormat: Text.PlainText
                         text: qsTr("Ends")
                         color: Theme.mutedText
                         font.pixelSize: Theme.smallFontSize
@@ -825,6 +830,7 @@ Dialog {
                     Accessible.name: qsTr("Recurring event edit scope")
                 }
                 Text {
+                    textFormat: Text.PlainText
                     visible: editor.editing && editor.recurring
                              && !editor.futureScopeSupported
                     Layout.fillWidth: true
@@ -836,6 +842,7 @@ Dialog {
                     wrapMode: Text.Wrap
                 }
                 Text {
+                    textFormat: Text.PlainText
                     visible: !editor.readOnly && !editor.recurrenceEditingSupported
                     Layout.fillWidth: true
                     text: qsTr("This calendar cannot write recurring events. Existing recurrence data is preserved.")
@@ -877,6 +884,7 @@ Dialog {
                     Accessible.name: qsTr("Guest notification policy")
                 }
                 Text {
+                    textFormat: Text.PlainText
                     visible: !editor.readOnly && !editor.attendeeEditingSupported
                     Layout.fillWidth: true
                     text: editor.activeProvider === "caldav"
@@ -924,6 +932,7 @@ Dialog {
                             Layout.fillWidth: true
                             spacing: 2
                             Text {
+                                textFormat: Text.PlainText
                                 objectName: "reminderLabel-" + reminderRow.index
                                 Layout.fillWidth: true
                                 text: reminderRow.kind === "absolute"
@@ -944,6 +953,7 @@ Dialog {
                                 Accessible.name: text
                             }
                             Text {
+                                textFormat: Text.PlainText
                                 visible: reminderRow.kind !== "relative"
                                 Layout.fillWidth: true
                                 text: reminderRow.kind === "absolute"
@@ -992,6 +1002,7 @@ Dialog {
                     }
                 }
                 Text {
+                    textFormat: Text.PlainText
                     visible: !editor.readOnly && !editor.reminderEditingSupported
                     Layout.fillWidth: true
                     text: qsTr("This calendar cannot write reminders. Existing provider reminders are preserved.")
@@ -1001,6 +1012,7 @@ Dialog {
                 }
 
                 Text {
+                    textFormat: Text.PlainText
                     visible: editor.validationError.length > 0
                     Layout.fillWidth: true
                     text: editor.validationError

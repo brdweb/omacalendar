@@ -26,7 +26,7 @@ QString notificationPrivacy(const Database* database) {
   return database == nullptr ? QStringLiteral("generic")
                              : database
                                    ->setting(QStringLiteral("notificationPrivacy"),
-                                             QStringLiteral("full_details"))
+                                             QStringLiteral("generic"))
                                    .toString();
 }
 
@@ -82,7 +82,7 @@ QString invitationFingerprint(const Event& event) {
 
 QString eventTitle(const Event& event) {
   return event.summary.trimmed().isEmpty() ? QStringLiteral("Calendar event")
-                                           : event.summary;
+                                           : event.summary.toHtmlEscaped();
 }
 
 }  // namespace
@@ -442,7 +442,7 @@ CalendarNotification ReminderScheduler::reminderNotification(
     notification.body = event.allDay ? QStringLiteral("All day")
                                      : start.toString(QStringLiteral("ddd h:mm AP"));
     if (!event.location.isEmpty()) {
-      notification.body += QStringLiteral(" — ") + event.location;
+      notification.body += QStringLiteral(" — ") + event.location.toHtmlEscaped();
     }
   } else if (privacy == QStringLiteral("title_only")) {
     notification.summary = eventTitle(event);
@@ -472,14 +472,14 @@ CalendarNotification ReminderScheduler::invitationNotification(
   const QString privacy = notificationPrivacy(m_database);
   notification.summary = changed ? QStringLiteral("Invitation updated")
                                  : QStringLiteral("New calendar invitation");
+  if (event.deleted ||
+      event.status.compare(QStringLiteral("cancelled"), Qt::CaseInsensitive) == 0) {
+    notification.summary = QStringLiteral("Invitation cancelled");
+  }
   if (privacy == QStringLiteral("full_details")) {
     notification.body = eventTitle(event);
-    if (event.deleted ||
-        event.status.compare(QStringLiteral("cancelled"), Qt::CaseInsensitive) == 0) {
-      notification.summary = QStringLiteral("Invitation cancelled");
-    }
     if (!event.location.isEmpty()) {
-      notification.body += QStringLiteral(" — ") + event.location;
+      notification.body += QStringLiteral(" — ") + event.location.toHtmlEscaped();
     }
   } else if (privacy == QStringLiteral("title_only")) {
     notification.body = eventTitle(event);

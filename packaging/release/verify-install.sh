@@ -9,6 +9,7 @@ fi
 staged_root=${1%/}
 required_paths=(
   usr/bin/omacalendar
+  usr/bin/omacalendar-widgetctl
   usr/bin/omacalendarctl
   usr/bin/omacalendard
   usr/lib/systemd/user/omacalendard.service
@@ -16,6 +17,9 @@ required_paths=(
   usr/share/applications/org.omacalendar.OmaCalendar.desktop
   usr/share/icons/hicolor/scalable/apps/org.omacalendar.OmaCalendar.svg
   usr/share/metainfo/org.omacalendar.OmaCalendar.metainfo.xml
+  usr/share/doc/OmaCalendar/docs/GETTING_STARTED.md
+  usr/share/doc/OmaCalendar/docs/GOOGLE_TESTING.md
+  usr/share/doc/OmaCalendar/docs/RELEASE.md
 )
 
 for relative_path in "${required_paths[@]}"; do
@@ -25,7 +29,7 @@ for relative_path in "${required_paths[@]}"; do
   fi
 done
 
-for binary in omacalendar omacalendarctl omacalendard; do
+for binary in omacalendar omacalendar-widgetctl omacalendarctl omacalendard; do
   if [[ ! -x "${staged_root}/usr/bin/${binary}" ]]; then
     echo "installed binary is not executable: usr/bin/${binary}" >&2
     exit 1

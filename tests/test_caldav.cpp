@@ -502,6 +502,9 @@ class CalDavHardeningTest final : public QObject {
   void attendeeRsvpPatchPreservesProviderParameters();
   void scopedRecurrenceMutationsPreserveSiblings();
   void multigetBatchesAreBounded();
+  void syncBudgetDeduplicatesAndCapsWork();
+  void inlineCalendarResponsesRespectBudgets();
+  void futureRangeProbeCleansUpOnBudgetFailure();
   void readResourceUsesCalendarMultiGetReport();
   void scheduleReplyHeaderIsExplicit();
   void moveRequestIsConditionalAndSameOrigin();
@@ -1022,6 +1025,91 @@ void CalDavHardeningTest::multigetBatchesAreBounded() {
   QCOMPARE(total, hrefs.size());
   QCOMPARE(batches.first().first(), hrefs.first());
   QCOMPARE(batches.last().last(), hrefs.last());
+}
+
+void CalDavHardeningTest::syncBudgetDeduplicatesAndCapsWork() {
+  caldav::CalDavSync::ResourceBudget budget(2, 2, 10);
+  const QUrl base(QStringLiteral("https://calendar.example.test/dav/team/"));
+  QStringList unique;
+  QString code;
+  QString message;
+  QVERIFY(budget.deduplicateHrefs(
+      base,
+      {QStringLiteral("event%20one.ics"),
+       QStringLiteral("https://CALENDAR.example.test:443/dav/team/event%20one.ics"),
+       QStringLiteral("nested/../event-two.ics")},
+      &unique, &code, &message));
+  QCOMPARE(unique, QStringList({QStringLiteral("event%20one.ics"),
+                                QStringLiteral("nested/../event-two.ics")}));
+  QCOMPARE(budget.canonicalResources.size(), 2);
+
+  QVERIFY(!budget.reserveResource(
+      QStringLiteral("https://calendar.example.test/dav/team/event-three.ics"), &code,
+      &message));
+  QCOMPARE(code, QStringLiteral("sync_resource_limit"));
+
+  code.clear();
+  QVERIFY(budget.beginRequest(&code, &message));
+  QVERIFY(budget.beginRequest(&code, &message));
+  QVERIFY(!budget.beginRequest(&code, &message));
+  QCOMPARE(code, QStringLiteral("sync_request_limit"));
+
+  code.clear();
+  QVERIFY(budget.consumeResponse(6, &code, &message));
+  QVERIFY(budget.consumeResponse(4, &code, &message));
+  QVERIFY(!budget.consumeResponse(1, &code, &message));
+  QCOMPARE(code, QStringLiteral("sync_response_budget_exceeded"));
+}
+
+void CalDavHardeningTest::inlineCalendarResponsesRespectBudgets() {
+  for (const bool byteLimit : {false, true}) {
+    QTemporaryDir helperDirectory;
+    QByteArray originalPath;
+    QVERIFY(installFastSecretTool(&helperDirectory, &originalPath));
+    CalDavRangeFixture server;
+    QVERIFY(server.listen());
+    Database database;
+    QString error;
+    QVERIFY(database.open(QStringLiteral(":memory:"), &error));
+    caldav::CalDavSync sync(&database);
+    sync.m_resourceBudgetLimits = caldav::CalDavSync::ResourceBudget(
+        byteLimit ? 20000 : 0, 256, byteLimit ? 1 : 64LL * 1024 * 1024);
+    const QString accountId = sync.createAccount(
+        server.endpoint().toString(), QStringLiteral("fixture-user"),
+        QStringLiteral("fixture-password"), QStringLiteral("Budget fixture"), &error);
+    QVERIFY(!accountId.isEmpty());
+    const QString expected = byteLimit ? QStringLiteral("sync_response_budget_exceeded")
+                                       : QStringLiteral("sync_resource_limit");
+    QTRY_COMPARE_WITH_TIMEOUT(
+        sync.status(accountId).value(QStringLiteral("errorCode")).toString(), expected,
+        5000);
+    const auto calendars = database.calendars(accountId);
+    QVERIFY(!calendars.isEmpty());
+    QVERIFY(database.eventsForCalendars({calendars.first().id}).isEmpty());
+    qputenv("PATH", originalPath);
+  }
+}
+
+void CalDavHardeningTest::futureRangeProbeCleansUpOnBudgetFailure() {
+  QTemporaryDir helperDirectory;
+  QByteArray originalPath;
+  QVERIFY(installFastSecretTool(&helperDirectory, &originalPath));
+  CalDavRangeFixture server;
+  QVERIFY(server.listen());
+  Database database;
+  QString error;
+  QVERIFY(database.open(QStringLiteral(":memory:"), &error));
+  caldav::CalDavSync sync(&database);
+  const QString accountId = setupRangeAccount(&server, &database, &sync, &error);
+  QVERIFY2(!accountId.isEmpty(), qPrintable(error));
+  sync.m_resourceBudgetLimits = caldav::CalDavSync::ResourceBudget(1);
+  const OutboxItem result = queueFutureMutation(&database, &sync, accountId, &error);
+  QVERIFY2(result.state == OutboxState::Blocked, qPrintable(error));
+  QCOMPARE(result.errorCode, QStringLiteral("sync_resource_limit"));
+  QCOMPARE(server.probePutCount(), 1);
+  QCOMPARE(server.probeDeleteCount(), 2);
+  QVERIFY(!server.probeResourceExists());
+  qputenv("PATH", originalPath);
 }
 
 void CalDavHardeningTest::readResourceUsesCalendarMultiGetReport() {

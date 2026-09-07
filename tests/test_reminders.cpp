@@ -140,6 +140,77 @@ class ReminderSchedulerTest final : public QObject {
   Q_OBJECT
 
  private slots:
+  void missingPrivacySettingDefaultsToGeneric() {
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    Database database;
+    QString error;
+    QVERIFY2(database.open(directory.filePath(QStringLiteral("store.sqlite")), &error),
+             qPrintable(error));
+    QDateTime current(QDate(2027, 1, 11), QTime(12, 0), QTimeZone::UTC);
+    FakeNotificationBackend backend;
+    ReminderScheduler scheduler(
+        &database, &backend, [&current]() { return current; },
+        [](const QUrl&) { return true; });
+
+    Event event = reminderEvent(QStringLiteral("Private appointment"),
+                                current.addSecs(10 * 60), QJsonArray{20});
+    QVERIFY2(database.saveLocalEvent(&event, OutboxOperation::Create, &error),
+             qPrintable(error));
+    scheduler.checkNow();
+    QCOMPARE(backend.sent.size(), 1);
+    QCOMPARE(backend.sent.constFirst().summary, QStringLiteral("Calendar reminder"));
+    QCOMPARE(backend.sent.constFirst().body,
+             QStringLiteral("An event is starting soon"));
+    QVERIFY(!backend.sent.constFirst().summary.contains(event.summary));
+    QVERIFY(!backend.sent.constFirst().body.contains(event.location));
+  }
+
+  void notificationMetadataIsEscapedBeforeDelivery() {
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    Database database;
+    QString error;
+    QVERIFY2(database.open(directory.filePath(QStringLiteral("store.sqlite")), &error),
+             qPrintable(error));
+    QVERIFY(database.setSetting(QStringLiteral("notificationPrivacy"),
+                                QStringLiteral("full_details"), &error));
+    QDateTime current(QDate(2027, 1, 11), QTime(13, 0), QTimeZone::UTC);
+    FakeNotificationBackend backend;
+    ReminderScheduler scheduler(
+        &database, &backend, [&current]() { return current; },
+        [](const QUrl&) { return true; });
+    scheduler.start();
+    scheduler.stop();
+    QCoreApplication::processEvents();
+
+    Event reminder = reminderEvent(QStringLiteral("<b>Board & Budget</b>"),
+                                   current.addSecs(10 * 60), QJsonArray{20});
+    reminder.location = QStringLiteral("<img src='file:///etc/passwd'> & room");
+    QVERIFY2(database.saveLocalEvent(&reminder, OutboxOperation::Create, &error),
+             qPrintable(error));
+    scheduler.checkNow();
+    QCOMPARE(backend.sent.size(), 1);
+    QCOMPARE(backend.sent.constLast().summary,
+             QStringLiteral("&lt;b&gt;Board &amp; Budget&lt;/b&gt;"));
+    QVERIFY(backend.sent.constLast().body.contains(
+        QStringLiteral("&lt;img src='file:///etc/passwd'&gt; &amp; room")));
+    QVERIFY(!backend.sent.constLast().body.contains(QStringLiteral("<img")));
+
+    Event invitation = invitationEvent(
+        QStringLiteral("<a href='file:///etc/passwd'>Open</a>"), current.addDays(1));
+    invitation.location = QStringLiteral("<b>Secret room</b>");
+    QVERIFY2(database.saveLocalEvent(&invitation, OutboxOperation::Create, &error),
+             qPrintable(error));
+    scheduler.eventsChanged({invitation.calendarId});
+    QCOMPARE(backend.sent.size(), 2);
+    QCOMPARE(backend.sent.constLast().body,
+             QStringLiteral("&lt;a href='file:///etc/passwd'&gt;Open&lt;/a&gt; — "
+                            "&lt;b&gt;Secret room&lt;/b&gt;"));
+    QVERIFY(!backend.sent.constLast().body.contains(QStringLiteral("<a")));
+    QVERIFY(!backend.sent.constLast().body.contains(QStringLiteral("<b")));
+  }
+
   void multipleAlarmsPrivacyAndDuplicateSuppression() {
     QTemporaryDir directory;
     QVERIFY(directory.isValid());
@@ -340,6 +411,8 @@ class ReminderSchedulerTest final : public QObject {
     QString error;
     QVERIFY2(database.open(directory.filePath(QStringLiteral("store.sqlite")), &error),
              qPrintable(error));
+    QVERIFY(database.setSetting(QStringLiteral("notificationPrivacy"),
+                                QStringLiteral("full_details"), &error));
     QDateTime current(QDate(2027, 3, 2), QTime(12, 0), QTimeZone::UTC);
     FakeNotificationBackend backend;
     ReminderScheduler scheduler(

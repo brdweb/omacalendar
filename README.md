@@ -6,11 +6,11 @@ booking services, natural-language entry, or an OmaCalendar cloud service. An
 optional Quickshell companion is developed and released independently.
 
 > [!WARNING]
-> `1.0.0-alpha` is an unsupported evaluation prerelease. Automated suites
+> `1.0.0-beta.1` is an unsupported public-testing prerelease. Automated suites
 > exercise the local database, provider mutation machinery, desktop, IPC,
 > and reminders, but the full live-provider and stable owner-acceptance
-> matrices are not complete. Use test or disposable calendars and never make an
-> alpha build the only copy of important calendar data.
+> matrices are not complete. Use test or disposable calendars and never make a
+> beta build the only copy of important calendar data.
 
 ## 1.0 scope
 
@@ -47,38 +47,38 @@ events; no maintainer account or calendar data is included.
 
 ![OmaCalendar event editor](docs/screenshots/event-editor.png)
 
-## Alpha status
+## Beta status
 
-The app is being qualified as `1.0.0-alpha` using IPC 2 and database schema 2.
+The app is being qualified as `1.0.0-beta.1` using IPC 2 and database schema 2.
 Local automated coverage currently includes the schema transition,
 daemon and provider contracts, local event/calendar workflows, reminders,
 recurrence, search, import/export, conflict handling, and desktop models. A
 staged `/usr` install and uninstall also pass. Narrow live development checks
-have passed against an isolated Radicale 3.7.8 instance and a public NASA HTTPS
-ICS feed.
+have passed against an isolated Radicale 3.8.0 instance and a public NASA HTTPS
+ICS feed, including persisted restart and completed refresh.
 
-The current local GCC build passes all 21 tests. Earlier clean matrices passed
-20 tests with GCC 16.2.1 Release and Clang 22.1.8 RelWithDebInfo under
-warnings-as-errors, plus a desktop-app-enabled Clang 22.1.8 Debug build under
-ASan and UBSan with no diagnostics. QML lint is clean, automated desktop smoke
-tests pass at scale factors 1, 1.25, and 2. The enforced
-100,000-event run measured p95 latency of 38.904 ms for agenda, 4.426 ms for
-indexed search, 87.223 ms for a full widget snapshot, and 0.403 ms for an
-unchanged snapshot in this development workspace.
+The candidate passes all 22 local GCC tests, including the reference-hardware
+performance gate. Clean hosted GCC Debug, Clang RelWithDebInfo, ASan/UBSan,
+and current-Arch package baseline jobs also pass. QML lint is clean and desktop
+smoke tests pass at scale factors 1, 1.25, and 2. The enforced 100,000-event
+reference-Omarchy run measured p95 latency of 45.183 ms for agenda, 5.158 ms for
+indexed search, 84.941 ms for a full widget snapshot, and 0.455 ms for an
+unchanged snapshot. Exact commits and workflow links are recorded in the
+[beta acceptance record](docs/releases/1.0.0-beta.1.md).
 
 These results do not qualify stable 1.0. Live Google writes, the full Radicale
 matrix, Nextcloud, Fastmail, authenticated ICS, a clean current-Omarchy VM,
-complete desktop workflow testing, clean-checkout CI/Arch package builds, and
-the final owner acceptance pass remain open.
+complete desktop workflow testing, and the final owner acceptance pass remain
+open.
 The detailed evidence and unchecked gates are maintained in [the implementation
 plan](docs/PLAN.md).
 
-Google Calendar access is currently in Google's OAuth verification stage and
-has not yet been approved for unrestricted public use. Until Google completes
-that review, authorization may be limited to configured test users and Google
-may display its unverified-app warning. Local calendars, CalDAV, ICS, and the
-widget's connection to the local OmaCalendar daemon do not depend on Google
-approval.
+Google has approved OmaCalendar's OAuth branding and requested Calendar scopes.
+The owner reports successful post-approval external-account login and sync.
+The exact-candidate write, token-persistence, and restart checks remain part of
+the owner acceptance pass. Local calendars,
+CalDAV, ICS, and the widget's connection to the local OmaCalendar daemon do not
+depend on Google authorization.
 
 ## Architecture
 
@@ -142,7 +142,7 @@ development package installation configured for `/usr`:
 cmake -S . -B build-release -G Ninja \
   -DCMAKE_BUILD_TYPE=Release \
   -DCMAKE_INSTALL_PREFIX=/usr \
-  -DOMACALENDAR_VERSION_SUFFIX=-alpha
+  -DOMACALENDAR_VERSION_SUFFIX=-beta.1
 cmake --build build-release --parallel
 DESTDIR="$PWD/stage" cmake --install build-release
 packaging/release/verify-install.sh "$PWD/stage"
@@ -207,14 +207,14 @@ shell history. Live-provider suites must use dedicated test accounts.
 - [Changelog](CHANGELOG.md)
 
 The release workflow produces checksummed archives, an SPDX SBOM, and GitHub
-artifact attestations. `1.0.0-alpha` uses its own non-production gate and is
-always marked as a GitHub prerelease; stable `1.0.0` remains blocked until every
-stable release gate and the owner acceptance pass are complete.
+artifact attestations. `1.0.0-beta.1` is always marked as a GitHub prerelease;
+stable `1.0.0` remains blocked until every stable release gate and the owner
+acceptance pass are complete.
 
 ## Project website
 
-- [OmaCalendar project site](https://brdweb.github.io/omacalendar/)
-- [Privacy policy](https://brdweb.github.io/omacalendar/privacy.html)
-- [Terms of use](https://brdweb.github.io/omacalendar/terms.html)
+- [OmaCalendar project site](https://omacalendar.brdweb.com/)
+- [Privacy policy](https://omacalendar.brdweb.com/privacy.html)
+- [Terms of use](https://omacalendar.brdweb.com/terms.html)
 
 OmaCalendar is released under the [MIT License](LICENSE).

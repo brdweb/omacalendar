@@ -86,6 +86,8 @@ Dialog {
         spacing: 12
 
         Text {
+            textFormat: Text.PlainText
+            objectName: "mutationEventSummary"
             Layout.fillWidth: true
             text: root.eventData.summary || qsTr("Untitled event")
             color: Theme.text
@@ -94,6 +96,7 @@ Dialog {
             wrapMode: Text.Wrap
         }
         Text {
+            textFormat: Text.PlainText
             visible: root.recurring
             Layout.fillWidth: true
             text: qsTr("Choose exactly which part of the recurring event to change.")
@@ -112,6 +115,7 @@ Dialog {
             Accessible.name: qsTr("Recurring event scope")
         }
         Text {
+            textFormat: Text.PlainText
             visible: root.hasGuests
             Layout.fillWidth: true
             text: qsTr("This event has guests. Choose whether the provider should notify them.")

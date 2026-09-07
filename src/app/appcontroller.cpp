@@ -8,6 +8,7 @@
 #include <QJsonDocument>
 #include <QJsonParseError>
 #include <QProcess>
+#include <QRegularExpression>
 #include <QSaveFile>
 #include <QStandardPaths>
 #include <QStringList>
@@ -22,6 +23,31 @@
 
 namespace omacalendar {
 namespace {
+
+constexpr auto kWidgetSourceUrl = "https://github.com/brdweb/omacalendar-widget.git";
+constexpr auto kWidgetSourceRef = "v0.1.0-beta.1";
+#ifndef OMACALENDAR_WIDGET_SOURCE_COMMIT
+#define OMACALENDAR_WIDGET_SOURCE_COMMIT "3940df1465bd5fa85541880058ac93745f69cfca"
+#endif
+constexpr auto kWidgetSourceCommit = OMACALENDAR_WIDGET_SOURCE_COMMIT;
+
+QUrl validatedExternalEventUrl(const QString& value) {
+  if (value.isEmpty() || value != value.trimmed()) {
+    return {};
+  }
+  const QUrl url(value, QUrl::StrictMode);
+  const QString scheme = url.scheme().toLower();
+  if (!url.isValid() || url.isRelative() || url.host().isEmpty() ||
+      (scheme != QStringLiteral("http") && scheme != QStringLiteral("https"))) {
+    return {};
+  }
+  return url;
+}
+
+bool isExactGitCommit(const QString& value) {
+  static const QRegularExpression expression(QStringLiteral("^[0-9a-f]{40}$"));
+  return expression.match(value).hasMatch();
+}
 
 QVariantList variantList(const QJsonValue& value, const QString& objectKey) {
   if (value.isArray()) {
@@ -72,7 +98,7 @@ AppController::AppController(QObject* parent) : QObject(parent) {
       {QStringLiteral("displayTimeZone"), QStringLiteral("")},
       {QStringLiteral("defaultDuration"), 60},
       {QStringLiteral("defaultCalendarId"), QStringLiteral("local-default")},
-      {QStringLiteral("notificationPrivacy"), QStringLiteral("full_details")},
+      {QStringLiteral("notificationPrivacy"), QStringLiteral("generic")},
       {QStringLiteral("currentView"), QStringLiteral("month")},
       {QStringLiteral("widgetConsentDecision"), QStringLiteral("")}};
   m_client.setAutoReconnect(true);
@@ -1179,7 +1205,29 @@ void AppController::undoLastMutation() {
        });
 }
 
+bool AppController::canOpenExternalEventUrl(const QString& value) const {
+  return validatedExternalEventUrl(value).isValid();
+}
+
+void AppController::openExternalEventUrl(const QString& value) {
+  const QUrl url = validatedExternalEventUrl(value);
+  if (!url.isValid()) {
+    setError(tr("Only valid HTTP or HTTPS event links can be opened"));
+    return;
+  }
+  if (!QDesktopServices::openUrl(url)) {
+    setError(tr("The event link could not be opened"));
+    return;
+  }
+  setError({});
+}
+
 void AppController::installWidget() {
+  const QString sourceCommit = QString::fromLatin1(kWidgetSourceCommit);
+  if (!isExactGitCommit(sourceCommit)) {
+    setError(tr("No verified OmaCalendar widget beta commit is configured"));
+    return;
+  }
   const QString executable =
       QStandardPaths::findExecutable(QStringLiteral("omacalendar-widgetctl"));
   if (executable.isEmpty()) {
@@ -1217,7 +1265,9 @@ void AppController::installWidget() {
           });
   process->start(executable,
                  {QStringLiteral("install"), QStringLiteral("--source"),
-                  QStringLiteral("https://github.com/brdweb/omacalendar-widget.git")});
+                  QString::fromLatin1(kWidgetSourceUrl), QStringLiteral("--source-ref"),
+                  QString::fromLatin1(kWidgetSourceRef),
+                  QStringLiteral("--source-commit"), sourceCommit});
 }
 
 void AppController::restoreOmarchyClock() {

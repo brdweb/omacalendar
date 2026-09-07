@@ -25,6 +25,7 @@ done <"${install_manifest}"
 
 package_paths=(
   usr/bin/omacalendar
+  usr/bin/omacalendar-widgetctl
   usr/bin/omacalendarctl
   usr/bin/omacalendard
   usr/lib/systemd/user/omacalendard.service

@@ -55,6 +55,7 @@ Item {
                                 anchors.centerIn: parent
                                 spacing: -2
                                 Text {
+                                    textFormat: Text.PlainText
                                     anchors.horizontalCenter: parent.horizontalCenter
                                     text: Qt.formatDate(daySection.dateValue, "ddd").toUpperCase()
                                     color: root.sameDate(daySection.dateValue, new Date())
@@ -63,6 +64,7 @@ Item {
                                     font.weight: Font.DemiBold
                                 }
                                 Text {
+                                    textFormat: Text.PlainText
                                     anchors.horizontalCenter: parent.horizontalCenter
                                     text: daySection.dateValue.getDate()
                                     color: root.sameDate(daySection.dateValue, new Date())
@@ -82,12 +84,14 @@ Item {
                             Layout.fillWidth: true
                             spacing: 1
                             Text {
+                                textFormat: Text.PlainText
                                 text: Qt.formatDate(daySection.dateValue, "dddd")
                                 color: Theme.text
                                 font.pixelSize: Theme.fontSize
                                 font.weight: Font.DemiBold
                             }
                             Text {
+                                textFormat: Text.PlainText
                                 text: Qt.formatDate(daySection.dateValue, "MMMM d")
                                 color: Theme.mutedText
                                 font.pixelSize: Theme.smallFontSize
@@ -127,6 +131,7 @@ Item {
                         color: dayEmptyMouse.containsMouse
                                ? Theme.alpha(Theme.text, 0.045) : "transparent"
                         Text {
+                            textFormat: Text.PlainText
                             anchors.left: parent.left
                             anchors.leftMargin: 54
                             anchors.verticalCenter: parent.verticalCenter

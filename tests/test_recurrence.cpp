@@ -53,6 +53,28 @@ class RecurrenceTest final : public QObject {
   Q_OBJECT
 
  private slots:
+  void componentTraversalFailureRejectsIncompleteExpansion() {
+    Event master = timedEvent(QStringLiteral("bounded-series"), utc(2026, 8, 28, 13));
+    master.uid = QStringLiteral("bounded-series");
+    master.recurrenceRule = QStringLiteral("FREQ=DAILY;COUNT=3");
+    master.rawFormat = QStringLiteral("text/calendar");
+    master.rawPayload = QStringLiteral("BEGIN:VCALENDAR\r\nVERSION:2.0\r\n");
+    for (int index = 0; index < 4100; ++index) {
+      master.rawPayload += QStringLiteral(
+                               "BEGIN:VEVENT\r\nUID:other-%1\r\nDTSTART:"
+                               "20260828T130000Z\r\nEND:VEVENT\r\n")
+                               .arg(index);
+    }
+    master.rawPayload += QStringLiteral(
+        "BEGIN:VEVENT\r\nUID:bounded-series\r\nDTSTART:20260828T130000Z\r\n"
+        "RRULE:FREQ=DAILY;COUNT=3\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n");
+    const auto result =
+        RecurrenceExpander::expand({master}, utc(2026, 8, 28, 0), utc(2026, 9, 1, 0));
+    QVERIFY(result.truncated);
+    QVERIFY(result.warnings.join(QLatin1Char(','))
+                .contains(QStringLiteral("recurrence_component_limit_exceeded")));
+  }
+
   void expandsSeriesWithoutChangingOrdinaryEvents() {
     Event master = timedEvent(QStringLiteral("series"), utc(2026, 8, 28, 13));
     master.recurrenceRule = QStringLiteral("FREQ=DAILY;COUNT=3");
@@ -258,6 +280,121 @@ class RecurrenceTest final : public QObject {
     QCOMPARE(result.occurrences.size(), 2);
     QCOMPARE(result.occurrences.at(0).startUtc, utc(2026, 8, 28, 13));
     QCOMPARE(result.occurrences.at(1).startUtc, utc(2026, 8, 29, 13));
+  }
+
+  void stopsDenseSecondlyRuleAtSharedWorkLimit() {
+    Event master = timedEvent(QStringLiteral("dense-secondly"), utc(2026, 8, 28, 13));
+    master.recurrenceRule = QStringLiteral("RRULE:FREQ=SECONDLY;COUNT=1000000");
+
+    const RecurrenceExpansionResult result = RecurrenceExpander::expand(
+        {master}, utc(2026, 8, 28, 0), utc(2026, 8, 29, 0), 1, 32);
+
+    QVERIFY(result.truncated);
+    QVERIFY(result.warnings.contains(QStringLiteral("recurrence_work_limit_exceeded")));
+    QVERIFY(result.occurrences.isEmpty());
+  }
+
+  void countsDenseExruleWorkEvenWhenResultWouldBeSparse() {
+    Event master = timedEvent(QStringLiteral("dense-exrule"), utc(2026, 8, 28, 13));
+    master.recurrenceRule =
+        QStringLiteral("RRULE:FREQ=DAILY;COUNT=2\nEXRULE:FREQ=SECONDLY;COUNT=1000000");
+
+    const RecurrenceExpansionResult result = RecurrenceExpander::expand(
+        {master}, utc(2026, 8, 28, 0), utc(2026, 8, 30, 0), 10, 32);
+
+    QVERIFY(result.truncated);
+    QVERIFY(result.warnings.contains(QStringLiteral("recurrence_work_limit_exceeded")));
+    QVERIFY(result.occurrences.isEmpty());
+  }
+
+  void sharesWorkLimitAcrossMultipleMasters() {
+    Event first = timedEvent(QStringLiteral("budget-first"), utc(2026, 8, 28, 9));
+    first.recurrenceRule = QStringLiteral("RRULE:FREQ=DAILY;COUNT=3");
+    Event second = timedEvent(QStringLiteral("budget-second"), utc(2026, 8, 28, 11));
+    second.recurrenceRule = QStringLiteral("RRULE:FREQ=DAILY;COUNT=1000000");
+
+    const RecurrenceExpansionResult result = RecurrenceExpander::expand(
+        {first, second}, utc(2026, 8, 28, 0), utc(2026, 9, 1, 0), 100, 15);
+
+    QVERIFY(result.truncated);
+    QVERIFY(result.warnings.contains(QStringLiteral("recurrence_work_limit_exceeded")));
+    QVERIFY(result.occurrences.size() <= 3);
+    for (const Event& occurrence : result.occurrences) {
+      QCOMPARE(occurrence.id, first.id);
+    }
+  }
+
+  void preservesRdateExruleDtstartUnionAndDeduplication() {
+    Event master = timedEvent(QStringLiteral("mixed-properties"), utc(2026, 8, 28, 13));
+    master.recurrenceRule = QStringLiteral(
+        "RRULE:FREQ=DAILY;COUNT=3\n"
+        "RDATE:20260830T130000Z\n"
+        "RDATE:20260831T130000Z\n"
+        "EXRULE:FREQ=DAILY;COUNT=1");
+
+    const RecurrenceExpansionResult result =
+        RecurrenceExpander::expand({master}, utc(2026, 8, 28, 0), utc(2026, 9, 2, 0));
+
+    QVERIFY2(result.warnings.isEmpty(),
+             qPrintable(result.warnings.join(QLatin1Char(','))));
+    QVERIFY(!result.truncated);
+    QCOMPARE(result.occurrences.size(), 3);
+    QCOMPARE(result.occurrences.at(0).startUtc, utc(2026, 8, 29, 13));
+    QCOMPARE(result.occurrences.at(1).startUtc, utc(2026, 8, 30, 13));
+    QCOMPARE(result.occurrences.at(2).startUtc, utc(2026, 8, 31, 13));
+  }
+
+  void indexesLargeUnrelatedMasterAndExceptionSetsWithinLinearBudget() {
+    QList<Event> events;
+    constexpr int count = 200;
+    events.reserve(count * 2);
+    for (int index = 0; index < count; ++index) {
+      Event master = timedEvent(QStringLiteral("indexed-master-%1").arg(index),
+                                utc(2026, 8, 28, 9));
+      master.recurrenceRule = QStringLiteral("RRULE:FREQ=DAILY;COUNT=1");
+      events.append(master);
+    }
+    for (int index = 0; index < count; ++index) {
+      Event exception = timedEvent(QStringLiteral("unrelated-exception-%1").arg(index),
+                                   utc(2026, 8, 29, 15));
+      exception.uid = QStringLiteral("unrelated-uid-%1").arg(index);
+      exception.recurrenceId = QStringLiteral("20260829T130000Z");
+      events.append(exception);
+    }
+
+    const RecurrenceExpansionResult result = RecurrenceExpander::expand(
+        events, utc(2026, 8, 28, 0), utc(2026, 8, 31, 0), count * 2, 2400);
+
+    QVERIFY2(result.warnings.isEmpty(),
+             qPrintable(result.warnings.join(QLatin1Char(','))));
+    QVERIFY(!result.truncated);
+    QCOMPARE(result.occurrences.size(), count * 2);
+  }
+
+  void preservesSequenceWinnerForDuplicateDetachedExceptions() {
+    Event master = timedEvent(QStringLiteral("winner-series"), utc(2026, 8, 28, 13));
+    master.uid = QStringLiteral("winner-uid");
+    master.recurrenceRule = QStringLiteral("RRULE:FREQ=DAILY;COUNT=2");
+
+    Event older = timedEvent(QStringLiteral("older-exception"), utc(2026, 8, 29, 15));
+    older.uid = master.uid;
+    older.recurrenceId = QStringLiteral("20260829T130000Z");
+    older.sequence = 1;
+    Event newer = older;
+    newer.id = QStringLiteral("newer-exception");
+    newer.summary = newer.id;
+    newer.startUtc = utc(2026, 8, 29, 17);
+    newer.endUtc = newer.startUtc.addSecs(3600);
+    newer.sequence = 2;
+
+    const RecurrenceExpansionResult result = RecurrenceExpander::expand(
+        {master, older, newer}, utc(2026, 8, 28, 0), utc(2026, 8, 31, 0));
+
+    QVERIFY2(result.warnings.isEmpty(),
+             qPrintable(result.warnings.join(QLatin1Char(','))));
+    QCOMPARE(result.occurrences.size(), 2);
+    QCOMPARE(result.occurrences.at(1).id, newer.id);
+    QCOMPARE(result.occurrences.at(1).startUtc, newer.startUtc);
   }
 
   void databaseQueryReturnsExpandedOccurrences() {

@@ -152,6 +152,8 @@ Control {
                 spacing: 1
 
                 Text {
+                    textFormat: Text.PlainText
+                    objectName: "timelineEventSummary"
                     Layout.fillWidth: true
                     text: root.eventData.summary || qsTr("Untitled event")
                     color: Theme.text
@@ -160,6 +162,8 @@ Control {
                     elide: Text.ElideRight
                 }
                 Text {
+                    textFormat: Text.PlainText
+                    objectName: "timelineEventLocation"
                     visible: root.visualHeight >= 43
                     Layout.fillWidth: true
                     text: root.eventData.location || ""
@@ -168,6 +172,7 @@ Control {
                     elide: Text.ElideRight
                 }
                 Text {
+                    textFormat: Text.PlainText
                     visible: root.stateText.length > 0 && root.visualHeight >= 58
                     Layout.fillWidth: true
                     text: root.stateLabel
