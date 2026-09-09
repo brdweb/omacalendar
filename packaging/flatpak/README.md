@@ -5,11 +5,13 @@ CLI, libical 4.0.5, and libsecret 0.21.7 (`secret-tool`). It uses the KDE 6.10
 runtime, which supplies Qt 6.10. The runtime is fetched from Flathub during
 installation if necessary. OmaCalendar itself is distributed through GitHub;
 this packaging does not imply a Flathub listing or an automatic app-update feed.
+Bundled dependency translations stay inside the standalone app bundle rather
+than requiring a separately published OmaCalendar Locale extension.
 
 After verifying the release checksums and attestations:
 
 ```bash
-flatpak install --user ./omacalendar-1.0.0-rc.2-linux-x86_64.flatpak
+flatpak install --user ./omacalendar-1.0.0-rc.3-linux-x86_64.flatpak
 flatpak run org.omacalendar.OmaCalendar
 ```
 
@@ -80,7 +82,7 @@ does not automatically erase provider credentials from Secret Service.
 
 ## Build and acceptance automation
 
-Install `flatpak`, `flatpak-builder`, `jq`, and ordinary shell tools. The build
+Install `flatpak`, `flatpak-builder`, `ostree`, `jq`, `python3`, and ordinary shell tools. The build
 downloads the KDE SDK/runtime and requires several GB of available disk space.
 The source archive must be the exact release archive, with one top-level
 directory. Library archives are pinned by version and SHA-256 in the manifest;
@@ -89,9 +91,9 @@ the runtime and SDK commits used are recorded alongside the bundle.
 ```bash
 export FLATPAK_USER_DIR="$(mktemp -d /tmp/omacalendar-flatpak-install.XXXXXX)"
 packaging/release/build-flatpak.sh \
-  /path/to/omacalendar-1.0.0-rc.2-source.tar.gz 1.0.0-rc.2 /path/to/artifacts
+  /path/to/omacalendar-1.0.0-rc.3-source.tar.gz 1.0.0-rc.3 /path/to/artifacts
 packaging/release/verify-flatpak.sh \
-  /path/to/artifacts/omacalendar-1.0.0-rc.2-linux-x86_64.flatpak 1.0.0-rc.2
+  /path/to/artifacts/omacalendar-1.0.0-rc.3-linux-x86_64.flatpak 1.0.0-rc.3
 ```
 
 Release builds require `OMACALENDAR_BUILD_GOOGLE_CLIENT_ID` and
@@ -110,7 +112,21 @@ directory. Build outputs are:
 - `libsecret-0.21.7.tar.xz`: the exact checksum-verified LGPL dependency source
   accompanying the bundle (the release also includes the shared libical source archive).
 - `flatpak-stage/`: installed app files for generating a package-specific SPDX
-  SBOM; this directory is build input for the SBOM step, not a release asset.
+  SBOM, checked out from the exact exported app ref rather than the larger
+  Builder working tree; this directory is not a release asset.
+
+After finalizing the SPDX document, verify it independently against the bundle:
+
+```bash
+python3 packaging/release/verify-flatpak-sbom.py \
+  --bundle /path/to/artifacts/omacalendar-1.0.0-rc.3-linux-x86_64.flatpak \
+  --sbom /path/to/artifacts/omacalendar-1.0.0-rc.3-flatpak.spdx.json \
+  --version 1.0.0-rc.3
+```
+
+This imports only into a temporary OSTree repository, never an app installation,
+and checks complete regular-file coverage, SHA-1/SHA-256 hashes, and application
+and bundled-library package verification codes before attestations are issued.
 
 The verifier requires a disposable `FLATPAK_USER_DIR` and refuses to replace an
 existing app. It installs the bundle, exercises daemon/CLI IPC, creates a local

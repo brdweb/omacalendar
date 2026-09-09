@@ -5,7 +5,7 @@ provides fast, interaction-dense desktop calendar workflows without tasks,
 booking services, natural-language entry, or an OmaCalendar cloud service. An
 optional Quickshell companion is developed and released independently.
 
-The next candidate is **`1.0.0-rc.2`**, prepared as a GitHub draft for owner
+The next candidate is **`1.0.0-rc.3`**, prepared as a GitHub draft for owner
 testing. It adds Arch, Ubuntu 26.04 `.deb`, and Flatpak installation paths. See
 [Install and update](docs/INSTALL.md), [the owner checklist](docs/OWNER_TESTING.md),
 and [the stable preparation plan](docs/STABLE_PLAN.md). The public beta below

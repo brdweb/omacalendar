@@ -9,7 +9,7 @@ on:
       version:
         description: Semantic version to build without creating a release
         required: true
-        default: 1.0.0-rc.2
+        default: 1.0.0-rc.3
         type: string
 
 permissions:
@@ -287,7 +287,7 @@ jobs:
         run: |
           source packaging/release/version-lib.sh
           source packaging/release/deb-version-lib.sh
-          package="omacalendar_$(deb_package_version "${RELEASE_VERSION}")_amd64.deb"
+          package=$(deb_package_filename "${RELEASE_VERSION}")
           docker run --rm -v "$PWD:/source:ro" -v "$PWD/artifacts:/packages:ro" \
             ubuntu:26.04@sha256:2260313b31c8c011cd2eebe728008efac1b3982be73eb71348ea2648d2c0e09b \
             bash /source/packaging/release/test-deb-package.sh \
@@ -341,7 +341,7 @@ jobs:
       - name: Install Flatpak build tools and runtime
         run: |
           sudo apt-get update
-          sudo apt-get install -y flatpak flatpak-builder dbus-x11 jq
+          sudo apt-get install -y flatpak flatpak-builder ostree dbus-x11 jq
           # Ubuntu hosted runners restrict the user namespaces bubblewrap
           # needs. This changes only this disposable CI runner, never a user's
           # workstation or any installed package's permissions.
@@ -379,6 +379,12 @@ jobs:
             --input "artifacts/omacalendar-${RELEASE_VERSION}-flatpak.spdx.json" \
             --stage artifacts/flatpak-stage --version "${RELEASE_VERSION}" --format flatpak \
             --output "artifacts/omacalendar-${RELEASE_VERSION}-flatpak.spdx.json"
+      - name: Verify SPDX against the exact exported Flatpak bundle
+        run: |
+          python3 packaging/release/verify-flatpak-sbom.py \
+            --bundle "artifacts/omacalendar-${RELEASE_VERSION}-linux-x86_64.flatpak" \
+            --sbom "artifacts/omacalendar-${RELEASE_VERSION}-flatpak.spdx.json" \
+            --version "${RELEASE_VERSION}"
       - name: Attest Flatpak provenance
         if: github.event_name == 'push'
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4
@@ -473,6 +479,25 @@ jobs:
               "${release_flags[@]}" --notes-file "docs/releases/${RELEASE_VERSION}.md" \
               --title "OmaCalendar ${RELEASE_VERSION} - owner testing candidate"
           fi
+      - name: Verify draft download names and bytes
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          test "$(gh release view "${GITHUB_REF_NAME}" --json isDraft --jq .isDraft)" = true
+          download_directory=$(mktemp -d "${RUNNER_TEMP}/omacalendar-published-download.XXXXXX")
+          gh release download "${GITHUB_REF_NAME}" --dir "${download_directory}"
+          # GitHub can normalize special characters in uploaded filenames.
+          # Require the actual downloaded names and bytes to match the manifest.
+          diff -u \
+            <(find artifacts -maxdepth 1 -type f -printf '%f\n' | LC_ALL=C sort) \
+            <(find "${download_directory}" -maxdepth 1 -type f -printf '%f\n' | LC_ALL=C sort)
+          (cd "${download_directory}" && sha256sum --check --strict SHA256SUMS)
+          for asset in artifacts/*; do
+            test -f "${asset}"
+            cmp "${asset}" "${download_directory}/${asset##*/}"
+          done
+
       - name: Summarize candidate disposition
         run: |
           {

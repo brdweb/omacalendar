@@ -5,6 +5,7 @@
   "sdk": "org.kde.Sdk",
   "command": "omacalendar",
   "branch": "stable",
+  "separate-locales": false,
   "build-options": {
     "libdir": "/app/lib",
     "prepend-pkg-config-path": "/app/lib/pkgconfig",

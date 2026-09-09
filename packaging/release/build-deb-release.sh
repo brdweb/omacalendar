@@ -9,7 +9,7 @@ repository_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 source "${repository_root}/packaging/release/version-lib.sh"
 source "${repository_root}/packaging/release/deb-version-lib.sh"
 release_version=$1
-package_version=$(deb_package_version "${release_version}")
+package_filename=$(deb_package_filename "${release_version}")
 if [[ $(release_base_version "${release_version}") != \
       $(release_base_version "$(cmake_release_version "${repository_root}")") ]]; then
   echo "requested package version does not match the CMake project version" >&2
@@ -30,7 +30,7 @@ output_directory=$(realpath "$2")
 libical_version=4.0.5
 libical_sha256=cc09a3ac41d60e6144e644bd3fcf97d47106d659c4a0b8965102581401e67c9c
 libical_archive="libical-${libical_version}.tar.gz"
-for output_name in "omacalendar_${package_version}_amd64.deb" \
+for output_name in "${package_filename}" \
   "${libical_archive}" "omacalendar-${release_version}-ubuntu26.04-build-packages.txt"; do
   if [[ -e ${output_directory}/${output_name} || -L ${output_directory}/${output_name} ]]; then
     echo "refusing to overwrite existing release output: ${output_name}" >&2
@@ -89,8 +89,8 @@ bash "${repository_root}/packaging/release/build-deb-package.sh" \
 mkdir "${working_directory}/second-package"
 bash "${repository_root}/packaging/release/build-deb-package.sh" \
   "${release_version}" "${stage_root}" "${working_directory}/second-package"
-cmp "${output_directory}/omacalendar_${package_version}_amd64.deb" \
-  "${working_directory}/second-package/omacalendar_${package_version}_amd64.deb"
+cmp "${output_directory}/${package_filename}" \
+  "${working_directory}/second-package/${package_filename}"
 cp "${working_directory}/${libical_archive}" "${output_directory}/${libical_archive}"
 dpkg-query -W -f='${binary:Package}\t${Version}\t${Architecture}\n' | LC_ALL=C sort \
   >"${output_directory}/omacalendar-${release_version}-ubuntu26.04-build-packages.txt"

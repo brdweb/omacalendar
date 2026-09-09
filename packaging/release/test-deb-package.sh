@@ -15,6 +15,7 @@ source "${repository_root}/packaging/release/deb-version-lib.sh"
 release_version=$1
 package_version=$(deb_package_version "${release_version}")
 package_path=$(realpath "$2")
+[[ $(basename "${package_path}") == "$(deb_package_filename "${release_version}")" ]]
 [[ $(dpkg-deb --field "${package_path}" Version) == "${package_version}" ]]
 [[ $(dpkg-deb --field "${package_path}" Package) == omacalendar ]]
 apt-get update

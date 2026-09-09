@@ -50,7 +50,9 @@ jobs:
         run: runuser -u package-test -- packaging/release/test-arch-package.sh
 
       - name: Validate package SBOM finalization
-        run: python3 packaging/release/test-finalize-sbom.py
+        run: |
+          python3 packaging/release/test-finalize-sbom.py
+          python3 packaging/release/test-flatpak-sbom.py
 
       - name: Validate desktop metadata
         run: desktop-file-validate packaging/org.omacalendar.OmaCalendar.desktop

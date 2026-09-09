@@ -16,7 +16,7 @@ validate_release_version "${release_version}"
 [[ $(uname -m) == x86_64 ]] || { echo 'The release Flatpak targets x86_64.' >&2; exit 1; }
 mkdir -p "$3"
 output_directory=$(realpath "$3")
-for command in flatpak flatpak-builder jq sha256sum curl; do
+for command in flatpak flatpak-builder ostree jq sha256sum curl; do
   command -v "${command}" >/dev/null
 done
 export OMACALENDAR_FLATPAK_VERSION_SUFFIX
@@ -62,7 +62,11 @@ flatpak build-bundle --arch=x86_64 \
   echo 'The Flatpak SBOM staging destination already exists; choose a fresh output directory.' >&2
   exit 1
 }
-cp -a "${work_directory}/build/files" "${output_directory}/flatpak-stage"
+# Builder's working files can include content exported into separate refs.
+# Inventory the exact application ref used by build-bundle, not that superset.
+ostree --repo="${work_directory}/repo" checkout --user-mode --force-copy \
+  --subpath=/files app/org.omacalendar.OmaCalendar/x86_64/stable \
+  "${output_directory}/flatpak-stage"
 # Ship the exact LGPL dependency source with the binary. Prefer Builder's
 # already verified download, with a checksum-checked fetch for older layouts.
 libsecret_url=$(jq -er '.modules[] | select(.name == "libsecret") | .sources[0].url' "${manifest}")

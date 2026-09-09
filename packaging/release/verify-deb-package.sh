@@ -9,9 +9,10 @@ repository_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 source "${repository_root}/packaging/release/version-lib.sh"
 source "${repository_root}/packaging/release/deb-version-lib.sh"
 package_version=$(deb_package_version "$1")
+package_filename=$(deb_package_filename "$1")
 stage_root=$(realpath "$2")
 package_path=$(realpath "$3")
-[[ $(basename "${package_path}") == "omacalendar_${package_version}_amd64.deb" ]]
+[[ $(basename "${package_path}") == "${package_filename}" ]]
 [[ $(dpkg-deb --field "${package_path}" Package) == omacalendar ]]
 [[ $(dpkg-deb --field "${package_path}" Version) == "${package_version}" ]]
 [[ $(dpkg-deb --field "${package_path}" Architecture) == amd64 ]]

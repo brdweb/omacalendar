@@ -6,6 +6,23 @@ Versioning once public releases begin.
 
 ## [Unreleased]
 
+## [1.0.0-rc.3] - 2026-09-08
+
+### Fixed
+
+- Align the Flatpak SPDX inventory with the actual distributed bundle. RC2
+  described 61 locale files from its build stage that separate-locale export
+  omitted from the bundle; RC3 requires exact downloaded file-set/hash checks.
+- Use GitHub-safe Debian asset filenames such as
+  `omacalendar_1.0.0-rc.3-1_amd64.deb`, retaining internal Debian version
+  `1.0.0~rc.3-1` and its correct prerelease ordering. No local rename is needed.
+
+### Changed
+
+- Prepare a fresh app/widget RC3 pair with new builds, documentation, checksums,
+  and attestations. Preserve RC1/RC2 tags and records; no old artifact is renamed
+  or promoted to RC3. Runtime logic, IPC, schema, and owner gates are unchanged.
+
 ## [1.0.0-rc.2] - 2026-09-08
 
 ### Changed
@@ -168,6 +185,9 @@ Versioning once public releases begin.
   and emits verifiable build provenance for tagged release candidates. The
   separately documented historical OAuth incident remains a pre-tag gate.
 
-[Unreleased]: https://github.com/brdweb/omacalendar/compare/v1.0.0-beta.1...HEAD
+[Unreleased]: https://github.com/brdweb/omacalendar/compare/v1.0.0-rc.3...HEAD
+[1.0.0-rc.3]: https://github.com/brdweb/omacalendar/compare/v1.0.0-rc.2...v1.0.0-rc.3
+[1.0.0-rc.2]: https://github.com/brdweb/omacalendar/compare/v1.0.0-rc.1...v1.0.0-rc.2
+[1.0.0-rc.1]: https://github.com/brdweb/omacalendar/compare/v1.0.0-beta.1...v1.0.0-rc.1
 [1.0.0-beta.1]: https://github.com/brdweb/omacalendar/compare/v1.0.0-alpha...v1.0.0-beta.1
 [1.0.0-alpha]: https://github.com/brdweb/omacalendar/releases/tag/v1.0.0-alpha
