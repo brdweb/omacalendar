@@ -35,6 +35,11 @@
   </recommends>
   <content_rating type="oars-1.1" />
   <releases>
+    <release version="1.0.0-rc.1" date="2026-09-08" type="development">
+      <description>
+        <p>Release candidate with Arch, Debian, and Flatpak packages for acceptance testing. Stable owner and live-provider acceptance remain pending.</p>
+      </description>
+    </release>
     <release version="1.0.0-beta.1" date="2026-09-06" type="development">
       <description>
         <p>Public beta for current Omarchy with an attested native package, Google Calendar authorization, and IPC 2 widget compatibility.</p>

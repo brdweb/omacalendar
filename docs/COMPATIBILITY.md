@@ -9,14 +9,18 @@ until the stable 1.0 owner acceptance gate passes.
 | Component | 1.0 target | Current qualification |
 |---|---|---|
 | Operating system | Current stable Omarchy, x86-64 | Local beta checks on Omarchy 4.0.2-1; exact-candidate clean-checkout gate pending |
-| Qt | 6.8 or newer | Local 21-test matrix passes with Qt 6.11.2 |
+| Qt | 6.9 or newer | OAuth APIs require 6.9; candidate packages exercise Qt 6.10 and current Arch Qt |
 | libical | 4.0 or newer | Current Omarchy/Arch package |
 | GCC | Current Arch GCC | GCC 16.2.1 Release/Werror build and 21/21 tests pass; exact-candidate clean-checkout CI remains |
 | Clang | Current Arch/LLVM Clang | Clang 22.1.8 Werror and ASan/UBSan builds pass; exact-candidate CI remains |
 | systemd | User manager shipped by release-reference Omarchy | Staged `/usr` unit validation passes; VM gate remains |
 
-Other Linux distributions and architectures may build from source but are not
-part of the initial support promise.
+The `1.0.0-rc.1` candidate adds Ubuntu 26.04 amd64 and a Flatpak x86-64 bundle
+using KDE runtime 6.10. Packaging qualification is recorded in the candidate
+acceptance record; neither new format has completed owner acceptance. Debian-format
+packaging ships a private libical 4 without replacing the distribution's libical 3.
+Debian 13 and older Ubuntu releases are not supported by that native `.deb`; use
+Flatpak where its runtime is available. No additional architecture is claimed.
 
 ## Providers
 
@@ -43,6 +47,7 @@ the untested portions of every provider matrix remain release blockers.
 |---|---:|---:|---|---|
 | `1.0.0-alpha` | 2 | 2 | Independent widget releases must declare IPC 2 and discover optional methods | Unsupported app prerelease |
 | `1.0.0-beta.1` | 2 | 2 | Qualified widget releases declare IPC 2 and discover optional methods | Public-testing beta candidate |
+| `1.0.0-rc.1` | 2 | 2 | Native packages support IPC 2 widgets; Flatpak uses a separate profile | Draft for owner acceptance; not stable |
 | 1.0.x | 2 | 2 | Protocol/capability based; no widget version lock | Planned stable app line |
 
 IPC major-version mismatches are rejected. Minor additions require capability

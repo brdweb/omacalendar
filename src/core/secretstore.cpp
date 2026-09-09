@@ -6,6 +6,8 @@
 #include <QTimer>
 #include <utility>
 
+#include "core/paths.h"
+
 namespace omacalendar {
 namespace {
 
@@ -61,7 +63,12 @@ void disposeProcess(QProcess* process, QObject* owner) {
 }
 
 QStringList attributes(const QString& accountId, const QString& kind) {
-  return {QStringLiteral("application"), QStringLiteral("omacalendar"),
+  // Separate installations can import the same account UUID. Their credentials
+  // must not overwrite or remove one another in the shared desktop keyring.
+  const QString application = paths::isFlatpak()
+                                  ? QStringLiteral("org.omacalendar.OmaCalendar")
+                                  : QStringLiteral("omacalendar");
+  return {QStringLiteral("application"), application,
           QStringLiteral("account"),     accountId,
           QStringLiteral("kind"),        kind};
 }

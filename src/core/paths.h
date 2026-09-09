@@ -4,6 +4,7 @@
 
 namespace omacalendar::paths {
 
+bool isFlatpak();
 QString dataDirectory();
 QString configDirectory();
 QString cacheDirectory();

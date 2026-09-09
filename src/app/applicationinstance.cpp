@@ -1,11 +1,15 @@
 #include "applicationinstance.h"
 
+#include <sys/file.h>
+
 #include <QDir>
+#include <QFile>
 #include <QFileInfo>
 #include <QLocalSocket>
 #include <QLockFile>
-#include <QStandardPaths>
 #include <QThread>
+
+#include "core/paths.h"
 
 namespace omacalendar {
 namespace {
@@ -17,9 +21,8 @@ constexpr qsizetype kMaximumRequestBytes = 64 * 1024;
 
 ApplicationInstance::ApplicationInstance(QObject* parent)
     : QObject(parent),
-      m_serverPath(
-          QDir(QStandardPaths::writableLocation(QStandardPaths::RuntimeLocation))
-              .filePath(QStringLiteral("omacalendar/app-instance.sock"))) {
+      m_serverPath(QDir(paths::runtimeDirectory())
+                       .filePath(QStringLiteral("app-instance.sock"))) {
   connect(&m_server, &QLocalServer::newConnection, this,
           &ApplicationInstance::acceptConnections);
 }
@@ -38,17 +41,33 @@ bool ApplicationInstance::claimPrimary() {
     return false;
   }
 
-  m_lock = std::make_unique<QLockFile>(m_serverPath + QStringLiteral(".lock"));
-  m_lock->setStaleLockTime(0);
-  if (!m_lock->tryLock()) {
-    return false;
+  if (paths::isFlatpak()) {
+    // Separate Flatpak PID namespaces reuse small process IDs. A stale
+    // QLockFile can therefore appear owned by the new desktop itself. Kernel
+    // locks refer to the shared inode and release on process exit, including
+    // SIGKILL. Never unlink this file: another process may already have it open.
+    m_kernelLock =
+        std::make_unique<QFile>(m_serverPath + QStringLiteral(".kernel-lock"));
+    if (!m_kernelLock->open(QIODevice::ReadWrite) ||
+        !m_kernelLock->setPermissions(QFileDevice::ReadOwner |
+                                      QFileDevice::WriteOwner) ||
+        flock(m_kernelLock->handle(), LOCK_EX | LOCK_NB) != 0) {
+      m_kernelLock.reset();
+      return false;
+    }
+  } else {
+    m_lock = std::make_unique<QLockFile>(m_serverPath + QStringLiteral(".lock"));
+    m_lock->setStaleLockTime(0);
+    if (!m_lock->tryLock()) {
+      return false;
+    }
   }
 
   // Owning the lock proves no live primary owns this endpoint.
   QLocalServer::removeServer(m_serverPath);
   if (!m_server.listen(m_serverPath)) {
-    m_lock->unlock();
     m_lock.reset();
+    m_kernelLock.reset();
     return false;
   }
 

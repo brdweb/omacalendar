@@ -17,7 +17,11 @@ required_paths=(
   usr/share/applications/org.omacalendar.OmaCalendar.desktop
   usr/share/icons/hicolor/scalable/apps/org.omacalendar.OmaCalendar.svg
   usr/share/metainfo/org.omacalendar.OmaCalendar.metainfo.xml
+  usr/share/licenses/omacalendar/LICENSE
   usr/share/doc/OmaCalendar/docs/GETTING_STARTED.md
+  usr/share/doc/OmaCalendar/docs/INSTALL.md
+  usr/share/doc/OmaCalendar/docs/OWNER_TESTING.md
+  usr/share/doc/OmaCalendar/docs/STABLE_PLAN.md
   usr/share/doc/OmaCalendar/docs/GOOGLE_TESTING.md
   usr/share/doc/OmaCalendar/docs/RELEASE.md
 )
@@ -28,6 +32,12 @@ for relative_path in "${required_paths[@]}"; do
     exit 1
   fi
 done
+
+if ! cmp -s "${staged_root}/usr/share/licenses/omacalendar/LICENSE" \
+  "${staged_root}/usr/share/doc/OmaCalendar/LICENSE"; then
+  echo "canonical package license differs from the application license" >&2
+  exit 1
+fi
 
 for binary in omacalendar omacalendar-widgetctl omacalendarctl omacalendard; do
   if [[ ! -x "${staged_root}/usr/bin/${binary}" ]]; then

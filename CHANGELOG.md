@@ -6,6 +6,28 @@ Versioning once public releases begin.
 
 ## [Unreleased]
 
+## [1.0.0-rc.1] - 2026-09-08
+
+### Added
+
+- Native Ubuntu 26.04 amd64 `.deb` and an installable Flatpak bundle alongside
+  the native Arch package, with independent build and installation checks.
+- A stable-release preparation plan, exact-candidate acceptance record, and
+  owner test checklist; candidate drafts keep pending stable gates visible.
+- Installation, update, backup, removal, and sandbox documentation for each
+  package format, delivered with the candidate artifacts.
+
+### Changed
+
+- Flatpak uses isolated data, application-instance and daemon sockets, and
+  keyring identities. The native Omarchy widget continues to use the native
+  daemon; sandbox and native profiles are separate.
+- Release automation assembles all package formats before making a draft
+  available. Stable tagging still requires completed acceptance evidence.
+- Correct the minimum Qt requirement to 6.9: the OAuth implementation already
+  used APIs introduced in that version. The `.deb` targets Ubuntu 26.04;
+  Debian 13 and Ubuntu 24.04 users should use Flatpak.
+
 ## [1.0.0-beta.1] - 2026-09-06
 
 ### Added

@@ -1,8 +1,11 @@
 // Copyright (c) 2026
 
+#include <QScopeGuard>
+#include <QTemporaryDir>
 #include <QtTest/QtTest>
 
 #include "core/domain.h"
+#include "core/paths.h"
 
 using namespace omacalendar;
 
@@ -10,6 +13,34 @@ class DomainTest final : public QObject {
   Q_OBJECT
 
  private slots:
+  void flatpakRuntimeIsSeparateFromNative() {
+    QTemporaryDir runtime;
+    QVERIFY(runtime.isValid());
+    const QByteArray originalRuntime = qgetenv("XDG_RUNTIME_DIR");
+    const QByteArray originalFlatpak = qgetenv("FLATPAK_ID");
+    const auto restore = qScopeGuard([&]() {
+      originalRuntime.isNull() ? qunsetenv("XDG_RUNTIME_DIR")
+                               : qputenv("XDG_RUNTIME_DIR", originalRuntime);
+      originalFlatpak.isNull() ? qunsetenv("FLATPAK_ID")
+                               : qputenv("FLATPAK_ID", originalFlatpak);
+    });
+    qputenv("XDG_RUNTIME_DIR", runtime.path().toUtf8());
+    qunsetenv("FLATPAK_ID");
+    const QString nativeSocket = paths::socketFile();
+    QCOMPARE(nativeSocket, runtime.filePath(QStringLiteral("omacalendar/daemon.sock")));
+    qputenv("FLATPAK_ID", "org.omacalendar.OmaCalendar");
+    QVERIFY(paths::isFlatpak());
+    QCOMPARE(paths::socketFile(),
+             runtime.filePath(QStringLiteral(
+                 "app/org.omacalendar.OmaCalendar/omacalendar/daemon.sock")));
+    QVERIFY(paths::socketFile() != nativeSocket);
+    QCOMPARE(qgetenv("XDG_RUNTIME_DIR"), runtime.path().toUtf8());
+    // An arbitrary environment value must never become a filesystem path.
+    qputenv("FLATPAK_ID", "../../another-application");
+    QVERIFY(!paths::isFlatpak());
+    QCOMPARE(paths::socketFile(), nativeSocket);
+  }
+
   void providerKindConversions() {
     QCOMPARE(providerKindFromString(QStringLiteral("google")), ProviderKind::Google);
     QCOMPARE(providerKindFromString(QStringLiteral("caldav")), ProviderKind::CalDav);

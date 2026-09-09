@@ -20,7 +20,7 @@ option(OMACALENDAR_BUILD_TESTS "Build automated tests" ON)
 option(OMACALENDAR_ENABLE_WERROR "Treat compiler warnings as errors" OFF)
 option(OMACALENDAR_ENABLE_SANITIZERS
        "Enable AddressSanitizer and UndefinedBehaviorSanitizer" OFF)
-set(OMACALENDAR_VERSION_SUFFIX "-beta.1" CACHE STRING
+set(OMACALENDAR_VERSION_SUFFIX "-rc.1" CACHE STRING
     "Suffix appended to the numeric project version (empty for a release)")
 set(OMACALENDAR_FULL_VERSION "${PROJECT_VERSION}${OMACALENDAR_VERSION_SUFFIX}")
 option(OMACALENDAR_REQUIRE_GOOGLE_OAUTH_CONFIG
@@ -86,7 +86,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND
   add_link_options("LINKER:-z,relro" "LINKER:-z,now")
 endif()
 
-find_package(Qt6 6.8 REQUIRED COMPONENTS
+find_package(Qt6 6.9 REQUIRED COMPONENTS
   Core
   DBus
   Gui
@@ -99,11 +99,11 @@ find_package(Qt6 6.8 REQUIRED COMPONENTS
 )
 # Optional: only needed for the lupdate_ts translation-extraction target, not
 # for building or running the application.
-find_package(Qt6 6.8 QUIET COMPONENTS LinguistTools)
+find_package(Qt6 6.9 QUIET COMPONENTS LinguistTools)
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(LibIcal REQUIRED IMPORTED_TARGET libical>=4.0)
 
-qt_standard_project_setup(REQUIRES 6.8)
+qt_standard_project_setup(REQUIRES 6.9)
 
 add_library(omacalendar_core STATIC
   src/core/database.cpp
@@ -258,6 +258,9 @@ install(FILES packaging/icons/org.omacalendar.OmaCalendar.svg
 install(FILES LICENSE README.md CHANGELOG.md
   DESTINATION ${CMAKE_INSTALL_DOCDIR}
 )
+install(FILES LICENSE
+  DESTINATION ${CMAKE_INSTALL_DATADIR}/licenses/omacalendar
+)
 install(FILES SECURITY.md SUPPORT.md
   DESTINATION ${CMAKE_INSTALL_DOCDIR}
 )
@@ -270,7 +273,7 @@ install(DIRECTORY docs/
 
 if(OMACALENDAR_BUILD_TESTS)
   enable_testing()
-  find_package(Qt6 6.8 REQUIRED COMPONENTS Test)
+  find_package(Qt6 6.9 REQUIRED COMPONENTS Test)
   find_package(Python3 REQUIRED COMPONENTS Interpreter)
   add_subdirectory(tests)
   add_test(NAME widget_activation_test

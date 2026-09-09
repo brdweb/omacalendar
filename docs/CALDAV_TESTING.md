@@ -1,5 +1,35 @@
 # CalDAV testing guide
 
+## Reproducible isolated transport smoke
+
+`packaging/release/live-provider-smoke.py` exercises a real disposable Radicale
+server and an authenticated HTTPS ICS fixture against the chosen daemon/CLI.
+It covers remote write/readback/delete, offline queue drain, server/daemon
+restart, conditional refresh, authentication failure with cached retention,
+credential rotation, disconnect, reconnect and removal.
+
+On a test machine with Python venv support, OpenSSL and bubblewrap installed:
+
+```bash
+provider_tools=$(mktemp -d /tmp/omacalendar-provider-tools.XXXXXX)
+python3 -m venv "${provider_tools}/venv"
+"${provider_tools}/venv/bin/pip" install 'Radicale==3.7.8'
+python3 packaging/release/live-provider-smoke.py \
+  --daemon /usr/bin/omacalendard --cli /usr/bin/omacalendarctl \
+  --radicale "${provider_tools}/venv/bin/radicale"
+```
+
+Use the exact extracted candidate binaries instead of `/usr/bin` when testing
+without installing. The harness removes its generated datasets and stops its
+servers on completion. The disposable tools environment remains at the printed
+`provider_tools` path for reuse. Bubblewrap mounts the fixture CA only inside the
+test daemon's process namespace; it does not change host trust or disable TLS
+verification. Only process-owned loopback endpoints receive synthetic credentials.
+It replaces Secret Service with a temporary fixture, so a passing result does
+not establish desktop keyring, Google, Nextcloud, Fastmail or owner acceptance.
+
+## Connecting a provider
+
 OmaCalendar accepts a CalDAV service URL, username, and password or app
 password in **Accounts & settings**. Passwords are sent directly to the local
 daemon over its user-only socket and stored in the desktop Secret Service; they

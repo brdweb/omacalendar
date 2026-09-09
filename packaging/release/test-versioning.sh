@@ -35,6 +35,17 @@ configured_version=$(cmake_release_version "${repository_root}")
 "${repository_root}/packaging/release/verify-release-metadata.sh" \
   "${configured_version}"
 acceptance_record="${repository_root}/docs/releases/${configured_version}.md"
+for invalid_draft in 1.0.0 1.0.0-beta.1 1.0.0-rc 1.0.0-rc.01; do
+  if bash "${repository_root}/packaging/release/verify-draft-candidate.sh" \
+    "${invalid_draft}" >/dev/null 2>&1; then
+    echo "draft-only validation accepted an ineligible version: ${invalid_draft}" >&2
+    exit 1
+  fi
+done
+if [[ ${configured_version} == *-rc.* ]]; then
+  bash "${repository_root}/packaging/release/verify-draft-candidate.sh" \
+    "${configured_version}"
+fi
 if awk '
     BEGIN { FS = "\\|" }
     $0 == "## Pre-tag gates" || $0 == "## External approvals" {

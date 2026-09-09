@@ -1,5 +1,10 @@
 # Getting started
 
+For the next `1.0.0-rc.1` draft candidate, use
+[the Arch, Ubuntu `.deb`, and Flatpak installation guide](INSTALL.md) and
+[owner checklist](OWNER_TESTING.md). The beta instructions below refer to the
+last public release and deliberately retain its immutable filenames.
+
 OmaCalendar `1.0.0-beta.1` is a public-testing release for Omarchy Linux. Back up
 important calendar data before testing it, and do not make the beta your only
 copy of an important device-only calendar.

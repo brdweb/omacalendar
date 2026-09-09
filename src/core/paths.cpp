@@ -17,6 +17,11 @@ QString appSubdirectory(const QStandardPaths::StandardLocation location) {
 
 }  // namespace
 
+bool isFlatpak() {
+  return qEnvironmentVariable("FLATPAK_ID") ==
+         QStringLiteral("org.omacalendar.OmaCalendar");
+}
+
 QString dataDirectory() { return appSubdirectory(QStandardPaths::GenericDataLocation); }
 
 QString configDirectory() {
@@ -30,10 +35,18 @@ QString cacheDirectory() {
 QString runtimeDirectory() {
   const QString xdgRuntime = qEnvironmentVariable("XDG_RUNTIME_DIR");
   if (!xdgRuntime.isEmpty()) {
-    return QDir(xdgRuntime).filePath(QStringLiteral("omacalendar"));
+    // Flatpak shares this app-specific directory between sandbox instances.
+    // Keep XDG_RUNTIME_DIR itself intact for Wayland and desktop portals, and
+    // never share the native daemon or desktop activation endpoints.
+    return QDir(xdgRuntime)
+        .filePath(isFlatpak()
+                      ? QStringLiteral("app/org.omacalendar.OmaCalendar/omacalendar")
+                      : QStringLiteral("omacalendar"));
   }
   return QDir(QDir::tempPath())
-      .filePath(QStringLiteral("omacalendar-%1").arg(QString::number(getuid())));
+      .filePath((isFlatpak() ? QStringLiteral("omacalendar-flatpak-%1")
+                             : QStringLiteral("omacalendar-%1"))
+                    .arg(QString::number(getuid())));
 }
 
 QString databaseFile() {

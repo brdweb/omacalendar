@@ -6,6 +6,7 @@
 #include <memory>
 
 class QLockFile;
+class QFile;
 
 namespace omacalendar {
 
@@ -30,6 +31,7 @@ class ApplicationInstance final : public QObject {
   QString m_serverPath;
   QLocalServer m_server;
   std::unique_ptr<QLockFile> m_lock;
+  std::unique_ptr<QFile> m_kernelLock;
 };
 
 }  // namespace omacalendar

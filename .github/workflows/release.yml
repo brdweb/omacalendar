@@ -9,7 +9,7 @@ on:
       version:
         description: Semantic version to build without creating a release
         required: true
-        default: 1.0.0-beta.1
+        default: 1.0.0-rc.1
         type: string
 
 permissions:
@@ -19,15 +19,19 @@ permissions:
 
 jobs:
   build-release-candidate:
-    name: Build, attest, and draft release
+    name: Build and attest Arch candidate
     runs-on: ubuntu-24.04
     container: archlinux:base-devel
+    outputs:
+      version: ${{ steps.version.outputs.value }}
+      suffix: ${{ steps.version.outputs.suffix }}
+      arch_pkgver: ${{ steps.version.outputs.arch_pkgver }}
     steps:
       - name: Install current Arch dependencies
         run: |
           pacman -Syu --noconfirm --needed \
             appstream cmake desktop-file-utils git github-cli libical libsecret \
-            ninja pkgconf qt6-base qt6-declarative qt6-networkauth systemd zstd
+            ninja pkgconf python qt6-base qt6-declarative qt6-networkauth systemd zstd
 
       - name: Check out source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -56,7 +60,12 @@ jobs:
         if: github.event_name == 'push'
         env:
           OMACALENDAR_GITHUB_VERIFIED_TAG: '1'
-        run: packaging/release/verify-release.sh "${GITHUB_REF_NAME}"
+        run: |
+          if [[ ${GITHUB_REF_NAME} =~ -rc\.[0-9]+$ ]]; then
+            packaging/release/verify-release.sh --draft-candidate "${GITHUB_REF_NAME}"
+          else
+            packaging/release/verify-release.sh "${GITHUB_REF_NAME}"
+          fi
 
       - name: Verify rehearsal source
         if: github.event_name == 'workflow_dispatch'
@@ -190,13 +199,14 @@ jobs:
           cp aur-rendered/source/PKGBUILD artifacts/PKGBUILD
           cp aur-rendered/binary/PKGBUILD artifacts/PKGBUILD-bin
 
-      - name: Write release checksums
+      - name: Complete shipped-file SPDX inventory
+        env:
+          RELEASE_VERSION: ${{ steps.version.outputs.value }}
         run: |
-          cd artifacts
-          mapfile -t assets < <(find . -maxdepth 1 -type f ! -name SHA256SUMS \
-            -printf '%f\n' | LC_ALL=C sort)
-          sha256sum "${assets[@]}" >SHA256SUMS
-          sha256sum --check SHA256SUMS
+          python3 packaging/release/finalize-sbom.py \
+            --input "artifacts/omacalendar-${RELEASE_VERSION}.spdx.json" \
+            --stage stage --version "${RELEASE_VERSION}" --format arch \
+            --output "artifacts/omacalendar-${RELEASE_VERSION}.spdx.json"
 
       - name: Attest archive provenance
         if: github.event_name == 'push'
@@ -219,41 +229,256 @@ jobs:
       - name: Upload candidate artifacts
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
-          name: omacalendar-${{ steps.version.outputs.value }}-release-candidate
+          name: omacalendar-${{ steps.version.outputs.value }}-arch-candidate
           path: artifacts/
           if-no-files-found: error
+          overwrite: true
 
-      - name: Create draft GitHub release
+  arch-runtime:
+    name: Install and remove native Arch package in a clean runtime
+    needs: build-release-candidate
+    runs-on: ubuntu-24.04
+    env:
+      RELEASE_VERSION: ${{ needs.build-release-candidate.outputs.version }}
+      ARCH_PKGVER: ${{ needs.build-release-candidate.outputs.arch_pkgver }}
+    steps:
+      - name: Check out exact candidate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: Download built Arch candidate
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: omacalendar-${{ env.RELEASE_VERSION }}-arch-candidate
+          path: artifacts
+      - name: Install, exercise, and remove the native package
+        run: |
+          docker run --rm -v "$PWD:/source:ro" -v "$PWD/artifacts:/packages:ro" \
+            archlinux:base bash /source/packaging/release/test-arch-install.sh \
+              "${RELEASE_VERSION}" \
+              "/packages/omacalendar-${ARCH_PKGVER}-1-x86_64.pkg.tar.zst"
+
+  debian:
+    name: Build, install, and attest Debian package
+    needs: build-release-candidate
+    runs-on: ubuntu-24.04
+    env:
+      RELEASE_VERSION: ${{ needs.build-release-candidate.outputs.version }}
+    steps:
+      - name: Check out exact candidate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: Build native Ubuntu 26.04 package and run automated matrix
+        env:
+          OMACALENDAR_BUILD_GOOGLE_CLIENT_ID: ${{ secrets.OMACALENDAR_GOOGLE_CLIENT_ID }}
+          OMACALENDAR_BUILD_GOOGLE_CLIENT_SECRET: ${{ secrets.OMACALENDAR_GOOGLE_CLIENT_SECRET }}
+        run: |
+          mkdir artifacts
+          docker build -f packaging/debian/Dockerfile -t omacalendar-debian-builder .
+          export SOURCE_DATE_EPOCH=$(git show -s --format=%ct HEAD)
+          docker run --rm -v "$PWD:/source:ro" -v "$PWD/artifacts:/output" \
+            -e SOURCE_DATE_EPOCH -e OMACALENDAR_BUILD_GOOGLE_CLIENT_ID \
+            -e OMACALENDAR_BUILD_GOOGLE_CLIENT_SECRET \
+            -e OMACALENDAR_REQUIRE_GOOGLE_OAUTH_CONFIG=ON \
+            omacalendar-debian-builder bash packaging/release/build-deb-release.sh \
+              "${RELEASE_VERSION}" /output
+      - name: Install and remove in a clean Ubuntu runtime
+        run: |
+          source packaging/release/version-lib.sh
+          source packaging/release/deb-version-lib.sh
+          package="omacalendar_$(deb_package_version "${RELEASE_VERSION}")_amd64.deb"
+          docker run --rm -v "$PWD:/source:ro" -v "$PWD/artifacts:/packages:ro" \
+            ubuntu:26.04@sha256:2260313b31c8c011cd2eebe728008efac1b3982be73eb71348ea2648d2c0e09b \
+            bash /source/packaging/release/test-deb-package.sh \
+              "${RELEASE_VERSION}" "/packages/${package}"
+          dpkg-deb --extract "artifacts/${package}" debian-stage
+      - name: Generate Debian SPDX SBOM
+        uses: anchore/sbom-action@3ad7283483fc7af8ff2b4ea19663c2d5ca935e26 # v0.24.2
+        with:
+          path: debian-stage
+          format: spdx-json
+          output-file: artifacts/omacalendar-${{ env.RELEASE_VERSION }}-debian.spdx.json
+          upload-artifact: false
+          upload-release-assets: false
+      - name: Complete Debian shipped-file SPDX inventory
+        run: |
+          python3 packaging/release/finalize-sbom.py \
+            --input "artifacts/omacalendar-${RELEASE_VERSION}-debian.spdx.json" \
+            --stage debian-stage --version "${RELEASE_VERSION}" --format debian \
+            --output "artifacts/omacalendar-${RELEASE_VERSION}-debian.spdx.json"
+      - name: Attest Debian provenance
+        if: github.event_name == 'push'
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4
+        with:
+          subject-path: artifacts/*.deb
+      - name: Attest Debian SBOM
+        if: github.event_name == 'push'
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4
+        with:
+          subject-path: artifacts/*.deb
+          sbom-path: artifacts/omacalendar-${{ env.RELEASE_VERSION }}-debian.spdx.json
+      - name: Upload Debian candidate
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: omacalendar-${{ env.RELEASE_VERSION }}-debian-candidate
+          path: artifacts/
+          if-no-files-found: error
+          overwrite: true
+
+  flatpak:
+    name: Build, install, and attest Flatpak bundle
+    needs: build-release-candidate
+    runs-on: ubuntu-24.04
+    env:
+      RELEASE_VERSION: ${{ needs.build-release-candidate.outputs.version }}
+      FLATPAK_USER_DIR: /tmp/omacalendar-flatpak-user
+    steps:
+      - name: Check out exact candidate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: Install Flatpak build tools and runtime
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y flatpak flatpak-builder dbus-x11 jq
+          # Ubuntu hosted runners restrict the user namespaces bubblewrap
+          # needs. This changes only this disposable CI runner, never a user's
+          # workstation or any installed package's permissions.
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          sudo systemctl reload apparmor
+          flatpak remote-add --user --if-not-exists flathub \
+            https://dl.flathub.org/repo/flathub.flatpakrepo
+          flatpak install --user --noninteractive flathub \
+            org.kde.Sdk//6.10 org.kde.Platform//6.10
+      - name: Build exact source as a Flatpak bundle
+        env:
+          OMACALENDAR_BUILD_GOOGLE_CLIENT_ID: ${{ secrets.OMACALENDAR_GOOGLE_CLIENT_ID }}
+          OMACALENDAR_BUILD_GOOGLE_CLIENT_SECRET: ${{ secrets.OMACALENDAR_GOOGLE_CLIENT_SECRET }}
+        run: |
+          git archive --format=tar.gz --prefix="omacalendar-${RELEASE_VERSION}/" \
+            --output=/tmp/omacalendar-flatpak-source.tar.gz HEAD
+          bash packaging/release/build-flatpak.sh \
+            /tmp/omacalendar-flatpak-source.tar.gz "${RELEASE_VERSION}" "$PWD/artifacts"
+      - name: Install and exercise the actual sandbox
+        run: |
+          dbus-run-session -- bash packaging/release/verify-flatpak.sh \
+            "$PWD/artifacts/omacalendar-${RELEASE_VERSION}-linux-x86_64.flatpak" \
+            "${RELEASE_VERSION}"
+      - name: Generate Flatpak SPDX SBOM
+        uses: anchore/sbom-action@3ad7283483fc7af8ff2b4ea19663c2d5ca935e26 # v0.24.2
+        with:
+          path: artifacts/flatpak-stage
+          format: spdx-json
+          output-file: artifacts/omacalendar-${{ env.RELEASE_VERSION }}-flatpak.spdx.json
+          upload-artifact: false
+          upload-release-assets: false
+      - name: Complete Flatpak shipped-file SPDX inventory
+        run: |
+          python3 packaging/release/finalize-sbom.py \
+            --input "artifacts/omacalendar-${RELEASE_VERSION}-flatpak.spdx.json" \
+            --stage artifacts/flatpak-stage --version "${RELEASE_VERSION}" --format flatpak \
+            --output "artifacts/omacalendar-${RELEASE_VERSION}-flatpak.spdx.json"
+      - name: Attest Flatpak provenance
+        if: github.event_name == 'push'
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4
+        with:
+          subject-path: artifacts/*.flatpak
+      - name: Attest Flatpak SBOM
+        if: github.event_name == 'push'
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4
+        with:
+          subject-path: artifacts/*.flatpak
+          sbom-path: artifacts/omacalendar-${{ env.RELEASE_VERSION }}-flatpak.spdx.json
+      - name: Upload Flatpak candidate
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: omacalendar-${{ env.RELEASE_VERSION }}-flatpak-candidate
+          path: |
+            artifacts/*.flatpak
+            artifacts/libsecret-*.tar.xz
+            artifacts/*flatpak*.txt
+            artifacts/*flatpak.spdx.json
+          if-no-files-found: error
+          overwrite: true
+
+  assemble:
+    name: Assemble complete candidate draft
+    needs: [build-release-candidate, arch-runtime, debian, flatpak]
+    runs-on: ubuntu-24.04
+    env:
+      RELEASE_VERSION: ${{ needs.build-release-candidate.outputs.version }}
+    steps:
+      - name: Check out candidate documentation
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: Download Arch candidate
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: omacalendar-${{ env.RELEASE_VERSION }}-arch-candidate
+          path: artifacts
+      - name: Download Debian-format candidate
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: omacalendar-${{ env.RELEASE_VERSION }}-debian-candidate
+          path: artifacts
+      - name: Download Flatpak candidate
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: omacalendar-${{ env.RELEASE_VERSION }}-flatpak-candidate
+          path: artifacts
+      - name: Include exact documentation and write complete checksums
+        run: |
+          git archive --format=tar.gz --prefix="omacalendar-${RELEASE_VERSION}-documentation/" \
+            --output="artifacts/omacalendar-${RELEASE_VERSION}-documentation.tar.gz" \
+            HEAD README.md CHANGELOG.md LICENSE SECURITY.md SUPPORT.md docs
+          cp docs/INSTALL.md artifacts/INSTALL.md
+          cp docs/OWNER_TESTING.md artifacts/OWNER_TESTING.md
+          cp "docs/releases/${RELEASE_VERSION}.md" artifacts/CANDIDATE-ACCEPTANCE.md
+          cd artifacts
+          mapfile -t assets < <(find . -maxdepth 1 -type f ! -name SHA256SUMS \
+            -printf '%f\n' | LC_ALL=C sort)
+          sha256sum "${assets[@]}" >SHA256SUMS
+          sha256sum --check SHA256SUMS
+      - name: Attest source documentation
+        if: github.event_name == 'push'
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4
+        with:
+          subject-path: artifacts/*documentation.tar.gz
+      - name: Upload complete candidate
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: omacalendar-${{ env.RELEASE_VERSION }}-release-candidate
+          path: artifacts/
+          if-no-files-found: error
+          overwrite: true
+      - name: Create complete draft GitHub release
         if: github.event_name == 'push'
         env:
           GH_TOKEN: ${{ github.token }}
-          RELEASE_VERSION: ${{ steps.version.outputs.value }}
         run: |
           existing_state=$(gh release view "${GITHUB_REF_NAME}" --json isDraft --jq .isDraft 2>/dev/null || echo missing)
           if [[ ${existing_state} == true ]]; then
             gh release upload "${GITHUB_REF_NAME}" artifacts/* --clobber
-            if [[ ${RELEASE_VERSION} == *-* ]]; then
-              gh release edit "${GITHUB_REF_NAME}" --prerelease
-            fi
           elif [[ ${existing_state} == false ]]; then
             echo "refusing to replace assets on an already published release" >&2
             exit 1
           else
-            release_flags=(--draft --generate-notes --verify-tag)
+            release_flags=(--draft --verify-tag)
             if [[ ${RELEASE_VERSION} == *-* ]]; then
               release_flags+=(--prerelease)
             fi
             gh release create "${GITHUB_REF_NAME}" artifacts/* \
-              "${release_flags[@]}" \
-              --title "OmaCalendar ${RELEASE_VERSION}"
+              "${release_flags[@]}" --notes-file "docs/releases/${RELEASE_VERSION}.md" \
+              --title "OmaCalendar ${RELEASE_VERSION} - owner testing candidate"
           fi
-
-      - name: Summarize release rehearsal
-        if: github.event_name == 'workflow_dispatch'
+      - name: Summarize candidate disposition
         run: |
           {
-            echo '### Release rehearsal passed'
+            echo '### All package formats and documentation assembled'
             echo
-            echo 'The candidate was built with the protected Google Desktop OAuth configuration.'
-            echo 'No tag or GitHub release was created.'
+            echo 'Arch, Debian and Flatpak were built from the same commit.'
+            echo 'Owner and live-provider acceptance remain separate pending gates.'
+            echo 'The workflow never publishes a release; signed tag runs create drafts only.'
           } >>"${GITHUB_STEP_SUMMARY}"
