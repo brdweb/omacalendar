@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 import hashlib
 import importlib.util
 import json
+import sqlite3
 from pathlib import Path
 import tempfile
 
@@ -52,6 +53,15 @@ def main():
                 "END:VEVENT\r\nEND:VCALENDAR\r\n").encode()
             status, _ = server.request("PUT", server.collection + "floating.ics", body)
             require(status == 201, "floating resource seed rejected")
+            if args.previous_daemon:
+                detached = body.replace(b"floating-provider-acceptance@example.test", b"floating-detached-upgrade@example.test").replace(
+                    b"Floating acceptance seed", b"Floating legacy detached")
+                detached = detached.replace(b"END:VCALENDAR\r\n", (
+                    "BEGIN:VEVENT\r\nUID:floating-detached-upgrade@example.test\r\nDTSTAMP:20300301T120000Z\r\n"
+                    "RECURRENCE-ID:20300311T090000\r\nDTSTART:20300311T090000\r\nDTEND:20300311T100000\r\n"
+                    "SUMMARY:Floating legacy detached exception\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n").encode())
+                status, _ = server.request("PUT", server.collection + "floating-detached.ics", detached)
+                require(status == 201, "legacy detached resource seed rejected")
             harness.start()
             report["version"] = harness.call("system.info")["version"]
             aid = harness.call("accounts.addCalDav", {
@@ -76,25 +86,74 @@ def main():
 
             wait_for(lambda: len(rows("Floating acceptance seed")) == 3, "floating seed pull")
             if args.previous_daemon:
+                report["previousVersion"] = report["version"]
                 report["cachedKindsBeforeUpgrade"] = sorted({e["timeKind"] for e in rows("Floating acceptance seed")})
+                require(report["cachedKindsBeforeUpgrade"] == ["zoned"], "upgrade fixture was not misclassified by RC3")
+                server.stop()
+                master = rows("Floating acceptance seed")[0]
+                harness.call("events.update", {
+                    "eventId": master["id"], "expectedLocalRevision": master["localRevision"],
+                    "clientMutationId": "legacy-offline-pending", "recurrenceScope": "series",
+                    "patch": {"description": "Unsent RC3 notes survive metadata refresh"}})
                 harness.stop()
+
+                def snapshot():
+                    with sqlite3.connect(harness.database_path) as db:
+                        db.row_factory = sqlite3.Row
+                        return {
+                            "events": [dict(row) for row in db.execute(
+                                "SELECT e.* FROM events e JOIN calendars c ON c.id=e.calendar_id WHERE c.account_id=? ORDER BY e.id", (aid,))],
+                            "outbox": [dict(row) for row in db.execute(
+                                "SELECT * FROM outbox WHERE account_id=? ORDER BY id", (aid,))],
+                            "version": db.execute("SELECT value_json FROM provider_state WHERE account_id=? AND key='caldav_time_kind_version'", (aid,)).fetchone(),
+                        }
+
+                baseline = snapshot()
+                require(len(baseline["outbox"]) == 1, "expected one durable offline mutation")
+                with sqlite3.connect(harness.database_path) as db:
+                    db.execute("CREATE TRIGGER reject_refresh_checkpoint BEFORE INSERT ON provider_state "
+                               "WHEN new.key='caldav_time_kind_version' BEGIN SELECT RAISE(ABORT,'acceptance interruption'); END")
                 harness.daemon = args.daemon.resolve()
                 harness.start()
-                harness.call("sync.account", {"accountId": aid})
-                wait_for(lambda: harness.call("sync.status", {"accountId": aid}).get("state") == "idle", "upgrade sync")
+                report["version"] = harness.call("system.info")["version"]
+                harness.stop()
+                require(snapshot() == baseline, "interrupted refresh changed rows/queue/checkpoint")
+                report["checks"].append("Interrupted/failed upgrade leaves cached rows and pending mutation intact; checkpoint remains absent")
+                with sqlite3.connect(harness.database_path) as db:
+                    db.execute("DROP TRIGGER reject_refresh_checkpoint")
+                harness.start()
                 report["cachedKindsAfterUpgradeSync"] = sorted({e["timeKind"] for e in rows("Floating acceptance seed")})
-                if any(e["timeKind"] != "floating" for e in rows("Floating acceptance seed")):
-                    # A remote revision forces readback when unchanged-ctag
-                    # optimization otherwise leaves the old cached kind intact.
-                    status, _ = server.request("PUT", server.collection + "floating.ics",
-                        body.replace(b"DTSTAMP:20300301T120000Z", b"DTSTAMP:20300301T120001Z"))
-                    require(status in (201, 204), "upgrade remote refresh rejected")
-                    harness.call("sync.account", {"accountId": aid})
-                    wait_for(lambda: all(e["timeKind"] == "floating" for e in rows("Floating acceptance seed")),
-                             "old cached floating metadata refresh")
-                    report["checks"].append("RC3 cached Zoned metadata normalized after a real remote revision refresh")
-                else:
-                    report["checks"].append("RC3 cached floating metadata normalized on upgrade sync")
+                require(report["cachedKindsAfterUpgradeSync"] == ["floating"],
+                        "offline upgrade failed to refresh unchanged cached floating metadata")
+                harness.stop()
+                normalized = snapshot()
+                require(normalized["version"] is not None, "completed refresh did not checkpoint")
+                require(len(baseline["events"]) == len(normalized["events"]) and
+                        len(baseline["outbox"]) == len(normalized["outbox"]), "refresh added or removed durable rows")
+                for original, after in zip(baseline["events"], normalized["events"]):
+                    expected = dict(original)
+                    if original["uid"] in ("floating-provider-acceptance@example.test", "floating-detached-upgrade@example.test"):
+                        expected["time_kind"] = "floating"
+                    require(after == expected, "metadata refresh changed canonical fields, local edit, identifiers or timestamps")
+                for original, after in zip(baseline["outbox"], normalized["outbox"]):
+                    expected = dict(original)
+                    old_payload = json.loads(expected.pop("payload_json"))
+                    new_payload = json.loads(after["payload_json"])
+                    old_payload["timeKind"] = "floating"
+                    require(old_payload == new_payload, "metadata refresh changed queued operation content")
+                    require(expected == {key: value for key, value in after.items() if key != "payload_json"},
+                            "metadata refresh changed durable mutation identity, state or timestamps")
+                report["checks"].append("Offline RC3 master/detached metadata refresh preserves event IDs, UTC references, local notes, revisions and queue state")
+                harness.start()
+                require(all(e["timeKind"] == "floating" for e in rows("Floating acceptance seed")), "offline normalized cache did not survive restart")
+                require(len(rows("Floating legacy detached")) == 3, "legacy detached refresh duplicated or lost an occurrence")
+                server.start()
+                harness.call("sync.account", {"accountId": aid})
+                wait_for(lambda: "Unsent RC3 notes survive metadata refresh" in resource_event("Floating acceptance seed"), "legacy queued provider write")
+                wait_for(lambda: get(master).get("syncState") == "clean", "legacy queued mutation acknowledgment")
+                require("DTSTART:20300309T090000\r\n" in resource_event("Floating acceptance seed"),
+                        "legacy queued mutation changed floating time on the wire")
+                report["checks"].append("Previously queued RC3 edit replays to real Radicale as floating after offline upgrade and clean acknowledgment")
             require(all(e["timeKind"] == "floating" for e in rows("Floating acceptance seed")),
                     "provider floating times were not classified as floating")
             report["checks"].append("Provider-seeded floating recurrence parsed as Floating")

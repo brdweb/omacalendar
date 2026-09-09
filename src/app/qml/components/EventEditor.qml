@@ -57,6 +57,9 @@ Dialog {
     readonly property bool futureScopeSupported: !movingCalendars
                                                  && activeCapabilities.thisAndFuture
                                                     === true
+    readonly property bool futureScopeCheckAvailable: !readOnly && !movingCalendars
+                                                       && activeProvider === "caldav"
+                                                       && activeCalendar.enabled !== false
 
     signal saveRequested(var eventData, var mutationOptions)
     signal removeRequested(string eventId, var mutationOptions)
@@ -831,15 +834,30 @@ Dialog {
                 }
                 Text {
                     textFormat: Text.PlainText
+                    objectName: "futureSupportMessage"
                     visible: editor.editing && editor.recurring
                              && !editor.futureScopeSupported
                     Layout.fillWidth: true
                     text: editor.movingCalendars
                           ? qsTr("This and future occurrences cannot be moved between calendars. Choose this occurrence or the entire series.")
-                          : qsTr("This calendar has not advertised safe support for changing this and future occurrences.")
+                          : editor.activeCapabilities.thisAndFutureProbeState === "failed"
+                            ? qsTr("Support check failed: %1. This and future changes remain disabled.")
+                                .arg(editor.activeCapabilities.thisAndFutureProbeMessage || qsTr("The server could not be verified"))
+                            : editor.futureScopeCheckAvailable
+                              ? qsTr("Check server support to enable this and future changes. The check creates and removes a temporary test event; your events are unchanged.")
+                              : qsTr("This calendar does not support changing this and future occurrences.")
                     color: Theme.mutedText
                     font.pixelSize: Theme.smallFontSize
                     wrapMode: Text.Wrap
+                }
+                AppButton {
+                    objectName: "checkFutureSupport"
+                    visible: editor.editing && editor.recurring
+                             && !editor.futureScopeSupported
+                             && editor.futureScopeCheckAvailable
+                    text: qsTr("Check this-and-future support")
+                    enabled: App.connected && !App.busy
+                    onClicked: App.probeThisAndFuture(String(editor.activeCalendar.id || ""))
                 }
                 Text {
                     textFormat: Text.PlainText

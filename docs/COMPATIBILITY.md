@@ -15,7 +15,7 @@ until the stable 1.0 owner acceptance gate passes.
 | Clang | Current Arch/LLVM Clang | Clang 22.1.8 Werror and ASan/UBSan builds pass; exact-candidate CI remains |
 | systemd | User manager shipped by release-reference Omarchy | Staged `/usr` unit validation passes; VM gate remains |
 
-The `1.0.0-rc.3` candidate adds Ubuntu 26.04 amd64 and a Flatpak x86-64 bundle
+The `1.0.0-rc.4` candidate includes Ubuntu 26.04 amd64 and a Flatpak x86-64 bundle
 using KDE runtime 6.10. Packaging qualification is recorded in the candidate
 acceptance record; neither new format has completed owner acceptance. Debian-format
 packaging ships a private libical 4 without replacing the distribution's libical 3.
@@ -49,7 +49,8 @@ the untested portions of every provider matrix remain release blockers.
 | `1.0.0-beta.1` | 2 | 2 | Qualified widget releases declare IPC 2 and discover optional methods | Public-testing beta candidate |
 | `1.0.0-rc.1` | 2 | 2 | Same protocol boundary as RC2 | Superseded before owner artifact delivery; signed tag preserved |
 | `1.0.0-rc.2` | 2 | 2 | Native packages support IPC 2 widgets; Flatpak uses a separate profile | Superseded after package inventory/download-name verification; historical draft |
-| `1.0.0-rc.3` | 2 | 2 | Native packages support IPC 2 widgets; Flatpak uses a separate profile | Corrected packaging candidate; fresh artifact and owner acceptance pending |
+| `1.0.0-rc.3` | 2 | 2 | Native packages support IPC 2 widgets; Flatpak uses a separate profile | Failed expanded correctness acceptance; original artifacts preserved |
+| `1.0.0-rc.4` | 2 | 2 | Native packages support IPC 2 widgets; Flatpak uses a separate profile | Replacement runtime-fix candidate; exact-artifact acceptance pending |
 | 1.0.x | 2 | 2 | Protocol/capability based; no widget version lock | Planned stable app line |
 
 IPC major-version mismatches are rejected. Minor additions require capability

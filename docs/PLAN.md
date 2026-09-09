@@ -1,9 +1,14 @@
 # OmaCalendar 1.0 implementation plan
 
-The [stable preparation plan](STABLE_PLAN.md) tracks the `1.0.0-rc.3` draft,
+The [stable preparation plan](STABLE_PLAN.md) tracks the `1.0.0-rc.4` replacement,
 Arch/Ubuntu `.deb`/Flatpak packaging, and the owner pass scheduled for
 2026-09-09. This document remains the stable gate authority; pending checks
 below are not waived by creating candidate artifacts.
+
+The [September 9 acceptance report](ACCEPTANCE_2026-09-09.md) supersedes older
+test-status snapshots below. The owner authorized committing the fixes and
+continuing through qualification and release on September 9. RC3's original
+artifacts failed expanded acceptance and are retained unchanged.
 
 ## Product outcome
 

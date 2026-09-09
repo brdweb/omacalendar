@@ -6,6 +6,26 @@ Versioning once public releases begin.
 
 ## [Unreleased]
 
+## [1.0.0-rc.4] - 2026-09-09
+
+### Fixed
+
+- Preserve selected occurrence dates and existing overrides when recurring
+  events receive partial edits; prevent duplicate floating instances.
+- Preserve all-day and floating CalDAV time kinds, recurrence wire identities,
+  acknowledgments, and client references across repeated edits and restart.
+- Resolve competing edits using real modification times; retain ambiguous
+  conflicts and prevent sync bookkeeping from changing edit chronology.
+- Preserve the selected local date west of UTC and expose accessible event
+  names and descriptions in Agenda and search results.
+
+### Added
+
+- Isolated installed-desktop, Secret Service, notification, socket, Radicale,
+  Nextcloud, floating-recurrence, and expanded upgrade/recovery acceptance tests.
+- Evidence distinguishing failed RC3 artifacts from verified source fixes and
+  the remaining exact-candidate/provider/desktop release gates.
+
 ## [1.0.0-rc.3] - 2026-09-08
 
 ### Fixed
@@ -185,7 +205,8 @@ Versioning once public releases begin.
   and emits verifiable build provenance for tagged release candidates. The
   separately documented historical OAuth incident remains a pre-tag gate.
 
-[Unreleased]: https://github.com/brdweb/omacalendar/compare/v1.0.0-rc.3...HEAD
+[Unreleased]: https://github.com/brdweb/omacalendar/compare/v1.0.0-rc.4...HEAD
+[1.0.0-rc.4]: https://github.com/brdweb/omacalendar/compare/v1.0.0-rc.3...v1.0.0-rc.4
 [1.0.0-rc.3]: https://github.com/brdweb/omacalendar/compare/v1.0.0-rc.2...v1.0.0-rc.3
 [1.0.0-rc.2]: https://github.com/brdweb/omacalendar/compare/v1.0.0-rc.1...v1.0.0-rc.2
 [1.0.0-rc.1]: https://github.com/brdweb/omacalendar/compare/v1.0.0-beta.1...v1.0.0-rc.1

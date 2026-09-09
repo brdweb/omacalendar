@@ -549,6 +549,11 @@ def run_account_lifecycle_contract(
     methods: set[str],
     initial_revision: int,
 ) -> None:
+    require("calendars.probeThisAndFuture" in methods, "calendar capability check was not advertised")
+    for calendar_id, expected in (("local-default", "capability_probe_unavailable"),
+                                  ("missing-calendar", "not_found")):
+        probe_error = harness.call_error("calendars.probeThisAndFuture", {"calendarId": calendar_id})
+        assert_ipc_error(probe_error, expected, "unavailable calendar capability check")
     require("accounts.addLocal" not in methods, "device-only account add was advertised")
     local_add_error = harness.call_error(
         "accounts.addLocal", {"displayName": "Second local account"}

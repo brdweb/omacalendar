@@ -1959,6 +1959,143 @@ class DatabaseTest final : public QObject {
     QVERIFY(db.eventByRemoteId(calendar.id, pruned.remoteId).id.isEmpty());
   }
 
+  void calDavTimeMetadataRefreshIsAtomicAndPreservesPendingEdits() {
+    QTemporaryDir directory;
+    const QString path = directory.filePath(QStringLiteral("time-refresh.sqlite"));
+    Database db;
+    QString error;
+    QVERIFY2(db.open(path, &error), qPrintable(error));
+    Account account =
+        makeAccount(QStringLiteral("refresh-account"), QStringLiteral("CalDAV"));
+    account.provider = ProviderKind::CalDav;
+    QVERIFY(db.upsertAccount(account, &error));
+    Calendar calendar = makeCalendar(QStringLiteral("refresh-calendar"), account.id);
+    QVERIFY(db.upsertCalendar(calendar, &error));
+    Event first = makeRemoteEvent(calendar.id, QStringLiteral("a-legacy"), 0);
+    first.startTimeZone.clear();
+    first.endTimeZone.clear();
+    first.rawPayload = QStringLiteral("retained floating source");
+    first.rawFormat = QStringLiteral("text/calendar");
+    QVERIFY(db.applyRemoteEvent(first, &error));
+    Event second = first;
+    second.id = QStringLiteral("b-legacy");
+    second.remoteId += QStringLiteral("-second");
+    second.uid += QStringLiteral("-second");
+    QVERIFY(db.applyRemoteEvent(second, &error));
+    Event explicitZone = first;
+    explicitZone.id = QStringLiteral("c-intentional-zone");
+    explicitZone.remoteId += QStringLiteral("-zone");
+    explicitZone.uid += QStringLiteral("-zone");
+    explicitZone.startTimeZone = QStringLiteral("America/New_York");
+    explicitZone.endTimeZone = explicitZone.startTimeZone;
+    QVERIFY(db.applyRemoteEvent(explicitZone, &error));
+    first = db.event(first.id);
+    first.summary = QStringLiteral("Unsent local title");
+    first.description = QStringLiteral("Preserve local notes");
+    QVERIFY(db.saveLocalEvent(&first, OutboxOperation::Update, &error,
+                              QStringLiteral("stable-refresh-mutation")));
+    Event conflictingRemote = first;
+    conflictingRemote.etag = QStringLiteral("changed-provider-revision");
+    conflictingRemote.description = QStringLiteral("Concurrent provider notes");
+    QVERIFY(db.recordProviderConflict(db.outboxItems().first().id, &conflictingRemote,
+                                      &error));
+    const OutboxItem queued = db.outboxItems().first();
+    const Conflict beforeConflict = db.conflicts().first();
+    const QJsonObject beforeEvent = toStorageJson(db.event(first.id));
+    const QJsonObject beforeSecond = toStorageJson(db.event(second.id));
+    const QJsonObject beforeZone = toStorageJson(db.event(explicitZone.id));
+    const qint64 revision = db.changeRevision();
+    const auto resolver = [](const Event& value, TimeKind* kind, QString*) {
+      if (value.rawPayload != QStringLiteral("retained floating source")) return false;
+      *kind = TimeKind::Floating;
+      return true;
+    };
+    int calls = 0;
+    QVERIFY(!db.refreshCalDavTimeKinds(
+        account.id,
+        [&calls, &resolver](const Event& value, TimeKind* kind, QString* message) {
+          if (++calls == 2) {
+            *message = QStringLiteral("interrupted source parsing");
+            return false;
+          }
+          return resolver(value, kind, message);
+        },
+        &error));
+    QCOMPARE(db.changeRevision(), revision);
+    QCOMPARE(toStorageJson(db.event(first.id)), beforeEvent);
+    QCOMPARE(toStorageJson(db.event(second.id)), beforeSecond);
+    QCOMPARE(db.outboxItems().first().payload, queued.payload);
+    QCOMPARE(db.conflicts().first().localSnapshot, beforeConflict.localSnapshot);
+    QCOMPARE(db.conflicts().first().remoteSnapshot, beforeConflict.remoteSnapshot);
+    QCOMPARE(
+        db.providerState(account.id, {}, QStringLiteral("caldav_time_kind_version"), 0)
+            .toInt(),
+        0);
+
+    // Force the final checkpoint write to fail after event/outbox updates.
+    const QString connection = QStringLiteral("time-refresh-injector");
+    {
+      QSqlDatabase inject =
+          QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), connection);
+      inject.setDatabaseName(path);
+      QVERIFY(inject.open());
+      QSqlQuery query(inject);
+      QVERIFY(query.exec(QStringLiteral(
+          "CREATE TRIGGER reject_refresh_checkpoint BEFORE INSERT ON provider_state "
+          "WHEN new.key='caldav_time_kind_version' BEGIN SELECT "
+          "RAISE(ABORT,'checkpoint unavailable'); END")));
+      error.clear();
+      QVERIFY(!db.refreshCalDavTimeKinds(account.id, resolver, &error));
+      QVERIFY(error.contains(QStringLiteral("checkpoint unavailable")));
+      QCOMPARE(toStorageJson(db.event(first.id)), beforeEvent);
+      QCOMPARE(db.outboxItems().first().payload, queued.payload);
+      QCOMPARE(db.changeRevision(), revision);
+      QVERIFY(query.exec(QStringLiteral("DROP TRIGGER reject_refresh_checkpoint")));
+      inject.close();
+    }
+    QSqlDatabase::removeDatabase(connection);
+    db.close();
+    QVERIFY(db.open(path, &error));
+    error.clear();
+    QVERIFY2(db.refreshCalDavTimeKinds(account.id, resolver, &error),
+             qPrintable(error));
+    QJsonObject expected = beforeEvent;
+    expected.insert(QStringLiteral("timeKind"), QStringLiteral("floating"));
+    QCOMPARE(toStorageJson(db.event(first.id)), expected);
+    expected = beforeSecond;
+    expected.insert(QStringLiteral("timeKind"), QStringLiteral("floating"));
+    QCOMPARE(toStorageJson(db.event(second.id)), expected);
+    QCOMPARE(toStorageJson(db.event(explicitZone.id)), beforeZone);
+    const OutboxItem after = db.outboxItems().first();
+    expected = queued.payload;
+    expected.insert(QStringLiteral("timeKind"), QStringLiteral("floating"));
+    QCOMPARE(after.payload, expected);
+    QCOMPARE(toJson(after), toJson(queued));
+    QCOMPARE(after.expectedRevision, queued.expectedRevision);
+    QCOMPARE(after.createdAt, queued.createdAt);
+    QCOMPARE(after.updatedAt, queued.updatedAt);
+    const Conflict afterConflict = db.conflicts().first();
+    expected = beforeConflict.localSnapshot;
+    expected.insert(QStringLiteral("timeKind"), QStringLiteral("floating"));
+    QCOMPARE(afterConflict.localSnapshot, expected);
+    expected = beforeConflict.remoteSnapshot;
+    expected.insert(QStringLiteral("timeKind"), QStringLiteral("floating"));
+    QCOMPARE(afterConflict.remoteSnapshot, expected);
+    QCOMPARE(afterConflict.id, beforeConflict.id);
+    QCOMPARE(afterConflict.mutationId, beforeConflict.mutationId);
+    QCOMPARE(afterConflict.createdAt, beforeConflict.createdAt);
+    QCOMPARE(db.calendar(calendar.id).syncToken, calendar.syncToken);
+    QCOMPARE(
+        db.providerState(account.id, {}, QStringLiteral("caldav_time_kind_version"), 0)
+            .toInt(),
+        1);
+    db.close();
+    QVERIFY(db.open(path, &error));
+    QVERIFY(db.refreshCalDavTimeKinds(
+        account.id, [](const Event&, TimeKind*, QString*) { return false; }, &error));
+    QCOMPARE(db.event(first.id).timeKind, TimeKind::Floating);
+  }
+
   void providerResourcesAreNormalizedAndHydrated() {
     QTemporaryDir directory;
     QVERIFY(directory.isValid());

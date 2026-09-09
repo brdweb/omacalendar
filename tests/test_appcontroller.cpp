@@ -27,6 +27,7 @@ class AppControllerTest final : public QObject {
   void wallTimeConversionRejectsDstGap();
   void wallTimeConversionResolvesDstOverlapToStandardTime();
   void wallTimeConversionRejectsInvalidInput();
+  void localTimeConversionsMatchDesktopTime();
   void exposesSystemTimeZoneChoices();
   void freshPreferencesDefaultToGenericNotifications();
   void browserGoogleFlowRejectsEmptyClientId();
@@ -207,6 +208,25 @@ void AppControllerTest::wallTimeConversionRejectsInvalidInput() {
   QCOMPARE(
       controller.utcToWallTime(QStringLiteral("not-a-date"), QStringLiteral("UTC")),
       QString());
+}
+
+void AppControllerTest::localTimeConversionsMatchDesktopTime() {
+  AppController controller;
+  // Do not force TZ: this also covers minimal /etc environments where the
+  // named system-zone fallback can disagree with Qt's actual local clock.
+  for (const auto& date : {QDate(2030, 1, 15), QDate(2030, 7, 15)}) {
+    const QDateTime local(date, QTime(9, 30), QTimeZone::LocalTime);
+    const QString utc = local.toUTC().toString(Qt::ISODateWithMs);
+    QCOMPARE(controller.wallTimeToUtc(date.toString(Qt::ISODate),
+                                      QStringLiteral("09:30"), {}),
+             utc);
+    QCOMPARE(controller.utcToWallTime(utc, {}),
+             local.toString(QStringLiteral("yyyy-MM-dd'T'HH:mm:ss.zzz")));
+    // An explicit named zone is independent of the desktop's local clock.
+    QCOMPARE(controller.wallTimeToUtc(date.toString(Qt::ISODate),
+                                      QStringLiteral("09:30"), QStringLiteral("UTC")),
+             date.toString(Qt::ISODate) + QStringLiteral("T09:30:00.000Z"));
+  }
 }
 
 void AppControllerTest::exposesSystemTimeZoneChoices() {

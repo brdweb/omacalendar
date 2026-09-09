@@ -1,5 +1,9 @@
 # Agent-executed acceptance — 2026-09-09
 
+This is the original RC3 assessment. Subsequent fixes and release work are
+tracked in the [RC4 acceptance record](releases/1.0.0-rc.4.md); its newer
+evidence supersedes the open-work status below without changing RC3 results.
+
 **Recommendation: do not publish or promote the RC3 app candidate.** Expanded
 testing found reproducible data-correctness and installed-desktop failures
 despite the earlier successful build, packaging and smoke checks. Local source

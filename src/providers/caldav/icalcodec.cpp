@@ -293,7 +293,7 @@ ParsedTime parseTime(icalproperty* property, icalcomponent* calendar) {
   // RFC 5545 floating times have no absolute instant. The desktop's current
   // zone is the least surprising interpretation for the canonical UTC cache;
   // the empty source TZID is retained so the distinction is not lost.
-  result.utc = QDateTime(result.date, time, QTimeZone::systemTimeZone()).toUTC();
+  result.utc = QDateTime(result.date, time, QTimeZone::LocalTime).toUTC();
   return result;
 }
 
@@ -1005,9 +1005,8 @@ icaltimetype zonedValue(const QDateTime& dateTime, const QString& timeZone) {
 
 icalproperty* dateTimeProperty(icalproperty_kind kind, const QDateTime& dateTime,
                                const QString& timeZone, bool floating = false) {
-  const QByteArray floatingValue = dateTime.toTimeZone(QTimeZone::systemTimeZone())
-                                       .toString(QStringLiteral("yyyyMMdd'T'HHmmss"))
-                                       .toLatin1();
+  const QByteArray floatingValue =
+      dateTime.toLocalTime().toString(QStringLiteral("yyyyMMdd'T'HHmmss")).toLatin1();
   const icaltimetype value = floating ? icaltime_from_string(floatingValue.constData())
                                       : zonedValue(dateTime, timeZone);
   icalproperty* property = nullptr;

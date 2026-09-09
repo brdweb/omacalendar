@@ -618,6 +618,16 @@ Drawer {
                 valueRole: "value"
                 Accessible.name: qsTr("Invitation recurrence scope")
             }
+            Text {
+                objectName: "invitationFutureScopeMessage"
+                textFormat: Text.PlainText
+                Layout.fillWidth: true
+                visible: root.futureInvitationResponseUnavailable()
+                text: qsTr("Reply to this occurrence or the entire series. This server has not proven support for replies to this and future occurrences.")
+                color: Theme.mutedText
+                font.pixelSize: Theme.smallFontSize
+                wrapMode: Text.Wrap
+            }
             RowLayout {
                 Layout.fillWidth: true
                 Item { Layout.fillWidth: true }
@@ -677,6 +687,14 @@ Drawer {
         return provider === "google" || capabilities.attendeeWrites === true
     }
 
+    function futureInvitationResponseUnavailable() {
+        const calendar = calendarForId(pendingInvitation.calendarId)
+        const capabilities = calendar.capabilities || ({})
+        const provider = String(capabilities.provider
+                                || providerForCalendar(pendingInvitation.calendarId))
+        return provider === "caldav" && capabilities.rsvpThisAndFuture !== true
+    }
+
     function invitationScopeChoices() {
         const choices = [{"text": qsTr("Choose recurrence scope…"), "value": ""}]
         if (String(pendingInvitation.recurrenceId || "").length > 0)
@@ -702,6 +720,10 @@ Drawer {
     }
 
     function completeInvitationResponse(scope) {
+        if (!scope || !invitationScopeChoices().some(function(choice) {
+            return choice.value === scope
+        }))
+            return
         const value = pendingInvitation
         const response = pendingInvitationResponse
         pendingInvitation = ({})

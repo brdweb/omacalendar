@@ -271,18 +271,45 @@ class Suite:
             smoke.payload = original_payload
             server.server.RequestHandlerClass = original_handler
 
-    def future(self):
-        event, path = self.seed("future", "Acceptance future series", ["RRULE:FREQ=DAILY;COUNT=5"])
+    def future(self, require_fresh=False):
+        # Keep the first-use and already-proven scenarios independent now that
+        # first-use succeeds and retains its own detached RANGE exception.
+        name = "future" if require_fresh else "future-qualified"
+        original_summary = "Acceptance " + name + " series"
+        changed_summary = "Acceptance " + name + " changed"
+        event, path = self.seed(name, original_summary, ["RRULE:FREQ=DAILY;COUNT=5"])
         occurrences = [e for e in self.rows() if e["id"] == event["id"]]
-        self.update(event, {"summary": "Acceptance future changed"}, "future", occurrences[2]["recurrenceId"])
+        calendar = next(c for c in smoke.calendars(self.h, self.account_id) if c["id"] == self.calendar_id)
+        if require_fresh:
+            require(calendar.get("capabilities", {}).get("thisAndFuture") is not True,
+                "fresh calendar was qualified before its explicit probe")
+            before = self.remote(path)
+            blocked = self.h.call_error("events.update", {"eventRef": {"eventId": event["id"],
+                "recurrenceId": occurrences[2]["recurrenceId"]}, "recurrenceScope": "future",
+                "clientMutationId": str(uuid.uuid4()), "patch": {"summary": "Must remain gated"}})
+            require(blocked.get("code") == "recurrence_scope_unsupported", "unproven future mutation was not gated")
+            require(self.remote(path) == before, "rejected future update touched the remote event")
+            wait_for(lambda: self.h.call("sync.status", {"accountId": self.account_id}).get("state") == "idle",
+                "idle account before explicit capability check")
+            result = self.h.call("calendars.probeThisAndFuture", {"calendarId": self.calendar_id})
+            require(result.get("state") == "checking", "fresh check did not start asynchronously")
+            wait_for(lambda: next(c for c in smoke.calendars(self.h, self.account_id) if c["id"] == self.calendar_id)
+                .get("capabilities", {}).get("thisAndFutureProbeState") == "supported", "explicit fresh-calendar proof")
+            require(self.remote(path) == before, "capability probe changed the user's event")
+            status, collection = self.server.request("GET", self.server.collection)
+            require(status == 200 and b"OmaCalendar capability probe" not in collection,
+                "capability probe left a temporary event on the server")
+            require(not any(o.get("eventId") == event["id"] for o in self.h.call("operations.list")["items"]),
+                "capability check created a user-event operation")
+        self.update(event, {"summary": changed_summary}, "future", occurrences[2]["recurrenceId"])
         wait_for(lambda: "RANGE=THISANDFUTURE" in self.remote(path), "qualified future remote mutation", timeout=45)
         calendar = next(c for c in smoke.calendars(self.h, self.account_id) if c["id"] == self.calendar_id)
         require(calendar.get("capabilities", {}).get("thisAndFuture") is True, "successful probe did not persist capability")
         self.h.stop(); self.h.start(); self.sync()
-        rows = [e for e in self.rows() if e.get("summary") in ("Acceptance future changed", "Acceptance future series")]
-        require(sum(e.get("summary") == "Acceptance future changed" for e in rows) == 3, "future edit did not affect last three instances")
-        require(sum(e.get("summary") == "Acceptance future series" for e in rows) == 2, "future edit altered earlier instances")
-        return "RANGE=THISANDFUTURE write/readback, persisted capability and two-before/three-after presentation"
+        rows = [e for e in self.rows() if e.get("summary") in (changed_summary, original_summary)]
+        require(sum(e.get("summary") == changed_summary for e in rows) == 3, "future edit did not affect last three instances")
+        require(sum(e.get("summary") == original_summary for e in rows) == 2, "future edit altered earlier instances")
+        return "Explicit disposable probe/cleanup without user-event writes; RANGE=THISANDFUTURE write/readback, persisted capability and two-before/three-after presentation" if require_fresh else "RANGE=THISANDFUTURE write/readback, persisted capability and two-before/three-after presentation"
 
     def future_after_external_proof(self):
         event, path = self.seed("future-proof", "External proof master", ["RRULE:FREQ=DAILY;COUNT=5"])
@@ -429,7 +456,7 @@ def main():
         suite.case("Radicale baseline exact-binary transport", suite.baseline)
         if suite.calendar_id:
             suite.case("Radicale recurrence exception and cancellation", suite.recurrence)
-            suite.case("Radicale this-and-future qualification", suite.future)
+            suite.case("Radicale this-and-future qualification", lambda: suite.future(require_fresh=True))
             suite.case("Radicale this-and-future after external server proof", suite.future_after_external_proof)
             suite.case("Radicale automatic resolution with newer remote edit", suite.automatic_conflict)
             suite.case("Radicale automatic resolution with newer local edit", lambda: suite.automatic_conflict(True))

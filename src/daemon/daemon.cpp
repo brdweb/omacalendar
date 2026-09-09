@@ -263,7 +263,7 @@ QDateTime recurrenceDateTime(QString recurrenceId, const QString& timeZone) {
   }
   const QTimeZone zone = utc ? QTimeZone(QTimeZone::UTC) : QTimeZone(timeZone.toUtf8());
   return QDateTime(result.date(), result.time(),
-                   zone.isValid() ? zone : QTimeZone::systemTimeZone())
+                   zone.isValid() ? zone : QTimeZone(QTimeZone::LocalTime))
       .toUTC();
 }
 
@@ -537,6 +537,10 @@ void Daemon::registerHandlers() {
   m_router.registerHandler(QStringLiteral("calendars.updatePreferences"),
                            [this](const QJsonObject& params, ipc::Error* error) {
                              return onCalendarsUpdatePreferences(params, error);
+                           });
+  m_router.registerHandler(QStringLiteral("calendars.probeThisAndFuture"),
+                           [this](const QJsonObject& params, ipc::Error* error) {
+                             return onCalendarsProbeThisAndFuture(params, error);
                            });
   m_router.registerHandler(QStringLiteral("calendarSets.list"),
                            [this](const QJsonObject& params, ipc::Error* error) {
@@ -1370,6 +1374,45 @@ QJsonValue Daemon::onCalendarsUpdatePreferences(const QJsonObject& params,
                      {{QStringLiteral("accountId"), current.accountId},
                       {QStringLiteral("revision"), m_database.changeRevision()}});
   return toJson(m_database.calendar(calendarId));
+}
+
+QJsonValue Daemon::onCalendarsProbeThisAndFuture(const QJsonObject& params,
+                                                 ipc::Error* error) {
+  QString calendarId;
+  if (!validateRequiredString(params, QStringLiteral("calendarId"), &calendarId,
+                              error)) {
+    return {};
+  }
+  const Calendar calendar = m_database.calendar(calendarId);
+  const Account account = m_database.account(calendar.accountId);
+  if (calendar.id.isEmpty()) {
+    if (error != nullptr) {
+      *error = {QStringLiteral("not_found"), QStringLiteral("Calendar not found"),
+                false};
+    }
+    return {};
+  }
+  if (account.provider != ProviderKind::CalDav || calendar.readOnly ||
+      !calendar.enabled || !account.enabled) {
+    if (error != nullptr) {
+      *error = {QStringLiteral("capability_probe_unavailable"),
+                QStringLiteral("Choose an enabled, writable CalDAV calendar"), false};
+    }
+    return {};
+  }
+  QString message;
+  if (!m_caldav.probeThisAndFuture(calendarId, &message)) {
+    if (error != nullptr) {
+      *error = {QStringLiteral("capability_probe_not_started"), message, true};
+    }
+    return {};
+  }
+  return QJsonObject{
+      {QStringLiteral("calendarId"), calendarId},
+      {QStringLiteral("state"),
+       calendar.capabilities.value(QStringLiteral("thisAndFutureProven")).toBool()
+           ? QStringLiteral("supported")
+           : QStringLiteral("checking")}};
 }
 
 QJsonValue Daemon::onCalendarSetsList(const QJsonObject&, ipc::Error* error) {
@@ -2595,13 +2638,17 @@ QJsonValue Daemon::onEventsRespond(const QJsonObject& params, ipc::Error* error)
     }
     return {};
   }
+  const QString futureResponseCapability = account.provider == ProviderKind::CalDav
+                                               ? QStringLiteral("rsvpThisAndFuture")
+                                               : QStringLiteral("thisAndFuture");
   if (recurrenceScope == QStringLiteral("future") &&
-      !calendar.capabilities.value(QStringLiteral("thisAndFuture")).toBool()) {
+      !calendar.capabilities.value(futureResponseCapability).toBool()) {
     if (error != nullptr) {
-      *error = {QStringLiteral("recurrence_scope_unsupported"),
-                QStringLiteral("This calendar cannot safely apply this-and-future "
-                               "responses"),
-                false};
+      *error = {
+          QStringLiteral("recurrence_scope_unsupported"),
+          QStringLiteral("This calendar cannot safely send this-and-future "
+                         "responses. Reply to this occurrence or the entire series"),
+          false};
     }
     return {};
   }

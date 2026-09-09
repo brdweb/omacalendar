@@ -1,18 +1,18 @@
 # Stable release preparation
 
 The target is OmaCalendar `1.0.0` and an independently qualified widget
-`0.1.0`. The owner requested preparation on 2026-09-08 and will perform the
-hands-on acceptance pass on 2026-09-09. Candidate versions are
-`1.0.0-rc.3` and `0.1.0-rc.3`; neither is a declaration that stable gates pass.
+`0.1.0`. The owner authorized committing the tested changes and continuing
+through qualification and release on 2026-09-09. The app replacement candidate
+is `1.0.0-rc.4`; the independent widget candidate remains `0.1.0-rc.3`.
+Neither version is a declaration that stable gates pass.
 
-RC3 replaces RC2 after downloaded-artifact verification found 61 Flatpak locale
-files described by its staged SPDX but absent from the actual bundle, plus a
-GitHub-normalized Debian filename that did not match the checksum examples.
-RC3 corrects the bundle inventory boundary and uses a GitHub-safe Debian asset
-filename. Runtime logic is unchanged. Prior tags, any existing drafts and
-[acceptance records](releases/1.0.0-rc.2.md) remain historical and unchanged.
-Rebuild and verify the new pair using the [RC3 record](releases/1.0.0-rc.3.md);
-earlier preparation evidence does not qualify the new artifacts automatically.
+RC4 follows the [expanded acceptance failures](ACCEPTANCE_2026-09-09.md) in
+RC3: recurrence dates/identity, CalDAV acknowledgement, conflict chronology,
+local date conversion and accessible event naming. It also closes the
+first-use recurrence capability and cached-floating upgrade paths before
+qualification. Prior signed tags and draft artifacts remain unchanged.
+Use the [RC4 record](releases/1.0.0-rc.4.md); earlier preparation or development
+evidence does not automatically qualify the new downloaded artifacts.
 
 ## Delivery plan
 
@@ -30,7 +30,7 @@ earlier preparation evidence does not qualify the new artifacts automatically.
 5. Publish source changes and prepare GitHub draft candidate releases with
    checksums, package-specific SBOMs, install/update/uninstall documentation,
    and a focused owner checklist available together.
-6. Record tomorrow's results against the exact downloaded artifacts. Fix any
+6. Record results against the exact downloaded artifacts. Fix any
    observed defect, repeat affected qualification, and publish stable versions
    only after every applicable criterion in `PLAN.md` and the widget's own
    acceptance record passes.

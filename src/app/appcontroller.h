@@ -160,6 +160,7 @@ class AppController final : public QObject {
   Q_INVOKABLE bool isValidTimeZone(const QString& timeZoneId) const;
   Q_INVOKABLE void syncAll();
   Q_INVOKABLE void syncAccount(const QString& accountId);
+  Q_INVOKABLE void probeThisAndFuture(const QString& calendarId);
   Q_INVOKABLE void setSelectedDate(const QDateTime& date);
   Q_INVOKABLE void reconnect();
   void activateWindow();

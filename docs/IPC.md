@@ -78,6 +78,8 @@ family wildcard such as `events.*`, or an exact event such as
 ### Calendars and calendar sets
 
 - `calendars.list`, `calendars.updatePreferences`
+- `calendars.probeThisAndFuture` with `{calendarId}` for a writable CalDAV
+  calendar whose recurrence-range support is not yet proven
 - `calendars.upsert` for writable device-only calendars
 - `calendars.remove` for confirmed custom device-only calendars and owned,
   non-primary Google calendars; built-in, primary, shared, and read-only
@@ -85,6 +87,19 @@ family wildcard such as `events.*`, or an exact event such as
 - `calendarSets.list`, `calendarSets.upsert`, `calendarSets.remove`,
   `calendarSets.activate`
 - `settings.get`, `settings.set`
+
+`calendars.probeThisAndFuture` creates a temporary test resource on the selected
+server, checks that `RANGE=THISANDFUTURE` survives a write and readback, and
+removes the resource before enabling the capability. It does not edit an
+existing user event. The response contains `calendarId` and `state` (`checking`
+or `supported`). A `checking` response completes asynchronously through
+`calendars.changed`; already-proven support returns immediately.
+Read `capabilities.thisAndFutureProbeState` and
+`capabilities.thisAndFutureProbeMessage` from the refreshed calendar. Terminal
+probe states are `supported` and `failed`. A failed
+probe also surfaces through `sync.status`. Busy or still-loading credentials
+can require a retry. Recurrence writes remain guarded until successful proof
+and cleanup; a started check is not proof of server support.
 
 ### Events and invitations
 

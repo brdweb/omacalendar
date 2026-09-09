@@ -1,6 +1,7 @@
 #include <QTemporaryDir>
 #include <QTimeZone>
 #include <QtTest/QtTest>
+#include <ctime>
 
 #include "core/database.h"
 #include "core/recurrenceexpander.h"
@@ -53,6 +54,84 @@ class RecurrenceTest final : public QObject {
   Q_OBJECT
 
  private slots:
+  void floatingTransitionQueriesAgreeWithBroadExpansion() {
+    const QByteArray originalZone = qgetenv("TZ");
+    const auto restoreZone = qScopeGuard([&]() {
+      originalZone.isNull() ? qunsetenv("TZ") : qputenv("TZ", originalZone);
+      tzset();
+    });
+    qputenv("TZ", QByteArrayLiteral("America/New_York"));
+    tzset();
+    struct Case {
+      QDate firstDate;
+      QTime wallTime;
+      QDateTime narrowStart;
+      QDateTime narrowEnd;
+    };
+    const QDateTime gap =
+        QDateTime(QDate(2030, 3, 10), QTime(2, 30), QTimeZone::LocalTime).toUTC();
+    const QList<Case> cases{
+        {QDate(2030, 11, 2), QTime(1, 55), utc(2030, 11, 3, 5, 50),
+         utc(2030, 11, 3, 6, 10)},
+        {QDate(2030, 3, 9), QTime(2, 30), gap.addSecs(-300), gap.addSecs(300)},
+    };
+    for (const auto& row : cases) {
+      Event master = timedEvent(
+          QStringLiteral("floating-transition"),
+          QDateTime(row.firstDate, row.wallTime, QTimeZone::LocalTime).toUTC(), 60);
+      master.timeKind = TimeKind::Floating;
+      master.startTimeZone.clear();
+      master.endTimeZone.clear();
+      master.recurrenceRule = QStringLiteral("FREQ=DAILY;COUNT=3");
+      const auto broad = RecurrenceExpander::expand(
+          {master}, row.narrowStart.addDays(-1), row.narrowEnd.addDays(1));
+      QVERIFY(broad.warnings.isEmpty());
+      const auto narrow =
+          RecurrenceExpander::expand({master}, row.narrowStart, row.narrowEnd);
+      QVERIFY(narrow.warnings.isEmpty());
+      QList<Event> expected;
+      for (const auto& occurrence : broad.occurrences) {
+        if (occurrence.startUtc < row.narrowEnd &&
+            occurrence.endUtc > row.narrowStart) {
+          expected.append(occurrence);
+        }
+      }
+      QCOMPARE(expected.size(), 1);
+      QCOMPARE(narrow.occurrences.size(), expected.size());
+      QCOMPARE(narrow.occurrences.first().startUtc, expected.first().startUtc);
+    }
+  }
+
+  void floatingRecurrencesKeepWallTimeInNarrowQueries() {
+    const QDate firstDate(2030, 3, 9);
+    const QDateTime first(firstDate, QTime(9, 0), QTimeZone::LocalTime);
+    Event master = timedEvent(QStringLiteral("floating-boundary"), first.toUTC());
+    master.timeKind = TimeKind::Floating;
+    master.startTimeZone.clear();
+    master.endTimeZone.clear();
+    master.recurrenceRule = QStringLiteral("FREQ=DAILY;COUNT=3");
+    for (const bool retained : {false, true}) {
+      if (retained) {
+        master.rawFormat = QStringLiteral("text/calendar");
+        master.rawPayload = QStringLiteral(
+            "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\n"
+            "UID:uid-floating-boundary\r\nDTSTART:20300309T090000\r\n"
+            "DTEND:20300309T100000\r\nRRULE:FREQ=DAILY;COUNT=3\r\n"
+            "END:VEVENT\r\nEND:VCALENDAR\r\n");
+      }
+      for (int day = 0; day < 3; ++day) {
+        const QDateTime expected(firstDate.addDays(day), QTime(9, 0),
+                                 QTimeZone::LocalTime);
+        const auto result = RecurrenceExpander::expand({master}, expected.toUTC(),
+                                                       expected.toUTC().addSecs(1));
+        QVERIFY(result.warnings.isEmpty());
+        QCOMPARE(result.occurrences.size(), 1);
+        QCOMPARE(result.occurrences.first().startUtc, expected.toUTC());
+        QCOMPARE(result.occurrences.first().endUtc, expected.toUTC().addSecs(3600));
+      }
+    }
+  }
+
   void floatingExceptionsAcceptReturnedInstantAndWallTimeIdentities() {
     Event master = timedEvent(QStringLiteral("floating-series"), utc(2030, 3, 9, 14));
     master.timeKind = TimeKind::Floating;

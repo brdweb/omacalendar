@@ -6,6 +6,7 @@
 #include <QSqlDatabase>
 #include <QSqlQuery>
 #include <QString>
+#include <functional>
 
 #include "core/domain.h"
 
@@ -286,6 +287,14 @@ class Database final {
                         QString* errorMessage = nullptr);
   bool clearProviderState(const QString& accountId, const QString& calendarId = {},
                           QString* errorMessage = nullptr);
+
+  // Reclassifies legacy CalDAV time metadata from retained provider source,
+  // without replacing local edits. Rows, active mutation/conflict snapshots,
+  // derived instances and the per-profile version checkpoint commit together.
+  using CalDavTimeKindResolver = std::function<bool(const Event&, TimeKind*, QString*)>;
+  bool refreshCalDavTimeKinds(const QString& accountId,
+                              const CalDavTimeKindResolver& resolve,
+                              QString* errorMessage = nullptr);
 
   bool upsertIcsSubscription(const IcsSubscription& subscription,
                              QString* errorMessage = nullptr);

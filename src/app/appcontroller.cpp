@@ -1055,7 +1055,7 @@ QString AppController::wallTimeToUtc(const QString& dateText, const QString& tim
     time = QTime::fromString(timeText, Qt::ISODate);
   }
   const QTimeZone zone = timeZoneId.trimmed().isEmpty()
-                             ? QTimeZone::systemTimeZone()
+                             ? QTimeZone(QTimeZone::LocalTime)
                              : QTimeZone(timeZoneId.trimmed().toUtf8());
   if (!date.isValid() || !time.isValid() || !zone.isValid()) {
     return {};
@@ -1081,7 +1081,7 @@ QString AppController::utcToWallTime(const QString& utcText,
                                      const QString& timeZoneId) const {
   const QDateTime utc = dateTimeFromIso(utcText);
   QTimeZone zone = timeZoneId.trimmed().isEmpty()
-                       ? QTimeZone::systemTimeZone()
+                       ? QTimeZone(QTimeZone::LocalTime)
                        : QTimeZone(timeZoneId.trimmed().toUtf8());
   if (!utc.isValid() || !zone.isValid()) {
     return {};
@@ -1100,10 +1100,10 @@ void AppController::applyDisplayTimes(QVariantList* events) const {
   }
   const QString requestedZone =
       m_preferences.value(QStringLiteral("displayTimeZone")).toString().trimmed();
-  QTimeZone displayZone = requestedZone.isEmpty() ? QTimeZone::systemTimeZone()
+  QTimeZone displayZone = requestedZone.isEmpty() ? QTimeZone(QTimeZone::LocalTime)
                                                   : QTimeZone(requestedZone.toUtf8());
   if (!displayZone.isValid()) {
-    displayZone = QTimeZone::systemTimeZone();
+    displayZone = QTimeZone(QTimeZone::LocalTime);
   }
   const auto wallText = [](const QDateTime& value, const QTimeZone& zone,
                            const bool floating) {
@@ -1475,6 +1475,21 @@ void AppController::syncAccount(const QString& accountId) {
   send(QStringLiteral("sync.account"), {{QStringLiteral("accountId"), accountId}},
        [this](const QJsonValue&) {
          setStatus(tr("Account sync started"));
+         refresh();
+       });
+}
+
+void AppController::probeThisAndFuture(const QString& calendarId) {
+  if (calendarId.isEmpty()) {
+    return;
+  }
+  send(QStringLiteral("calendars.probeThisAndFuture"),
+       {{QStringLiteral("calendarId"), calendarId}}, [this](const QJsonValue& result) {
+         setStatus(result.toObject().value(QStringLiteral("state")).toString() ==
+                           QStringLiteral("supported")
+                       ? tr("This and future occurrences are supported")
+                       : tr("Checking this-and-future support; a temporary test event "
+                            "will be removed after the check"));
          refresh();
        });
 }

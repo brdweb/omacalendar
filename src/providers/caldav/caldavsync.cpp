@@ -534,6 +534,48 @@ void CalDavSync::handleCredentialFailure(const QString& accountId,
   emit syncStatusChanged(accountId, value);
 }
 
+bool CalDavSync::refreshCachedTimeKinds(const QString& accountId,
+                                        QString* errorMessage) {
+  return m_database->refreshCalDavTimeKinds(
+      accountId,
+      [](const Event& legacy, TimeKind* kind, QString* error) {
+        const ICalendarParseResult parsed =
+            ICalendarCodec::parse(legacy.rawPayload.toUtf8());
+        if (!parsed.ok()) {
+          if (error != nullptr) {
+            *error =
+                QStringLiteral("Could not refresh retained CalDAV time metadata: ") +
+                parsed.error.message;
+          }
+          return false;
+        }
+        const Event* master = nullptr;
+        for (const Event& source : parsed.events) {
+          if (source.uid != legacy.uid) continue;
+          if (source.recurrenceId.isEmpty()) master = &source;
+          Event reference = legacy;
+          reference.timeKind = source.timeKind;
+          reference.startTimeZone = source.startTimeZone;
+          if (ICalendarCodec::sameRecurrenceIdentity(reference, source)) {
+            *kind = source.timeKind;
+            return true;
+          }
+        }
+        // An unsent detached edit is absent from the acknowledged resource;
+        // its series master still supplies the original time semantics.
+        if (master != nullptr && legacy.dirty && !legacy.recurrenceId.isEmpty()) {
+          *kind = master->timeKind;
+          return true;
+        }
+        if (error != nullptr) {
+          *error = QStringLiteral(
+              "Retained CalDAV source did not identify cached event metadata");
+        }
+        return false;
+      },
+      errorMessage);
+}
+
 bool CalDavSync::restoreAccounts(QString* errorMessage) {
   QString databaseError;
   const QList<Account> accounts = m_database->accounts(&databaseError);
@@ -544,10 +586,15 @@ bool CalDavSync::restoreAccounts(QString* errorMessage) {
     return false;
   }
   for (const Account& account : accounts) {
-    if (account.provider != ProviderKind::CalDav || !account.enabled) {
+    if (account.provider != ProviderKind::CalDav) {
       continue;
     }
-    syncAccount(account.id);
+    // This local refresh runs even offline or for disabled accounts. It uses
+    // retained source before ctag/etag optimizations or queued writes can skip it.
+    if (!refreshCachedTimeKinds(account.id, errorMessage)) {
+      return false;
+    }
+    if (account.enabled) syncAccount(account.id);
   }
   return true;
 }
@@ -555,6 +602,14 @@ bool CalDavSync::restoreAccounts(QString* errorMessage) {
 bool CalDavSync::disconnectAccount(const QString& accountId,
                                    const bool removeCachedData, QString* errorMessage) {
   if (SyncJob* job = m_jobs.value(accountId, nullptr); job != nullptr) {
+    if (job->futureProbeInProgress) {
+      if (errorMessage != nullptr) {
+        *errorMessage = QStringLiteral(
+            "Wait for the calendar support check to finish cleaning up, then "
+            "disconnect");
+      }
+      return false;
+    }
     // A QNetworkReply may still own a callback that references this job. Keep
     // the small job object alive until that callback returns, but prevent it
     // from touching an account that is being removed.
@@ -618,6 +673,14 @@ bool CalDavSync::updateCredentials(const QString& accountId, const QString& user
     return false;
   }
   if (SyncJob* job = m_jobs.value(accountId, nullptr); job != nullptr) {
+    if (job->futureProbeInProgress) {
+      if (errorMessage != nullptr) {
+        *errorMessage = QStringLiteral(
+            "Wait for the calendar support check to finish cleaning up, then update "
+            "credentials");
+      }
+      return false;
+    }
     job->cancelled = true;
   }
   m_client.forgetCredentials(accountId);
@@ -630,6 +693,51 @@ bool CalDavSync::updateCredentials(const QString& accountId, const QString& user
   }
   emit accountChanged(accountId);
   storeCredentialsAsync(account, password);
+  return true;
+}
+
+bool CalDavSync::probeThisAndFuture(const QString& calendarId, QString* errorMessage) {
+  const Calendar calendar = m_database->calendar(calendarId, errorMessage);
+  const Account account = m_database->account(calendar.accountId, errorMessage);
+  if (calendar.id.isEmpty() || account.provider != ProviderKind::CalDav ||
+      calendar.readOnly || !calendar.enabled || !account.enabled) {
+    if (errorMessage != nullptr) {
+      *errorMessage = QStringLiteral("Choose an enabled, writable CalDAV calendar");
+    }
+    return false;
+  }
+  if (calendar.capabilities.value(QStringLiteral("thisAndFutureProven")).toBool()) {
+    return true;
+  }
+  if (m_jobs.contains(account.id) || !m_loadedCredentials.contains(account.id)) {
+    if (errorMessage != nullptr) {
+      *errorMessage = QStringLiteral(
+          "Wait for this account to finish syncing, then check support again");
+    }
+    return false;
+  }
+  const QUrl calendarUrl = QUrl(account.endpoint).resolved(QUrl(calendar.href));
+  if (calendar.href.isEmpty() || !calendarUrl.isValid()) {
+    if (errorMessage != nullptr) {
+      *errorMessage = QStringLiteral("Sync this calendar before checking support");
+    }
+    return false;
+  }
+  auto* job = new SyncJob;
+  job->resourceBudget = m_resourceBudgetLimits;
+  job->accountId = account.id;
+  job->account = account;
+  job->endpoint = QUrl(account.endpoint);
+  job->futureProbeInProgress = true;
+  m_jobs.insert(account.id, job);
+  const QJsonObject value = statusObject(QStringLiteral("syncing"));
+  m_status.insert(account.id, value);
+  emit syncStatusChanged(account.id, value);
+  // A stable, daemon-owned identity lets a retry remove a probe left behind
+  // by an interrupted process. No user event or outbox mutation is created.
+  OutboxItem standalone;
+  standalone.idempotencyKey = QStringLiteral("explicit-this-and-future-check");
+  startFutureCapabilityProbe(job, standalone, calendar, calendarUrl);
   return true;
 }
 
@@ -654,6 +762,14 @@ void CalDavSync::syncAccount(const QString& accountId) {
   const Account account = m_database->account(accountId, &error);
   if (account.id.isEmpty() || account.provider != ProviderKind::CalDav ||
       !account.enabled) {
+    return;
+  }
+  if (!refreshCachedTimeKinds(accountId, &error)) {
+    const QJsonObject value =
+        statusObject(QStringLiteral("error"),
+                     QStringLiteral("cache_metadata_refresh_failed"), error);
+    m_status.insert(accountId, value);
+    emit syncStatusChanged(accountId, value);
     return;
   }
   if (!m_loadedCredentials.contains(accountId)) {
@@ -883,6 +999,9 @@ void CalDavSync::discoverCollections(SyncJob* job, const QUrl& homeUrl) {
               {QStringLiteral("serverScheduling"), schedulingWritable},
               {QStringLiteral("attendeeWrites"), schedulingWritable},
               {QStringLiteral("rsvp"), schedulingWritable},
+              // RANGE storage/readback does not prove the scheduling server
+              // propagates a ranged attendee reply to the organizer.
+              {QStringLiteral("rsvpThisAndFuture"), false},
               {QStringLiteral("thisAndFuture"), thisAndFutureProven},
               {QStringLiteral("thisAndFutureProven"), thisAndFutureProven},
               {QStringLiteral("resourceMove"),
@@ -896,6 +1015,12 @@ void CalDavSync::discoverCollections(SyncJob* job, const QUrl& homeUrl) {
             calendar.capabilities.insert(
                 QStringLiteral("syncedCtag"),
                 existing.capabilities.value(QStringLiteral("syncedCtag")));
+            for (const QString& key : {QStringLiteral("thisAndFutureProbeState"),
+                                       QStringLiteral("thisAndFutureProbeMessage")}) {
+              if (existing.capabilities.contains(key)) {
+                calendar.capabilities.insert(key, existing.capabilities.value(key));
+              }
+            }
           } else {
             calendar.id = newUuid();
           }
@@ -1599,7 +1724,13 @@ void CalDavSync::startFutureCapabilityProbe(SyncJob* job, const OutboxItem& item
   const QString token = QString::fromLatin1(
       QCryptographicHash::hash(identity, QCryptographicHash::Sha256).toHex().left(32));
   probe->uid = QStringLiteral("omacalendar-capability-%1@example.invalid").arg(token);
-  const QString fileName = QStringLiteral(".omacalendar-capability-%1.ics").arg(token);
+  // Radicale rejects dot-prefixed storage names. The new standalone check
+  // uses a portable name; existing mutation IDs keep their legacy recovery
+  // path so an interrupted older probe can still be removed on retry.
+  const QString fileName =
+      (item.id == 0 ? QStringLiteral("omacalendar-capability-%1.ics")
+                    : QStringLiteral(".omacalendar-capability-%1.ics"))
+          .arg(token);
   QUrl resourceUrl = calendarUrl;
   QString path = resourceUrl.path();
   if (!path.endsWith(QLatin1Char('/'))) {
@@ -1699,8 +1830,9 @@ void CalDavSync::probeReadUpdated(SyncJob* job,
     const ICalendarParseResult parsed = ICalendarCodec::parse(resource.body);
     if (parsed.ok()) {
       retainedRange = std::any_of(
-          parsed.events.cbegin(), parsed.events.cend(), [](const Event& event) {
-            return event.recurrenceId.contains(QStringLiteral("RANGE=THISANDFUTURE"),
+          parsed.events.cbegin(), parsed.events.cend(), [probe](const Event& event) {
+            return event.uid == probe->uid &&
+                   event.recurrenceId.contains(QStringLiteral("RANGE=THISANDFUTURE"),
                                                Qt::CaseInsensitive);
           });
     }
@@ -1738,6 +1870,44 @@ void CalDavSync::finishFutureCapabilityProbe(
       message = QStringLiteral(
           "The CalDAV capability probe could not clean up its "
           "temporary resource");
+    }
+    if (probe->item.id == 0) {
+      // Standalone qualification never advances or blocks a user mutation.
+      // Store proof and its visible result together only after cleanup.
+      Calendar calendar = m_database->calendar(probe->calendar.id);
+      if (!calendar.id.isEmpty() && !job->cancelled) {
+        if (!success && message.isEmpty()) {
+          message =
+              QStringLiteral("The server could not prove safe this-and-future support");
+        }
+        calendar.capabilities.insert(QStringLiteral("thisAndFuture"), success);
+        calendar.capabilities.insert(QStringLiteral("thisAndFutureProven"), success);
+        calendar.capabilities.insert(
+            QStringLiteral("thisAndFutureProbeState"),
+            success ? QStringLiteral("supported") : QStringLiteral("failed"));
+        calendar.capabilities.insert(
+            QStringLiteral("thisAndFutureProbeMessage"),
+            success ? QStringLiteral("This and future occurrences are supported")
+                    : message);
+        QString storageError;
+        if (!m_database->upsertCalendar(calendar, &storageError)) {
+          code = QStringLiteral("database_error");
+          message = storageError;
+          success = false;
+        }
+        emit calendarsChanged(job->accountId);
+      } else if (calendar.id.isEmpty()) {
+        success = false;
+        code = QStringLiteral("database_error");
+        message =
+            QStringLiteral("The calendar disappeared before proof could be stored");
+      }
+      if (!success && code.isEmpty()) {
+        code = QStringLiteral("recurrence_capability_probe_failed");
+      }
+      job->futureProbeInProgress = false;
+      finish(job, success ? QString() : code, success ? QString() : message);
+      return;
     }
     if (success) {
       Calendar proven = m_database->calendar(probe->calendar.id, &message);

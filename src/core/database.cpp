@@ -1414,8 +1414,7 @@ bool Database::rebuildReminderJobs(const Event& event, QString* errorMessage) {
   for (const Event& occurrence : occurrences) {
     const QDateTime eventStart =
         occurrence.allDay
-            ? QDateTime(occurrence.startDate, QTime(0, 0), QTimeZone::systemTimeZone())
-                  .toUTC()
+            ? QDateTime(occurrence.startDate, QTime(0, 0), QTimeZone::LocalTime).toUTC()
             : occurrence.startUtc;
     if (!eventStart.isValid()) {
       continue;
@@ -5308,6 +5307,167 @@ int Database::resolveNewestConflicts(bool* queuedLocalWrites, QString* errorMess
     ++resolvedCount;
   }
   return resolvedCount;
+}
+
+bool Database::refreshCalDavTimeKinds(const QString& accountId,
+                                      const CalDavTimeKindResolver& resolve,
+                                      QString* errorMessage) {
+  const QString key = QStringLiteral("caldav_time_kind_version");
+  QString error;
+  if (providerState(accountId, {}, key, 0, &error).toInt() >= 1) {
+    return true;
+  }
+  if (!error.isEmpty() || account(accountId, &error).provider != ProviderKind::CalDav) {
+    if (errorMessage != nullptr) {
+      *errorMessage =
+          error.isEmpty() ? QStringLiteral("CalDAV account required") : error;
+    }
+    return false;
+  }
+  if (!execute(QStringLiteral("SAVEPOINT refresh_caldav_time_kinds"), errorMessage)) {
+    return false;
+  }
+  const auto rollback = [this]() {
+    execute(QStringLiteral("ROLLBACK TO refresh_caldav_time_kinds"), nullptr);
+    execute(QStringLiteral("RELEASE refresh_caldav_time_kinds"), nullptr);
+    return false;
+  };
+  const auto normalize = [this, &resolve, errorMessage](Event* value) {
+    // A nonempty timezone may be an intentional local conversion. New local
+    // events without provider source are also left as explicitly authored.
+    if (value->timeKind != TimeKind::Zoned || !value->startTimeZone.isEmpty() ||
+        !value->endTimeZone.isEmpty()) {
+      return true;
+    }
+    if (value->allDay) {
+      value->timeKind = TimeKind::AllDay;
+      return true;
+    }
+    if (!hydrateProviderResource(value, errorMessage)) {
+      return false;
+    }
+    if (value->rawPayload.isEmpty() && value->remoteId.isEmpty()) {
+      return true;
+    }
+    return resolve(*value, &value->timeKind, errorMessage);
+  };
+  QSqlQuery events(m_database);
+  events.prepare(
+      QStringLiteral("SELECT e.* FROM events e JOIN calendars c ON c.id=e.calendar_id "
+                     "WHERE c.account_id=? ORDER BY e.id"));
+  events.addBindValue(accountId);
+  if (!events.exec()) {
+    if (errorMessage != nullptr)
+      *errorMessage = sqlError(events, QStringLiteral("read legacy events"));
+    return rollback();
+  }
+  bool changed = false;
+  while (events.next()) {
+    Event value = eventFromQuery(events);
+    const TimeKind previous = value.timeKind;
+    if (!normalize(&value)) return rollback();
+    if (value.timeKind == previous) continue;
+    QSqlQuery update(m_database);
+    update.prepare(QStringLiteral("UPDATE events SET time_kind=? WHERE id=?"));
+    update.addBindValue(timeKindToString(value.timeKind));
+    update.addBindValue(value.id);
+    if (!update.exec()) {
+      if (errorMessage != nullptr)
+        *errorMessage = sqlError(update, QStringLiteral("refresh event time kind"));
+      return rollback();
+    }
+    if (!rebuildEventInstances(value, errorMessage) ||
+        !rebuildReminderJobs(value, errorMessage))
+      return rollback();
+    changed = true;
+  }
+  // Patch just the metadata key, preserving unknown mutation fields and every
+  // operation identifier/revision, timestamp, lease and retry state verbatim.
+  const auto normalizeSnapshot = [this, &normalize, &accountId](QJsonObject* object) {
+    if (object->isEmpty()) return true;
+    Event value = eventFromJson(*object);
+    if (calendar(value.calendarId).accountId != accountId) return true;
+    const TimeKind previous = value.timeKind;
+    if (!normalize(&value)) return false;
+    if (value.timeKind != previous) {
+      object->insert(QStringLiteral("timeKind"), timeKindToString(value.timeKind));
+    }
+    return true;
+  };
+  QSqlQuery mutations(m_database);
+  mutations.prepare(
+      QStringLiteral("SELECT id,payload_json FROM outbox WHERE account_id=? "
+                     "AND state IN ('pending','sending','retry_wait','blocked')"));
+  mutations.addBindValue(accountId);
+  if (!mutations.exec()) {
+    if (errorMessage != nullptr)
+      *errorMessage = sqlError(mutations, QStringLiteral("read legacy mutations"));
+    return rollback();
+  }
+  while (mutations.next()) {
+    QJsonObject payload = parseObject(mutations.value(1).toString());
+    const QJsonObject original = payload;
+    if (!normalizeSnapshot(&payload)) return rollback();
+    if (payload.contains(QStringLiteral("_move"))) {
+      QJsonObject move = payload.value(QStringLiteral("_move")).toObject();
+      QJsonObject source = move.value(QStringLiteral("sourceEvent")).toObject();
+      const QJsonObject oldSource = source;
+      if (!normalizeSnapshot(&source)) return rollback();
+      if (source != oldSource) {
+        move.insert(QStringLiteral("sourceEvent"), source);
+        payload.insert(QStringLiteral("_move"), move);
+      }
+    }
+    if (payload == original) continue;
+    QSqlQuery update(m_database);
+    update.prepare(QStringLiteral("UPDATE outbox SET payload_json=? WHERE id=?"));
+    update.addBindValue(compactJson(payload));
+    update.addBindValue(mutations.value(0));
+    if (!update.exec()) {
+      if (errorMessage != nullptr)
+        *errorMessage = sqlError(update, QStringLiteral("refresh mutation time kind"));
+      return rollback();
+    }
+    changed = true;
+  }
+  QSqlQuery conflicts(m_database);
+  conflicts.prepare(QStringLiteral(
+      "SELECT f.id,f.local_snapshot_json,f.remote_snapshot_json FROM conflicts f "
+      "JOIN events e ON e.id=f.event_id JOIN calendars c ON c.id=e.calendar_id "
+      "WHERE c.account_id=? AND f.state='unresolved'"));
+  conflicts.addBindValue(accountId);
+  if (!conflicts.exec()) {
+    if (errorMessage != nullptr)
+      *errorMessage = sqlError(conflicts, QStringLiteral("read legacy conflicts"));
+    return rollback();
+  }
+  while (conflicts.next()) {
+    QJsonObject local = parseObject(conflicts.value(1).toString());
+    QJsonObject remote = parseObject(conflicts.value(2).toString());
+    const QJsonObject oldLocal = local;
+    const QJsonObject oldRemote = remote;
+    if (!normalizeSnapshot(&local) || !normalizeSnapshot(&remote)) return rollback();
+    if (local == oldLocal && remote == oldRemote) continue;
+    QSqlQuery update(m_database);
+    update.prepare(
+        QStringLiteral("UPDATE conflicts SET "
+                       "local_snapshot_json=?,remote_snapshot_json=? WHERE id=?"));
+    update.addBindValue(compactJson(local));
+    update.addBindValue(compactJson(remote));
+    update.addBindValue(conflicts.value(0));
+    if (!update.exec()) {
+      if (errorMessage != nullptr)
+        *errorMessage = sqlError(update, QStringLiteral("refresh conflict time kind"));
+      return rollback();
+    }
+    changed = true;
+  }
+  if (!setProviderState(accountId, {}, key, 1, errorMessage) ||
+      (changed && !bumpChangeRevision(errorMessage)) ||
+      !execute(QStringLiteral("RELEASE refresh_caldav_time_kinds"), errorMessage)) {
+    return rollback();
+  }
+  return true;
 }
 
 QJsonValue Database::providerState(const QString& accountId, const QString& calendarId,
