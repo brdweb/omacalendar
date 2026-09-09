@@ -14,7 +14,8 @@ qualification. RC5 retains that implementation and fixes a build-environment
 dependency after the unrelated Chrome APT repository blocked RC4 assembly.
 [RC4 runtime results](testing/release-runtime-rc4.md) remain separately recorded.
 Prior signed tags and draft artifacts remain unchanged.
-Use the [RC5 record](releases/1.0.0-rc.5.md); earlier preparation or development
+Use the [RC5 qualification results](testing/release-runtime-rc5.md) and
+[RC5 record](releases/1.0.0-rc.5.md); earlier preparation or development
 evidence does not automatically qualify the new downloaded artifacts.
 
 ## Delivery plan
