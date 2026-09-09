@@ -1,6 +1,6 @@
 # Candidate testing for 2026-09-09
 
-Test app `1.0.0-rc.1` and widget `0.1.0-rc.1`. These are candidate drafts;
+Test app `1.0.0-rc.2` and widget `0.1.0-rc.2`. These are candidate drafts;
 the last public release remains beta until acceptance is complete. Use the
 [installation guide](INSTALL.md) and the `SHA256SUMS` shipped with the draft.
 Record the app/widget commit, package filename and hash, OS/desktop version,
@@ -18,8 +18,8 @@ credentials, private calendar names, personal events, or provider URLs in report
 3. Install the native Arch candidate on Omarchy for app/widget tests. Test the
    `.deb` package on Ubuntu 26.04. Test Flatpak separately: it has its own profile,
    credentials, runtime, and daemon; the native widget does not use that profile.
-4. Confirm the reported app version is `1.0.0-rc.1` and widget version is
-   `0.1.0-rc.1`. Record the exact downloaded hashes before changing anything.
+4. Confirm the reported app version is `1.0.0-rc.2` and widget version is
+   `0.1.0-rc.2`. Record the exact downloaded hashes before changing anything.
 
 ## Native installation and upgrade
 
@@ -74,7 +74,7 @@ server capability evidence, not PASS. An unavailable account remains pending.
 ## Widget on Omarchy
 
 Install the exact RC archive using
-[the widget candidate guide](https://github.com/brdweb/omacalendar-widget/blob/v0.1.0-rc.1/docs/STABLE_ACCEPTANCE.md);
+[the widget candidate guide](https://github.com/brdweb/omacalendar-widget/blob/v0.1.0-rc.2/docs/STABLE_ACCEPTANCE.md);
 the marketplace/default-branch installation may still select the public beta.
 
 | Check | Expected result | Result |

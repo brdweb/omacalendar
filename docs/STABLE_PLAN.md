@@ -3,7 +3,14 @@
 The target is OmaCalendar `1.0.0` and an independently qualified widget
 `0.1.0`. The owner requested preparation on 2026-09-08 and will perform the
 hands-on acceptance pass on 2026-09-09. Candidate versions are
-`1.0.0-rc.1` and `0.1.0-rc.1`; neither is a declaration that stable gates pass.
+`1.0.0-rc.2` and `0.1.0-rc.2`; neither is a declaration that stable gates pass.
+
+RC2 replaces the paired RC1 preparation before owner artifact delivery because
+GitHub reported an unverified tagger email on the widget RC1 tag. Existing RC1
+tags and the [RC1 acceptance record](releases/1.0.0-rc.1.md) remain unchanged.
+This replacement changes versions and documentation, not runtime behavior.
+Rebuild and verify the new pair using the [RC2 record](releases/1.0.0-rc.2.md);
+earlier preparation evidence does not qualify the new artifacts automatically.
 
 ## Delivery plan
 

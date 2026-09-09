@@ -1,6 +1,6 @@
 # Support and current limitations
 
-`1.0.0-beta.1` is the last public prerelease. The `1.0.0-rc.1` draft is prepared
+`1.0.0-beta.1` is the last public prerelease. The `1.0.0-rc.2` draft is prepared
 for owner testing, with no production support commitment. Its Arch, Ubuntu
 26.04 `.deb`, and Flatpak package instructions are in [Install](docs/INSTALL.md).
 Calendar reading has been owner-tested. An isolated Radicale 3.7.8 development

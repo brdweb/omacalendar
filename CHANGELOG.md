@@ -6,6 +6,17 @@ Versioning once public releases begin.
 
 ## [Unreleased]
 
+## [1.0.0-rc.2] - 2026-09-08
+
+### Changed
+
+- Replace the paired RC1 preparation with app `1.0.0-rc.2` and widget
+  `0.1.0-rc.2` before owner artifact delivery. GitHub could not verify the
+  widget RC1 tagger email; the existing signed RC1 tags remain unchanged.
+- Update candidate versions, package filenames, and documentation only;
+  runtime implementation and pending stable acceptance gates are unchanged.
+  RC2 artifacts must be rebuilt and independently verified under their new tags.
+
 ## [1.0.0-rc.1] - 2026-09-08
 
 ### Added
