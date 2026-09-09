@@ -5,6 +5,12 @@ provides fast, interaction-dense desktop calendar workflows without tasks,
 booking services, natural-language entry, or an OmaCalendar cloud service. An
 optional Quickshell companion is developed and released independently.
 
+The next candidate is **`1.0.0-rc.1`**, prepared as a GitHub draft for owner
+testing. It adds Arch, Ubuntu 26.04 `.deb`, and Flatpak installation paths. See
+[Install and update](docs/INSTALL.md), [the owner checklist](docs/OWNER_TESTING.md),
+and [the stable preparation plan](docs/STABLE_PLAN.md). The public beta below
+remains the last published release; pending stable checks have not been waived.
+
 > [!WARNING]
 > `1.0.0-beta.1` is an unsupported public-testing prerelease. Automated suites
 > exercise the local database, provider mutation machinery, desktop, IPC,
@@ -117,7 +123,7 @@ for a provider sync.
 
 ## Build from source
 
-OmaCalendar uses C++20, CMake 3.28+, Ninja, Qt 6.8+, libical 4.0+, and Secret Service.
+OmaCalendar uses C++20, CMake 3.28+, Ninja, Qt 6.9+, libical 4.0+, and Secret Service.
 On Omarchy/Arch Linux:
 
 ```bash

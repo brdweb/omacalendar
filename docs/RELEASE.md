@@ -1,5 +1,28 @@
 # Release procedure
 
+For `1.0.0-rc.1`, follow [STABLE_PLAN.md](STABLE_PLAN.md). The owner requested
+draft packages for testing on 2026-09-09; stable acceptance remains pending.
+`verify-release.sh --draft-candidate v1.0.0-rc.1` verifies the signed, clean RC
+tree, metadata, draft-only disposition and scoped tag authorization. This mode
+rejects stable/beta versions and never qualifies public acceptance. Ordinary
+`verify-release.sh TAG` retains every strict public gate.
+
+The release workflow builds Arch first, then Ubuntu 26.04 `.deb` and Flatpak
+from the same commit, tests their actual installations and emits separate
+SBOM/provenance attestations. Only after every package job succeeds does the
+assembler create a draft with one complete `SHA256SUMS`, source, documentation
+archive, install guide and owner checklist. Manual dispatch rehearses the same
+build without tags, attestations or releases. Signed RC tags produce drafts
+for owner testing, not published releases. The oldest build API requirement
+is Qt 6.9: [Qt's OAuth2 API](https://doc.qt.io/qt-6/qabstractoauth2.html)
+documents the token, refresh and scope functions used here as introduced in 6.9.
+
+The historical beta procedure below remains useful background. For current
+package filenames, download verification, upgrade and removal commands use
+[INSTALL.md](INSTALL.md). Native `.deb` is Ubuntu 26.04 amd64; Flatpak x86-64
+uses KDE 6.10. Their exact build environments and private dependencies are
+described in `packaging/debian/README.md` and `packaging/flatpak/README.md`.
+
 This procedure releases the OmaCalendar desktop application, daemon, and CLI.
 The optional `org.omacalendar.widget` Quickshell plugin has an independent
 version, qualification gate, tag, artifact set, and publication schedule in its

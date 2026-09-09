@@ -1,8 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+draft_candidate=0
+if [[ ${1:-} == --draft-candidate ]]; then
+  draft_candidate=1
+  shift
+fi
 if [[ $# -ne 1 ]]; then
-  echo "usage: $0 vMAJOR.MINOR.PATCH[-PRERELEASE]" >&2
+  echo "usage: $0 [--draft-candidate] vMAJOR.MINOR.PATCH[-PRERELEASE]" >&2
   exit 2
 fi
 
@@ -46,6 +51,12 @@ if [[ ${OMACALENDAR_GITHUB_VERIFIED_TAG:-0} != 1 ]]; then
   fi
 fi
 
-"${repository_root}/packaging/release/verify-release-metadata.sh" \
-  --require-pretag-pass "${release_version}"
-echo "signed release candidate ${release_tag} is internally consistent"
+if [[ ${draft_candidate} -eq 1 ]]; then
+  bash "${repository_root}/packaging/release/verify-draft-candidate.sh" \
+    "${release_version}"
+  echo "signed ${release_tag} is valid for a draft only; public acceptance is not granted"
+else
+  "${repository_root}/packaging/release/verify-release-metadata.sh" \
+    --require-pretag-pass "${release_version}"
+  echo "signed release candidate ${release_tag} is internally consistent"
+fi

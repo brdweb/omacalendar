@@ -1,4 +1,5 @@
 #include <QFileInfo>
+#include <QScopeGuard>
 #include <QSignalSpy>
 #include <QTemporaryDir>
 #include <QTemporaryFile>
@@ -30,6 +31,7 @@ class AppControllerTest final : public QObject {
   void controllerDispatchesValidatedIcsFile();
   void applicationInstanceAllowsOnePrimary();
   void applicationInstanceRoutesActivation();
+  void nativeAndFlatpakInstancesAreIndependent();
 
  private:
   QTemporaryDir m_xdgRoot;
@@ -42,6 +44,32 @@ void AppControllerTest::initTestCase() {
   qputenv("XDG_CONFIG_HOME", m_xdgRoot.filePath(QStringLiteral("config")).toUtf8());
   qputenv("XDG_RUNTIME_DIR", m_xdgRoot.filePath(QStringLiteral("runtime")).toUtf8());
   qputenv("OMACALENDAR_DISABLE_DAEMON_AUTOSTART", "1");
+}
+
+void AppControllerTest::nativeAndFlatpakInstancesAreIndependent() {
+  // Unix sockets are limited to 108 bytes, including the temporary prefix.
+  QTemporaryDir runtime(QStringLiteral("/tmp/omac-instance-XXXXXX"));
+  QVERIFY(runtime.isValid());
+  const QByteArray originalFlatpak = qgetenv("FLATPAK_ID");
+  const QByteArray originalRuntime = qgetenv("XDG_RUNTIME_DIR");
+  const auto restore = qScopeGuard([&]() {
+    originalFlatpak.isNull() ? qunsetenv("FLATPAK_ID")
+                             : qputenv("FLATPAK_ID", originalFlatpak);
+    originalRuntime.isNull() ? qunsetenv("XDG_RUNTIME_DIR")
+                             : qputenv("XDG_RUNTIME_DIR", originalRuntime);
+  });
+  qputenv("XDG_RUNTIME_DIR", runtime.path().toUtf8());
+  qunsetenv("FLATPAK_ID");
+  ApplicationInstance native;
+  QVERIFY(native.claimPrimary());
+  qputenv("FLATPAK_ID", "org.omacalendar.OmaCalendar");
+  ApplicationInstance sandbox;
+  QVERIFY(sandbox.claimPrimary());
+  ApplicationInstance secondSandbox;
+  QVERIFY(!secondSandbox.claimPrimary());
+  qunsetenv("FLATPAK_ID");
+  ApplicationInstance secondNative;
+  QVERIFY(!secondNative.claimPrimary());
 }
 
 void AppControllerTest::wallTimeConversionRejectsDstGap() {

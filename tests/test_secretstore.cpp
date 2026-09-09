@@ -1,4 +1,5 @@
 #include <QFile>
+#include <QScopeGuard>
 #include <QTemporaryDir>
 #include <QTimer>
 #include <QtTest>
@@ -19,6 +20,7 @@ class SecretStoreTest final : public QObject {
   void timeoutKeepsEventLoopResponsive();
   void cancellationAndDestructionAreSafe();
   void invalidRequestsCompleteAsynchronously();
+  void flatpakCredentialsUseSeparateNamespace();
 
  private:
   void setMode(const QByteArray& mode, const QByteArray& value = {});
@@ -39,6 +41,10 @@ void SecretStoreTest::initTestCase() {
   const QByteArray script = QByteArrayLiteral(R"SH(#!/bin/sh
 mode="${FAKE_SECRET_MODE:-success}"
 case "$mode" in
+  attributes)
+    shift
+    printf '%s\n' "$@"
+    ;;
   success)
     case "$1" in
       lookup) printf '%s\n' "$FAKE_SECRET_VALUE" ;;
@@ -93,6 +99,38 @@ void SecretStoreTest::cleanupTestCase() {
 void SecretStoreTest::setMode(const QByteArray& mode, const QByteArray& value) {
   qputenv("FAKE_SECRET_MODE", mode);
   qputenv("FAKE_SECRET_VALUE", value);
+}
+
+void SecretStoreTest::flatpakCredentialsUseSeparateNamespace() {
+  const QByteArray originalFlatpak = qgetenv("FLATPAK_ID");
+  const auto restore = qScopeGuard([&]() {
+    originalFlatpak.isNull() ? qunsetenv("FLATPAK_ID")
+                             : qputenv("FLATPAK_ID", originalFlatpak);
+  });
+  setMode(QByteArrayLiteral("attributes"));
+  qunsetenv("FLATPAK_ID");
+  SecretStore store;
+  QCOMPARE(
+      store.lookup(QStringLiteral("same-account"), QStringLiteral("token")),
+      QStringLiteral("application\nomacalendar\naccount\nsame-account\nkind\ntoken"));
+  qputenv("FLATPAK_ID", "org.omacalendar.OmaCalendar");
+  const QString expected = QStringLiteral(
+      "application\norg.omacalendar.OmaCalendar\naccount\nsame-account\nkind\ntoken");
+  QCOMPARE(store.lookup(QStringLiteral("same-account"), QStringLiteral("token")),
+           expected);
+  AsyncSecretStore asyncStore;
+  bool completed = false;
+  SecretStoreResult result;
+  const auto id =
+      asyncStore.lookupAsync(QStringLiteral("same-account"), QStringLiteral("token"),
+                             [&](SecretStoreResult value) {
+                               result = std::move(value);
+                               completed = true;
+                             });
+  QVERIFY(id != kInvalidSecretStoreOperationId);
+  QTRY_VERIFY_WITH_TIMEOUT(completed, 1000);
+  QVERIFY(result.success);
+  QCOMPARE(result.value, expected);
 }
 
 void SecretStoreTest::asynchronousSuccess() {

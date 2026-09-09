@@ -4,8 +4,9 @@
 #include <QFileInfo>
 #include <QLocalSocket>
 #include <QLockFile>
-#include <QStandardPaths>
 #include <QThread>
+
+#include "core/paths.h"
 
 namespace omacalendar {
 namespace {
@@ -17,9 +18,8 @@ constexpr qsizetype kMaximumRequestBytes = 64 * 1024;
 
 ApplicationInstance::ApplicationInstance(QObject* parent)
     : QObject(parent),
-      m_serverPath(
-          QDir(QStandardPaths::writableLocation(QStandardPaths::RuntimeLocation))
-              .filePath(QStringLiteral("omacalendar/app-instance.sock"))) {
+      m_serverPath(QDir(paths::runtimeDirectory())
+                       .filePath(QStringLiteral("app-instance.sock"))) {
   connect(&m_server, &QLocalServer::newConnection, this,
           &ApplicationInstance::acceptConnections);
 }

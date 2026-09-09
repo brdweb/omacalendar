@@ -40,7 +40,8 @@ jobs:
 
       - name: Validate shell scripts
         run: |
-          bash -n packaging/arch/*.in packaging/aur/*.in packaging/release/*.sh
+          bash -n packaging/arch/*.in packaging/aur/*.in packaging/release/*.sh \
+            packaging/flatpak/omacalendar-launcher
           runuser -u package-test -- packaging/release/test-versioning.sh
 
       - name: Validate native Arch package assembly

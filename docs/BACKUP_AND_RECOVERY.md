@@ -18,12 +18,12 @@ Default locations follow the XDG base-directory convention:
 
 ## Create a consistent backup
 
-Stop the daemon so the SQLite database, WAL, and related files cannot change
-during the copy:
+Close the desktop and widget, then stop both the socket and daemon so another
+client cannot reactivate SQLite while its database/WAL files are being copied:
 
 ```bash
-systemctl --user stop omacalendard.service
-trap 'systemctl --user start omacalendard.service' EXIT
+systemctl --user stop omacalendard.socket omacalendard.service
+trap 'systemctl --user start omacalendard.socket' EXIT
 data_root="${XDG_DATA_HOME:-$HOME/.local/share}/omacalendar"
 if [[ ! -d "$data_root" ]]; then
   echo "OmaCalendar data directory does not exist" >&2
@@ -36,11 +36,19 @@ if [[ -d "${XDG_CONFIG_HOME:-$HOME/.config}/omacalendar" ]]; then
   cp -a "${XDG_CONFIG_HOME:-$HOME/.config}/omacalendar" "$backup_root/config"
 fi
 trap - EXIT
-systemctl --user start omacalendard.service
+systemctl --user start omacalendard.socket
 ```
 
 Protect the backup like calendar data. Secret Service credentials are not
 included; reconnecting accounts may be required on a new installation.
+
+For Flatpak, close/stop `org.omacalendar.OmaCalendar` first. Back up its
+`~/.var/app/org.omacalendar.OmaCalendar/data/omacalendar/` and corresponding
+`config/omacalendar/` directory to a private location. Restart it with
+`flatpak run org.omacalendar.OmaCalendar` afterward. Do not run native systemd
+commands for this profile, and do not copy a native database into a running
+sandbox. Flatpak and native keyring identities are separate; the backup never
+contains tokens, and account reconnection may be needed after migration.
 
 ## Restore
 

@@ -17,6 +17,8 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--previous-bin", type=Path, required=True)
     parser.add_argument("--candidate-bin", type=Path, required=True)
+    parser.add_argument("--previous-version", default="1.0.0-alpha")
+    parser.add_argument("--candidate-version", default="1.0.0-beta.1")
     args = parser.parse_args()
     previous = args.previous_bin.resolve()
     candidate = args.candidate_bin.resolve()
@@ -26,7 +28,7 @@ def main() -> None:
         try:
             harness.start()
             previous_version = harness.call("system.info")["version"]
-            require(previous_version == "1.0.0-alpha", "wrong prior artifact")
+            require(previous_version == args.previous_version, "wrong prior artifact")
             calendars = harness.call("calendars.list")["calendars"]
             calendar_id = next(item["id"] for item in calendars if not item["readOnly"])
             events = []
@@ -53,7 +55,7 @@ def main() -> None:
             harness.cli = candidate / "omacalendarctl"
             for _ in range(2):
                 harness.start()
-                require(harness.call("system.info")["version"] == "1.0.0-beta.1", "wrong candidate")
+                require(harness.call("system.info")["version"] == args.candidate_version, "wrong candidate")
                 require(harness.call("system.health")["ok"], "candidate unhealthy")
                 for old in events:
                     current = harness.call("events.get", {"eventId": old["id"]})
@@ -68,13 +70,13 @@ def main() -> None:
             harness.daemon = previous / "omacalendard"
             harness.cli = previous / "omacalendarctl"
             harness.start()
-            require(harness.call("system.health")["ok"], "restored alpha unhealthy")
+            require(harness.call("system.health")["ok"], "restored prior version unhealthy")
             for old in events:
                 require(harness.call("events.get", {"eventId": old["id"]})["summary"] == old["summary"], "restore lost event")
             harness.stop()
             require(hashlib.sha256((backup / "data/omacalendar/calendar.sqlite3").read_bytes()).hexdigest() == backup_hash,
                     "backup was modified")
-            print("PASS: published alpha -> beta, timed/all-day/recurring data and settings, beta restart, older-backup restore")
+            print(f"PASS: {args.previous_version} -> {args.candidate_version}, timed/all-day/recurring data and settings, candidate restart, older-backup restore")
         finally:
             harness.stop()
 

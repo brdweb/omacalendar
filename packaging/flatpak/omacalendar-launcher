@@ -1,0 +1,85 @@
+#!/usr/bin/env bash
+set -euo pipefail
+umask 077
+
+# Native installations use systemd socket activation. A Flatpak invocation owns
+# its sandbox daemon until the desktop (or explicitly requested command) exits.
+if [[ ${FLATPAK_ID:-} != org.omacalendar.OmaCalendar || -z ${XDG_RUNTIME_DIR:-} ]]; then
+  echo 'This launcher must run inside the OmaCalendar Flatpak.' >&2
+  exit 1
+fi
+runtime_directory="${XDG_RUNTIME_DIR}/app/${FLATPAK_ID}/omacalendar"
+install -d -m 700 "${runtime_directory}"
+daemon_pid=
+client_pid=
+clients_lock_open=false
+cleanup() {
+  if [[ -n ${client_pid} ]]; then
+    kill "${client_pid}" 2>/dev/null || true
+    wait "${client_pid}" 2>/dev/null || true
+  fi
+  if [[ ${clients_lock_open} == true ]]; then
+    flock --unlock 8
+  fi
+  if [[ -n ${daemon_pid} ]]; then
+    # A different Flatpak invocation may have attached a desktop or CLI while
+    # this one was running. Keep the owning sandbox alive until they finish.
+    flock --exclusive 8
+    kill "${daemon_pid}" 2>/dev/null || true
+    wait "${daemon_pid}" 2>/dev/null || true
+  fi
+}
+trap cleanup EXIT
+trap 'exit 143' TERM HUP
+trap 'exit 130' INT
+
+# Serialize startup across independent sandbox instances. Kernel file locks,
+# unlike PID checks, work across their separate process namespaces.
+exec 9>"${runtime_directory}/launcher.lock"
+flock --exclusive --timeout 15 9
+exec 8>"${runtime_directory}/clients.lock"
+clients_lock_open=true
+flock --shared 8
+if [[ ! -S ${runtime_directory}/daemon.sock ]] ||
+   ! /app/bin/omacalendarctl system.ping >/dev/null 2>&1; then
+  /app/bin/omacalendard >"${runtime_directory}/daemon.log" 2>&1 9>&- 8>&- &
+  daemon_pid=$!
+  ready=false
+  for _attempt in {1..100}; do
+    if [[ -S ${runtime_directory}/daemon.sock ]] &&
+       /app/bin/omacalendarctl system.ping >/dev/null 2>&1; then
+      ready=true
+      break
+    fi
+    kill -0 "${daemon_pid}" 2>/dev/null || break
+    sleep 0.05
+  done
+  if [[ ${ready} != true ]]; then
+    echo "OmaCalendar could not start its sandbox daemon. See ${runtime_directory}/daemon.log" >&2
+    exit 1
+  fi
+fi
+flock --unlock 9
+exec 9>&-
+
+case ${1:-} in
+  --daemon)
+    if [[ -z ${daemon_pid} ]]; then
+      echo 'The OmaCalendar Flatpak daemon is already running.' >&2
+      exit 1
+    fi
+    wait "${daemon_pid}"
+    daemon_pid=
+    ;;
+  --cli)
+    shift
+    /app/bin/omacalendarctl "$@"
+    ;;
+  *)
+    export OMACALENDAR_DISABLE_DAEMON_AUTOSTART=1
+    /app/libexec/omacalendar/omacalendar-ui "$@" &
+    client_pid=$!
+    wait "${client_pid}"
+    client_pid=
+    ;;
+esac

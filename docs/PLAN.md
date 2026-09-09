@@ -1,5 +1,10 @@
 # OmaCalendar 1.0 implementation plan
 
+The [stable preparation plan](STABLE_PLAN.md) tracks the `1.0.0-rc.1` draft,
+Arch/Ubuntu `.deb`/Flatpak packaging, and the owner pass scheduled for
+2026-09-09. This document remains the stable gate authority; pending checks
+below are not waived by creating candidate artifacts.
+
 ## Product outcome
 
 OmaCalendar 1.0 is a local-first, keyboard-fast Omarchy calendar with a dense,
