@@ -362,6 +362,19 @@ jobs:
             /tmp/omacalendar-flatpak-source.tar.gz "${RELEASE_VERSION}" "$PWD/artifacts"
       - name: Install and exercise the actual sandbox
         run: |
+          # Builder sandboxes use the application's ID and can remain listed
+          # briefly after build-bundle exits. This disposable runner has no
+          # user application to stop; wait for natural shutdown, never kill it
+          # or bypass verify-flatpak.sh's existing-instance protections.
+          deadline=$((SECONDS + 30))
+          while flatpak ps --columns=application | grep -Fxq org.omacalendar.OmaCalendar; do
+            if (( SECONDS >= deadline )); then
+              echo 'Flatpak builder did not release its application instance.' >&2
+              flatpak ps
+              exit 1
+            fi
+            sleep 0.5
+          done
           dbus-run-session -- bash packaging/release/verify-flatpak.sh \
             "$PWD/artifacts/omacalendar-${RELEASE_VERSION}-linux-x86_64.flatpak" \
             "${RELEASE_VERSION}"
