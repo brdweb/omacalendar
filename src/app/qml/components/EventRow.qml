@@ -46,6 +46,10 @@ ItemDelegate {
     width: ListView.view ? ListView.view.width : 400
     height: Math.max(68, details.implicitHeight + 24)
     padding: 0
+    Accessible.name: eventData.summary || qsTr("Untitled event")
+    Accessible.description: eventDetails.text
+                            + (displayStateLabel.length > 0 ? " · " + displayStateLabel : "")
+    Accessible.role: Accessible.Button
     onClicked: editRequested(eventData)
     ToolTip.visible: generatedInstance && hovered
     ToolTip.text: qsTr("Recurring event — choose an occurrence scope when editing")
@@ -87,6 +91,7 @@ ItemDelegate {
                 elide: Text.ElideRight
             }
             Text {
+                id: eventDetails
                 textFormat: Text.PlainText
                 Layout.fillWidth: true
                 text: {

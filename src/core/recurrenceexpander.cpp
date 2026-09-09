@@ -106,8 +106,17 @@ QString occurrenceKey(const Event& event) {
 
 QString recurrenceKey(const Event& exception, const Event& master) {
   const TimeKind timeKind = master.allDay ? TimeKind::AllDay : master.timeKind;
-  const QString canonical = canonicalRecurrenceIdentity(
-      exception.recurrenceId, master.allDay, timeKind, master.startTimeZone);
+  QString canonical = canonicalRecurrenceIdentity(exception.recurrenceId, master.allDay,
+                                                  timeKind, master.startTimeZone);
+  if (timeKind == TimeKind::Floating &&
+      canonical.startsWith(QStringLiteral("F:offset:"))) {
+    // Generated occurrences have historically exposed UTC recurrence IDs,
+    // including for floating series. Accept those returned IDs as instants
+    // when finding their exception slot, while keeping true floating wall
+    // identities distinct in the general canonical identity comparison.
+    canonical = canonicalRecurrenceIdentity(exception.recurrenceId, false,
+                                            TimeKind::Zoned, QStringLiteral("UTC"));
+  }
   if (canonical.startsWith(QStringLiteral("D:"))) {
     return canonical;
   }

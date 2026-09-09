@@ -1287,6 +1287,139 @@ class DatabaseTest final : public QObject {
     QVERIFY(db.conflicts(true, &error).isEmpty());
   }
 
+  void newestConflictResolutionPreservesUncertainOrdering() {
+    for (const QString& scenario :
+         {QStringLiteral("missing_remote_time"), QStringLiteral("equal_times"),
+          QStringLiteral("same_second"), QStringLiteral("remote_deletion")}) {
+      QTemporaryDir directory;
+      QVERIFY(directory.isValid());
+      Database db;
+      QString error;
+      QVERIFY2(db.open(directory.filePath(QStringLiteral("store.sqlite")), &error),
+               qPrintable(error));
+      const Account account =
+          makeAccount(QStringLiteral("uncertain-account"), scenario);
+      const Calendar calendar =
+          makeCalendar(QStringLiteral("uncertain-calendar"), account.id);
+      QVERIFY2(db.upsertAccount(account, &error), qPrintable(error));
+      QVERIFY2(db.upsertCalendar(calendar, &error), qPrintable(error));
+      Event original = makeRemoteEvent(calendar.id, scenario, 0);
+      QVERIFY2(db.applyRemoteEvent(original, &error), qPrintable(error));
+      Event local = db.event(original.id, &error);
+      local.summary = QStringLiteral("Preserve this unsent edit");
+      QVERIFY2(db.saveLocalEvent(&local, OutboxOperation::Update, &error, scenario,
+                                 QStringLiteral("series"), QStringLiteral("none"),
+                                 local.localRevision),
+               qPrintable(error));
+      local = db.event(original.id, &error);
+      bool conflicted = false;
+      if (scenario == QStringLiteral("remote_deletion")) {
+        QVERIFY2(
+            db.removeRemoteEvent(calendar.id, original.remoteId,
+                                 QStringLiteral("remote-delete"), &error, &conflicted),
+            qPrintable(error));
+      } else {
+        Event remote = original;
+        remote.id.clear();
+        remote.etag = QStringLiteral("different-provider-revision");
+        remote.summary = QStringLiteral("Competing provider edit");
+        remote.updatedAt = scenario == QStringLiteral("equal_times") ? local.updatedAt
+                           : scenario == QStringLiteral("same_second")
+                               ? QDateTime::fromSecsSinceEpoch(
+                                     local.updatedAt.toSecsSinceEpoch(), QTimeZone::UTC)
+                               : QDateTime();
+        QVERIFY2(db.applyRemoteEvent(remote, &error, &conflicted), qPrintable(error));
+      }
+      QVERIFY2(conflicted, qPrintable(scenario));
+      const qint64 before = db.changeRevision();
+      bool queued = true;
+      QCOMPARE(db.resolveNewestConflicts(&queued, &error), 0);
+      QVERIFY(!queued);
+      QCOMPARE(db.changeRevision(), before);
+      QCOMPARE(db.event(original.id, &error).summary, local.summary);
+      QCOMPARE(db.conflicts(true, &error).size(), 1);
+      QCOMPARE(db.conflicts(true, &error).first().state, QStringLiteral("unresolved"));
+    }
+  }
+
+  void conflictBookkeepingPreservesEditChronology() {
+    for (const bool acknowledgeEarlierWrite : {false, true}) {
+      QTemporaryDir directory;
+      QVERIFY(directory.isValid());
+      Database db;
+      QString error;
+      QVERIFY2(db.open(directory.filePath(QStringLiteral("store.sqlite")), &error),
+               qPrintable(error));
+      const Account account = makeAccount(QStringLiteral("chronology-account"),
+                                          QStringLiteral("Edit chronology"));
+      const Calendar calendar =
+          makeCalendar(QStringLiteral("chronology-calendar"), account.id);
+      QVERIFY2(db.upsertAccount(account, &error), qPrintable(error));
+      QVERIFY2(db.upsertCalendar(calendar, &error), qPrintable(error));
+      Event original = makeRemoteEvent(calendar.id, QStringLiteral("chronology"), 0);
+      QVERIFY2(db.applyRemoteEvent(original, &error), qPrintable(error));
+      Event local = db.event(original.id, &error);
+      local.summary = QStringLiteral("First local edit");
+      QVERIFY2(db.saveLocalEvent(&local, OutboxOperation::Update, &error,
+                                 QStringLiteral("chronology-first"),
+                                 QStringLiteral("series"), QStringLiteral("none"),
+                                 local.localRevision),
+               qPrintable(error));
+      const auto firstOperations = db.readyOutbox(10, &error);
+      QCOMPARE(firstOperations.size(), 1);
+      const qint64 firstMutationId = firstOperations.first().id;
+      Event acknowledgement = local;
+      acknowledgement.etag = QStringLiteral("acknowledged-provider-revision");
+      if (acknowledgeEarlierWrite) {
+        QVERIFY2(db.updateOutboxState(firstMutationId, OutboxState::Sending, 1,
+                                      QDateTime::currentDateTimeUtc().addSecs(60), {},
+                                      {}, &error),
+                 qPrintable(error));
+        local.summary = QStringLiteral("Second pending local edit");
+        QVERIFY2(db.saveLocalEvent(&local, OutboxOperation::Update, &error,
+                                   QStringLiteral("chronology-second"),
+                                   QStringLiteral("series"), QStringLiteral("none"),
+                                   local.localRevision),
+                 qPrintable(error));
+      }
+      const QDateTime editedAt = db.event(local.id, &error).updatedAt;
+      Event competing = original;
+      competing.id.clear();
+      competing.etag = QStringLiteral("competing-provider-revision");
+      competing.summary = QStringLiteral("Same-second competing provider edit");
+      competing.updatedAt =
+          QDateTime::fromSecsSinceEpoch(editedAt.toSecsSinceEpoch(), QTimeZone::UTC);
+
+      // Network completion and repeated conflict observation may happen much
+      // later than the actual edit; neither establishes a newer local version.
+      QTest::qWait(1100);
+      if (acknowledgeEarlierWrite) {
+        QVERIFY2(db.completeOutbox(firstMutationId, &acknowledgement, &error),
+                 qPrintable(error));
+      } else {
+        QVERIFY2(db.recordProviderConflict(firstMutationId, &competing, &error),
+                 qPrintable(error));
+        bool queued = true;
+        QCOMPARE(db.resolveNewestConflicts(&queued, &error), 0);
+        QVERIFY(!queued);
+      }
+      bool conflicted = false;
+      QVERIFY2(db.applyRemoteEvent(competing, &error, &conflicted), qPrintable(error));
+      QVERIFY(conflicted);
+      if (!acknowledgeEarlierWrite) {
+        QVERIFY2(db.recordProviderConflict(firstMutationId, &competing, &error),
+                 qPrintable(error));
+      }
+      bool queued = true;
+      QCOMPARE(db.resolveNewestConflicts(&queued, &error), 0);
+      QVERIFY(!queued);
+      QCOMPARE(db.event(local.id, &error).updatedAt, editedAt);
+      QCOMPARE(db.event(local.id, &error).summary, local.summary);
+      QCOMPARE(db.conflicts(true, &error).size(), 1);
+      QCOMPARE(db.conflicts(true, &error).first().state, QStringLiteral("unresolved"));
+    }
+  }
+
   void providerConflictsResolveAtomically() {
     QTemporaryDir directory;
     QVERIFY(directory.isValid());

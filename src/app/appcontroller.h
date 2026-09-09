@@ -1,6 +1,6 @@
 #pragma once
 
-#include <QDate>
+#include <QDateTime>
 #include <QHash>
 #include <QObject>
 #include <QSet>
@@ -51,7 +51,7 @@ class AppController final : public QObject {
                  activeCalendarSetIdChanged)
   Q_PROPERTY(
       bool preferencesLoaded READ preferencesLoaded NOTIFY preferencesLoadedChanged)
-  Q_PROPERTY(QDate selectedDate READ selectedDate WRITE setSelectedDate NOTIFY
+  Q_PROPERTY(QDateTime selectedDate READ selectedDate WRITE setSelectedDate NOTIFY
                  selectedDateChanged)
   Q_PROPERTY(QString systemTimeZoneId READ systemTimeZoneId CONSTANT)
   Q_PROPERTY(QStringList availableTimeZoneIds READ availableTimeZoneIds CONSTANT)
@@ -86,7 +86,7 @@ class AppController final : public QObject {
   [[nodiscard]] bool widgetInstalled() const;
   [[nodiscard]] QString activeCalendarSetId() const;
   [[nodiscard]] bool preferencesLoaded() const;
-  [[nodiscard]] QDate selectedDate() const;
+  [[nodiscard]] QDateTime selectedDate() const;
   [[nodiscard]] QString systemTimeZoneId() const;
   [[nodiscard]] QStringList availableTimeZoneIds() const;
   [[nodiscard]] bool bundledGoogleOAuthAvailable() const;
@@ -160,7 +160,7 @@ class AppController final : public QObject {
   Q_INVOKABLE bool isValidTimeZone(const QString& timeZoneId) const;
   Q_INVOKABLE void syncAll();
   Q_INVOKABLE void syncAccount(const QString& accountId);
-  Q_INVOKABLE void setSelectedDate(const QDate& date);
+  Q_INVOKABLE void setSelectedDate(const QDateTime& date);
   Q_INVOKABLE void reconnect();
   void activateWindow();
 

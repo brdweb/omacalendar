@@ -84,6 +84,28 @@ QString textProperty(icalcomponent* component, icalproperty_kind kind) {
   }
 }
 
+QDateTime utcChangeTime(icalcomponent* component, icalproperty_kind kind) {
+  icalproperty* property = icalcomponent_get_first_property(component, kind);
+  if (property == nullptr ||
+      icalcomponent_get_next_property(component, kind) != nullptr) {
+    return {};
+  }
+  icaltimetype value = icaltime_null_time();
+  if (kind == ICAL_LASTMODIFIED_PROPERTY) {
+    value = icalproperty_get_lastmodified(property);
+  } else if (kind == ICAL_CREATED_PROPERTY) {
+    value = icalproperty_get_created(property);
+  } else if (kind == ICAL_DTSTAMP_PROPERTY) {
+    value = icalproperty_get_dtstamp(property);
+  }
+  if (icaltime_is_null_time(value) || !icaltime_is_valid_time(value) ||
+      icaltime_is_date(value) || !icaltime_is_utc(value)) {
+    return {};
+  }
+  return QDateTime(QDate(value.year, value.month, value.day),
+                   QTime(value.hour, value.minute, value.second), QTimeZone::UTC);
+}
+
 QString timeZoneId(icalproperty* property) {
   if (property == nullptr) {
     return {};
@@ -125,6 +147,22 @@ QString normalizedRecurrenceId(const Event& event) {
     }
     parameters = recurrence.left(separator).split(QLatin1Char(';'), Qt::SkipEmptyParts);
     value = recurrence.sliced(separator + 1);
+  }
+
+  if (!event.allDay && event.timeKind == TimeKind::Floating) {
+    const QString canonical =
+        canonicalRecurrenceIdentity(value, false, TimeKind::Floating);
+    if (canonical.startsWith(QStringLiteral("F:offset:"))) {
+      // Generated occurrence references are UTC instants even for floating
+      // series. Convert the instant back to the desktop wall time before
+      // dropping its offset, just as floating DTSTART/DTEND are serialized.
+      const QString instantKey = canonicalRecurrenceIdentity(
+          value, false, TimeKind::Zoned, QStringLiteral("UTC"));
+      const QDateTime instant = dateTimeFromIso(instantKey.sliced(2));
+      if (instantKey.startsWith(QStringLiteral("Z:")) && instant.isValid()) {
+        value = instant.toLocalTime().toString(QStringLiteral("yyyyMMdd'T'HHmmss"));
+      }
+    }
   }
 
   // Presentation occurrence references use ISO 8601 while iCalendar requires
@@ -966,15 +1004,19 @@ icaltimetype zonedValue(const QDateTime& dateTime, const QString& timeZone) {
 }
 
 icalproperty* dateTimeProperty(icalproperty_kind kind, const QDateTime& dateTime,
-                               const QString& timeZone) {
-  const icaltimetype value = zonedValue(dateTime, timeZone);
+                               const QString& timeZone, bool floating = false) {
+  const QByteArray floatingValue = dateTime.toTimeZone(QTimeZone::systemTimeZone())
+                                       .toString(QStringLiteral("yyyyMMdd'T'HHmmss"))
+                                       .toLatin1();
+  const icaltimetype value = floating ? icaltime_from_string(floatingValue.constData())
+                                      : zonedValue(dateTime, timeZone);
   icalproperty* property = nullptr;
   if (kind == ICAL_DTSTART_PROPERTY) {
     property = icalproperty_new_dtstart(value);
   } else if (kind == ICAL_DTEND_PROPERTY) {
     property = icalproperty_new_dtend(value);
   }
-  if (property != nullptr && !timeZone.isEmpty() && !isUtcZone(timeZone)) {
+  if (property != nullptr && !floating && !timeZone.isEmpty() && !isUtcZone(timeZone)) {
     const QByteArray zoneName = timeZone.toUtf8();
     icalproperty_add_parameter(property, icalparameter_new_tzid(zoneName.constData()));
   }
@@ -1018,6 +1060,14 @@ QByteArray mutationFingerprint(const QString& clientMutationId) {
 }
 
 }  // namespace
+
+bool ICalendarCodec::sameRecurrenceIdentity(const Event& first, const Event& second) {
+  Event firstWire = first;
+  firstWire.recurrenceId = normalizedRecurrenceId(first);
+  Event secondWire = second;
+  secondWire.recurrenceId = normalizedRecurrenceId(second);
+  return recurrenceIdentityEqual(firstWire, secondWire);
+}
 
 ICalendarParseResult ICalendarCodec::parse(const QByteArray& payload) {
   ICalendarParseResult result;
@@ -1099,6 +1149,9 @@ ICalendarParseResult ICalendarCodec::parse(const QByteArray& payload) {
     }
 
     event.allDay = start.dateOnly;
+    event.timeKind = event.allDay ? TimeKind::AllDay
+                                  : (start.timeZone.isEmpty() ? TimeKind::Floating
+                                                              : TimeKind::Zoned);
     if (event.allDay) {
       event.startDate = start.date;
       event.endDate =
@@ -1129,6 +1182,15 @@ ICalendarParseResult ICalendarCodec::parse(const QByteArray& payload) {
     event.description = textProperty(component, ICAL_DESCRIPTION_PROPERTY);
     event.location = textProperty(component, ICAL_LOCATION_PROPERTY);
     event.url = textProperty(component, ICAL_URL_PROPERTY);
+    event.createdAt = utcChangeTime(component, ICAL_CREATED_PROPERTY);
+    // RFC 5545 3.8.7.2: without METHOD, DTSTAMP is the store revision time.
+    // With METHOD it is message creation time and cannot order competing edits.
+    if (icalcomponent_get_first_property(component, ICAL_LASTMODIFIED_PROPERTY)) {
+      event.updatedAt = utcChangeTime(component, ICAL_LASTMODIFIED_PROPERTY);
+    } else if (icalcomponent_get_first_property(calendar.get(), ICAL_METHOD_PROPERTY) ==
+               nullptr) {
+      event.updatedAt = utcChangeTime(component, ICAL_DTSTAMP_PROPERTY);
+    }
     if (icalproperty* organizer =
             icalcomponent_get_first_property(component, ICAL_ORGANIZER_PROPERTY)) {
       event.organizer = calendarUser(organizer, true);
@@ -1264,7 +1326,10 @@ ICalendarSerializeResult ICalendarCodec::serialize(const Event& event,
                         ? QDateTime(event.startDate, QTime(0, 0), QTimeZone::UTC)
                         : event.startUtc));
   if (!addProperty(component, icalproperty_new_uid(uid.toUtf8().constData())) ||
-      !addProperty(component, icalproperty_new_dtstamp(utcValue(stamp)))) {
+      !addProperty(component, icalproperty_new_dtstamp(utcValue(stamp))) ||
+      (event.updatedAt.isValid() &&
+       !addProperty(component,
+                    icalproperty_new_lastmodified(utcValue(event.updatedAt))))) {
     result.error = serializationError(
         QStringLiteral("allocation_failed"),
         QStringLiteral("Unable to serialize required event metadata"));
@@ -1284,8 +1349,10 @@ ICalendarSerializeResult ICalendarCodec::serialize(const Event& event,
   } else {
     const QString endZone =
         event.endTimeZone.isEmpty() ? event.startTimeZone : event.endTimeZone;
-    if (!addProperty(component, dateTimeProperty(ICAL_DTSTART_PROPERTY, event.startUtc,
-                                                 event.startTimeZone))) {
+    if (!addProperty(
+            component,
+            dateTimeProperty(ICAL_DTSTART_PROPERTY, event.startUtc, event.startTimeZone,
+                             event.timeKind == TimeKind::Floating))) {
       result.error =
           serializationError(QStringLiteral("allocation_failed"),
                              QStringLiteral("Unable to serialize event times"));
@@ -1295,7 +1362,8 @@ ICalendarSerializeResult ICalendarCodec::serialize(const Event& event,
     // present DTEND must be later than DTSTART.
     if (event.endUtc.isValid() && event.endUtc > event.startUtc &&
         !addProperty(component,
-                     dateTimeProperty(ICAL_DTEND_PROPERTY, event.endUtc, endZone))) {
+                     dateTimeProperty(ICAL_DTEND_PROPERTY, event.endUtc, endZone,
+                                      event.timeKind == TimeKind::Floating))) {
       result.error =
           serializationError(QStringLiteral("allocation_failed"),
                              QStringLiteral("Unable to serialize event times"));
@@ -1556,11 +1624,12 @@ ICalendarSerializeResult ICalendarCodec::patch(const Event& event,
   }
 
   constexpr icalproperty_kind editableProperties[] = {
-      ICAL_UID_PROPERTY,      ICAL_DTSTAMP_PROPERTY,  ICAL_DTSTART_PROPERTY,
-      ICAL_DTEND_PROPERTY,    ICAL_DURATION_PROPERTY, ICAL_RECURRENCEID_PROPERTY,
-      ICAL_RRULE_PROPERTY,    ICAL_SUMMARY_PROPERTY,  ICAL_DESCRIPTION_PROPERTY,
-      ICAL_LOCATION_PROPERTY, ICAL_URL_PROPERTY,      ICAL_CLASS_PROPERTY,
-      ICAL_STATUS_PROPERTY,   ICAL_TRANSP_PROPERTY,   ICAL_SEQUENCE_PROPERTY,
+      ICAL_UID_PROPERTY,          ICAL_DTSTAMP_PROPERTY,  ICAL_LASTMODIFIED_PROPERTY,
+      ICAL_DTSTART_PROPERTY,      ICAL_DTEND_PROPERTY,    ICAL_DURATION_PROPERTY,
+      ICAL_RECURRENCEID_PROPERTY, ICAL_RRULE_PROPERTY,    ICAL_SUMMARY_PROPERTY,
+      ICAL_DESCRIPTION_PROPERTY,  ICAL_LOCATION_PROPERTY, ICAL_URL_PROPERTY,
+      ICAL_CLASS_PROPERTY,        ICAL_STATUS_PROPERTY,   ICAL_TRANSP_PROPERTY,
+      ICAL_SEQUENCE_PROPERTY,
   };
   for (const icalproperty_kind kind : editableProperties) {
     if (!replaceProperties(targetEvent, draftEvent, kind)) {
@@ -1696,7 +1765,7 @@ ICalendarSerializeResult ICalendarCodec::patchScoped(const Event& event,
   icalcomponent* target = nullptr;
   for (icalcomponent* candidate : events) {
     if (textProperty(candidate, ICAL_UID_PROPERTY) == draft.uid &&
-        recurrenceIdentityEqual(recurrenceId(candidate), draft.recurrenceId,
+        recurrenceIdentityEqual(recurrenceId(candidate), normalizedRecurrenceId(draft),
                                 draft.allDay, draft.timeKind, draft.startTimeZone)) {
       if (target != nullptr) {
         return {{},

@@ -56,7 +56,7 @@ QString remoteResourceHref(const QString& remoteId) {
 }
 
 bool sameRecurrenceIdentity(const Event& first, const Event& second) {
-  return recurrenceIdentityEqual(first, second);
+  return ICalendarCodec::sameRecurrenceIdentity(first, second);
 }
 
 QUrl eventResourceUrl(const QUrl& calendarUrl, const Event& event) {
@@ -217,7 +217,7 @@ bool attendeeMutation(const Event& event) {
     return !event.attendees.isEmpty();
   }
   for (const Event& retained : parsed.events) {
-    if (retained.uid == event.uid && recurrenceIdentityEqual(retained, event)) {
+    if (retained.uid == event.uid && sameRecurrenceIdentity(retained, event)) {
       return canonicalAttendees(retained.attendees) !=
              canonicalAttendees(event.attendees);
     }

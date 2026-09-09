@@ -15,6 +15,7 @@
 #include "core/paths.h"
 #include "core/recurrenceexpander.h"
 #include "core/widgeteventquery.h"
+#include "providers/caldav/icalcodec.h"
 
 namespace {
 
@@ -141,6 +142,21 @@ QString normalizedRecurrenceScope(QString scope) {
     scope = QStringLiteral("series");
   }
   return scope;
+}
+
+bool occurrenceReferenceMatches(const QString& reference,
+                                const omacalendar::Event& occurrence) {
+  if (!occurrence.allDay && occurrence.timeKind == omacalendar::TimeKind::Floating) {
+    // The client may still hold the generated UTC reference after CalDAV
+    // acknowledges the same occurrence using its floating wall-time identity.
+    omacalendar::Event requested = occurrence;
+    requested.recurrenceId = reference;
+    return omacalendar::caldav::ICalendarCodec::sameRecurrenceIdentity(requested,
+                                                                       occurrence);
+  }
+  return omacalendar::recurrenceIdentityEqual(reference, occurrence.recurrenceId,
+                                              occurrence.allDay, occurrence.timeKind,
+                                              occurrence.startTimeZone);
 }
 
 QString resourceRemoteId(const QString& remoteId) {
@@ -1557,9 +1573,9 @@ QJsonValue Daemon::onEventsGet(const QJsonObject& params, ipc::Error* error) {
     }
     const auto matchesReference = [&requestedRecurrenceId,
                                    &master](const Event& candidate) {
-      return recurrenceIdentityEqual(requestedRecurrenceId, candidate.recurrenceId,
-                                     master.allDay, master.timeKind,
-                                     master.startTimeZone);
+      Event reference = master;
+      reference.recurrenceId = candidate.recurrenceId;
+      return occurrenceReferenceMatches(requestedRecurrenceId, reference);
     };
     for (const Event& candidate : series) {
       if (!candidate.recurrenceId.isEmpty() && matchesReference(candidate)) {
@@ -1729,12 +1745,33 @@ QJsonValue Daemon::onEventsUpdate(const QJsonObject& params, ipc::Error* error) 
   if (params.value(QStringLiteral("patch")).isObject() &&
       !requestedCurrent.id.isEmpty()) {
     QJsonObject merged = toJson(requestedCurrent);
+    const QString patchScope = normalizedRecurrenceScope(
+        params.value(QStringLiteral("recurrenceScope")).toString());
+    const QString occurrenceId = recurrenceReference(params).trimmed();
+    if (!requestedCurrent.recurrenceRule.isEmpty() &&
+        requestedCurrent.recurrenceId.isEmpty() && !occurrenceId.isEmpty() &&
+        (patchScope == QStringLiteral("occurrence") ||
+         patchScope == QStringLiteral("future"))) {
+      // A partial edit applies to the selected occurrence, whose dates and
+      // duration can differ from the master (including across DST). Resolve
+      // through the same canonical expansion/exception lookup as events.get
+      // before merging fields, so an existing detached edit is preserved too.
+      const QJsonValue occurrence =
+          onEventsGet({{QStringLiteral("eventId"), requestedId},
+                       {QStringLiteral("recurrenceId"), occurrenceId}},
+                      error);
+      if (!occurrence.isObject()) {
+        return {};
+      }
+      merged = occurrence.toObject();
+    }
+    const QString patchedId = merged.value(QStringLiteral("id")).toString();
     const QJsonObject patch =
         normalizedEventDraft(params.value(QStringLiteral("patch")).toObject());
     for (auto iterator = patch.constBegin(); iterator != patch.constEnd(); ++iterator) {
       merged.insert(iterator.key(), iterator.value());
     }
-    merged.insert(QStringLiteral("id"), requestedId);
+    merged.insert(QStringLiteral("id"), patchedId);
     eventPayload = merged;
   }
   Event event = eventFromJson(eventPayload);
@@ -1787,9 +1824,7 @@ QJsonValue Daemon::onEventsUpdate(const QJsonObject& params, ipc::Error* error) 
     }
     if (storedDetachedException) {
       if (!referencedRecurrenceId.isEmpty() &&
-          !recurrenceIdentityEqual(referencedRecurrenceId, currentEvent.recurrenceId,
-                                   currentEvent.allDay, currentEvent.timeKind,
-                                   currentEvent.startTimeZone)) {
+          !occurrenceReferenceMatches(referencedRecurrenceId, currentEvent)) {
         if (error != nullptr) {
           *error = {QStringLiteral("occurrence_identity_mismatch"),
                     QStringLiteral("eventRef does not match this detached occurrence"),
@@ -2271,9 +2306,7 @@ QJsonValue Daemon::onEventsMove(const QJsonObject& params, ipc::Error* error) {
   } else if (!source.id.isEmpty() && recurrenceScope == QStringLiteral("occurrence")) {
     if (!source.recurrenceId.isEmpty()) {
       if (!requestedRecurrenceId.isEmpty() &&
-          !recurrenceIdentityEqual(requestedRecurrenceId, source.recurrenceId,
-                                   source.allDay, source.timeKind,
-                                   source.startTimeZone)) {
+          !occurrenceReferenceMatches(requestedRecurrenceId, source)) {
         if (error != nullptr) {
           *error = {QStringLiteral("occurrence_identity_mismatch"),
                     QStringLiteral("The event and occurrence reference do not match"),
@@ -2541,9 +2574,7 @@ QJsonValue Daemon::onEventsRespond(const QJsonObject& params, ipc::Error* error)
     }
   } else if (recurrenceScope != QStringLiteral("series") &&
              !requestedRecurrenceId.isEmpty() &&
-             !recurrenceIdentityEqual(requestedRecurrenceId, event.recurrenceId,
-                                      event.allDay, event.timeKind,
-                                      event.startTimeZone)) {
+             !occurrenceReferenceMatches(requestedRecurrenceId, event)) {
     if (error != nullptr) {
       *error = {QStringLiteral("occurrence_identity_mismatch"),
                 QStringLiteral("The event and occurrence reference do not match"),

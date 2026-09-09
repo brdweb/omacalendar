@@ -493,6 +493,9 @@ class CalDavHardeningTest final : public QObject {
   void oversizedResponseIsRejectedBeforeBuffering();
   void crossOriginRedirectIsNotFollowed();
   void schedulingRequiresProof();
+  void calendarRevisionTimestampsRespectMethodAndPrecision();
+  void parsedTimeKindsMatchMutationIdentity();
+  void floatingOccurrenceReferencesRoundTripThroughWireIdentity();
   void valarmsParseIntoStructuredReminders();
   void multipleValarmsSerializeAndRoundTrip();
   void invalidAndEmptyReminderWritesAreSafe();
@@ -517,6 +520,142 @@ class CalDavHardeningTest final : public QObject {
   void futureRangeProbeRemovesDeterministicStaleResource();
   void futureRangeProbeCleansUpLostCreateAcknowledgment();
 };
+
+void CalDavHardeningTest::calendarRevisionTimestampsRespectMethodAndPrecision() {
+  const auto parse = [](const QByteArray& timestamps,
+                        const QByteArray& method = QByteArray()) {
+    return caldav::ICalendarCodec::parse(
+        "BEGIN:VCALENDAR\r\nVERSION:2.0\r\n" + method +
+        "BEGIN:VEVENT\r\nUID:revision@example.test\r\n"
+        "DTSTART:20260910T130000Z\r\nDTEND:20260910T140000Z\r\n" +
+        timestamps + "SUMMARY:Revision test\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n");
+  };
+  const QDateTime modified(QDate(2026, 9, 8), QTime(11, 0), QTimeZone::UTC);
+  const QByteArray stamp = "DTSTAMP:20260909T120000Z\r\n";
+  auto result =
+      parse(stamp + "CREATED:20260901T100000Z\r\nLAST-MODIFIED:20260908T110000Z\r\n");
+  QVERIFY2(result.ok(), qPrintable(result.error.message));
+  QCOMPARE(result.events.first().updatedAt, modified);
+  QCOMPARE(result.events.first().createdAt,
+           QDateTime(QDate(2026, 9, 1), QTime(10, 0), QTimeZone::UTC));
+  result = parse(stamp);
+  QVERIFY(result.ok());
+  QCOMPARE(result.events.first().updatedAt,
+           QDateTime(QDate(2026, 9, 9), QTime(12, 0), QTimeZone::UTC));
+  result = parse(stamp, "METHOD:REQUEST\r\n");
+  QVERIFY(result.ok());
+  QVERIFY(!result.events.first().updatedAt.isValid());
+  result = parse(stamp + "LAST-MODIFIED:20260908T110000Z\r\n", "METHOD:REQUEST\r\n");
+  QVERIFY(result.ok());
+  QCOMPARE(result.events.first().updatedAt, modified);
+  for (const QByteArray& uncertain :
+       {QByteArray(), QByteArray("DTSTAMP:20260909T120000\r\n"),
+        stamp + "LAST-MODIFIED:20260908T110000\r\n",
+        stamp +
+            "LAST-MODIFIED:20260908T110000Z\r\nLAST-MODIFIED:20260909T120000Z\r\n"}) {
+    result = parse(uncertain);
+    QVERIFY2(result.ok(), qPrintable(result.error.message));
+    QVERIFY(!result.events.first().updatedAt.isValid());
+  }
+  const auto original = parse(stamp + "LAST-MODIFIED:20260908T110000Z\r\n");
+  Event changed = original.events.first();
+  changed.updatedAt = modified.addSecs(3600);
+  const auto serialized = caldav::ICalendarCodec::serialize(changed);
+  QVERIFY(serialized.ok());
+  const auto reparsed = caldav::ICalendarCodec::parse(serialized.payload);
+  QVERIFY(reparsed.ok());
+  QCOMPARE(reparsed.events.first().updatedAt, changed.updatedAt);
+  const auto patched = caldav::ICalendarCodec::patch(
+      changed,
+      "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\nUID:revision@example.test\r\n"
+      "DTSTART:20260910T130000Z\r\nDTEND:20260910T140000Z\r\n"
+      "DTSTAMP:20260908T110000Z\r\nLAST-MODIFIED:20260908T110000Z\r\n"
+      "SUMMARY:Old revision\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n");
+  QVERIFY2(patched.ok(), qPrintable(patched.error.message));
+  QCOMPARE(caldav::ICalendarCodec::parse(patched.payload).events.first().updatedAt,
+           changed.updatedAt);
+}
+
+void CalDavHardeningTest::parsedTimeKindsMatchMutationIdentity() {
+  for (const auto& row :
+       {std::pair{
+            QByteArray("DTSTART;VALUE=DATE:20260910\r\nDTEND;VALUE=DATE:20260913\r\n"),
+            TimeKind::AllDay},
+        std::pair{QByteArray("DTSTART:20260910T130000\r\nDTEND:20260910T140000\r\n"),
+                  TimeKind::Floating},
+        std::pair{QByteArray("DTSTART:20260910T130000Z\r\nDTEND:20260910T140000Z\r\n"),
+                  TimeKind::Zoned}}) {
+    const auto parsed = caldav::ICalendarCodec::parse(
+        "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\nUID:kind@example.test\r\n"
+        "DTSTAMP:20260909T120000Z\r\n" +
+        row.first + "END:VEVENT\r\nEND:VCALENDAR\r\n");
+    QVERIFY2(parsed.ok(), qPrintable(parsed.error.message));
+    const Event event = parsed.events.first();
+    QCOMPARE(event.timeKind, row.second);
+    QVERIFY(recurrenceIdentityEqual(event, eventFromJson(toJson(event))));
+    const auto serialized = caldav::ICalendarCodec::serialize(event);
+    QVERIFY2(serialized.ok(), qPrintable(serialized.error.message));
+    const auto roundTrip = caldav::ICalendarCodec::parse(serialized.payload);
+    QVERIFY(roundTrip.ok());
+    QCOMPARE(roundTrip.events.first().timeKind, row.second);
+    QVERIFY(recurrenceIdentityEqual(event, roundTrip.events.first()));
+  }
+}
+
+void CalDavHardeningTest::floatingOccurrenceReferencesRoundTripThroughWireIdentity() {
+  const QByteArray retained =
+      "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\nUID:floating@example.test\r\n"
+      "DTSTAMP:20300301T120000Z\r\nDTSTART:20300309T090000\r\nDTEND:20300309T100000\r\n"
+      "RRULE:FREQ=DAILY;COUNT=3\r\nSUMMARY:Floating "
+      "series\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
+  const auto parsed = caldav::ICalendarCodec::parse(retained);
+  QVERIFY2(parsed.ok(), qPrintable(parsed.error.message));
+  const QDateTime selected(QDate(2030, 3, 10), QTime(9, 0),
+                           QTimeZone::systemTimeZone());
+  for (const QString& reference : {
+           selected.toUTC().toString(Qt::ISODateWithMs),
+           selected.toUTC().toString(QStringLiteral("yyyyMMdd'T'HHmmss'Z'")),
+           selected.toOffsetFromUtc(3600).toString(Qt::ISODateWithMs),
+           QStringLiteral("20300310T090000"),
+       }) {
+    Event draft = parsed.events.first();
+    draft.summary = QStringLiteral("Moved floating occurrence");
+    draft.recurrenceRule.clear();
+    draft.recurrenceId = reference;
+    draft.startUtc = selected.addSecs(3600).toUTC();
+    draft.endUtc = selected.addSecs(7200).toUTC();
+    draft.updatedAt = QDateTime(QDate(2030, 3, 1), QTime(13, 0), QTimeZone::UTC);
+    for (const QString& scope :
+         {QStringLiteral("occurrence"), QStringLiteral("future")}) {
+      const auto patched = caldav::ICalendarCodec::patchScoped(draft, retained, scope);
+      QVERIFY2(patched.ok(), qPrintable(patched.error.message));
+      QVERIFY(patched.payload.contains("DTSTART:20300310T100000\r\n"));
+      QVERIFY(patched.payload.contains(
+          scope == QStringLiteral("future")
+              ? "RECURRENCE-ID;RANGE=THISANDFUTURE:20300310T090000\r\n"
+              : "RECURRENCE-ID:20300310T090000\r\n"));
+      const auto readback = caldav::ICalendarCodec::parse(patched.payload);
+      QVERIFY2(readback.ok(), qPrintable(readback.error.message));
+      QCOMPARE(readback.events.size(), 2);
+      const auto found = std::find_if(
+          readback.events.cbegin(), readback.events.cend(),
+          [&draft](const Event& candidate) {
+            return caldav::ICalendarCodec::sameRecurrenceIdentity(candidate, draft);
+          });
+      QVERIFY(found != readback.events.cend());
+      QCOMPARE(found->startUtc, draft.startUtc);
+      QCOMPARE(found->endUtc, draft.endUtc);
+      QCOMPARE(found->timeKind, TimeKind::Floating);
+      Event wrongOccurrence = draft;
+      wrongOccurrence.recurrenceId = QStringLiteral("20300310T100000");
+      QVERIFY(!caldav::ICalendarCodec::sameRecurrenceIdentity(*found, wrongOccurrence));
+      const auto repeated =
+          caldav::ICalendarCodec::patchScoped(draft, patched.payload, scope);
+      QVERIFY2(repeated.ok(), qPrintable(repeated.error.message));
+      QCOMPARE(caldav::ICalendarCodec::parse(repeated.payload).events.size(), 2);
+    }
+  }
+}
 
 void CalDavHardeningTest::endpointAndHrefSafety() {
   QString error;

@@ -40,6 +40,11 @@ class ICalendarCodec final {
   [[nodiscard]] static ICalendarSerializeResult serialize(
       const Event& event,
       const QString& productId = QStringLiteral("-//OmaCalendar//OmaCalendar 0.1//EN"));
+  // Compares references after converting presentation IDs to their RFC 5545
+  // wire form. Floating UTC presentation IDs become local wall-time IDs;
+  // the provider-neutral canonical comparison remains unchanged.
+  [[nodiscard]] static bool sameRecurrenceIdentity(const Event& first,
+                                                   const Event& second);
   // Updates only fields represented by Event inside the matching VEVENT. All
   // sibling events/components and provider-owned properties remain intact.
   [[nodiscard]] static ICalendarSerializeResult patch(

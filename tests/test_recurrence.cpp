@@ -53,6 +53,57 @@ class RecurrenceTest final : public QObject {
   Q_OBJECT
 
  private slots:
+  void floatingExceptionsAcceptReturnedInstantAndWallTimeIdentities() {
+    Event master = timedEvent(QStringLiteral("floating-series"), utc(2030, 3, 9, 14));
+    master.timeKind = TimeKind::Floating;
+    master.startTimeZone.clear();
+    master.endTimeZone.clear();
+    master.recurrenceRule = QStringLiteral("FREQ=DAILY;COUNT=3");
+    const auto before =
+        RecurrenceExpander::expand({master}, utc(2030, 3, 8, 0), utc(2030, 3, 13, 0));
+    QCOMPARE(before.occurrences.size(), 3);
+    const Event selected = before.occurrences.at(1);
+    // Keep the IDs already returned to RC3 clients usable without changing
+    // the canonical distinction between floating wall times and instants.
+    QCOMPARE(selected.recurrenceId, selected.startUtc.toString(Qt::ISODateWithMs));
+    const QString wallIdentity =
+        selected.startUtc.toLocalTime().toString(QStringLiteral("yyyyMMdd'T'HHmmss"));
+    QVERIFY(!recurrenceIdentityEqual(selected.recurrenceId, wallIdentity, false,
+                                     TimeKind::Floating));
+    const QStringList identities{
+        selected.recurrenceId,
+        selected.startUtc.toString(QStringLiteral("yyyyMMdd'T'HHmmss'Z'")),
+        selected.startUtc.toOffsetFromUtc(3600).toString(Qt::ISODateWithMs),
+        wallIdentity,
+    };
+    for (const QString& identity : identities) {
+      Event moved = selected;
+      moved.id = QStringLiteral("floating-exception");
+      moved.recurrenceRule.clear();
+      moved.recurrenceId = identity;
+      moved.startUtc = selected.startUtc.addSecs(3 * 3600);
+      moved.endUtc = selected.endUtc.addSecs(3 * 3600);
+      const auto updated = RecurrenceExpander::expand(
+          {master, moved}, utc(2030, 3, 8, 0), utc(2030, 3, 13, 0));
+      QCOMPARE(updated.occurrences.size(), 3);
+      QCOMPARE(updated.occurrences.at(1).id, moved.id);
+      QCOMPARE(updated.occurrences.at(1).startUtc, moved.startUtc);
+      QCOMPARE(updated.occurrences.first().startUtc,
+               before.occurrences.first().startUtc);
+      QCOMPARE(updated.occurrences.last().startUtc, before.occurrences.last().startUtc);
+
+      moved.deleted = true;
+      moved.status = QStringLiteral("cancelled");
+      const auto cancelled = RecurrenceExpander::expand(
+          {master, moved}, utc(2030, 3, 8, 0), utc(2030, 3, 13, 0));
+      QCOMPARE(cancelled.occurrences.size(), 2);
+      QCOMPARE(cancelled.occurrences.first().startUtc,
+               before.occurrences.first().startUtc);
+      QCOMPARE(cancelled.occurrences.last().startUtc,
+               before.occurrences.last().startUtc);
+    }
+  }
+
   void componentTraversalFailureRejectsIncompleteExpansion() {
     Event master = timedEvent(QStringLiteral("bounded-series"), utc(2026, 8, 28, 13));
     master.uid = QStringLiteral("bounded-series");

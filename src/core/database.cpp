@@ -2778,9 +2778,10 @@ bool Database::recordProviderConflict(const qint64 mutationId, const Event* remo
   block.addBindValue(isoUtc(now));
   block.addBindValue(mutationId);
   QSqlQuery mark(m_database);
-  mark.prepare(QStringLiteral(
-      "UPDATE events SET sync_state='conflict',dirty=1,updated_at=? WHERE id=?"));
-  mark.addBindValue(isoUtc(now));
+  // Sync bookkeeping is not an edit. Repeated conflict observations must keep
+  // the original content timestamp used to compare the local and remote edits.
+  mark.prepare(
+      QStringLiteral("UPDATE events SET sync_state='conflict',dirty=1 WHERE id=?"));
   mark.addBindValue(eventId);
   if (!block.exec() || block.numRowsAffected() == 0 || !mark.exec() ||
       !bumpChangeRevision(errorMessage) || !m_database.commit()) {
@@ -4149,7 +4150,7 @@ bool Database::completeOutboxInternal(const qint64 id, const Event* remoteEvent,
       QSqlQuery revisionQuery(m_database);
       revisionQuery.prepare(QStringLiteral(R"SQL(
         UPDATE events SET remote_id=?, etag=?, recurrence_id=?, raw_payload=?,
-          raw_format=?, dirty=1, updated_at=?
+          raw_format=?, dirty=1
         WHERE id=?
       )SQL"));
       revisionQuery.addBindValue(nonNull(remoteEvent->remoteId));
@@ -4157,7 +4158,8 @@ bool Database::completeOutboxInternal(const qint64 id, const Event* remoteEvent,
       revisionQuery.addBindValue(nonNull(remoteEvent->recurrenceId));
       revisionQuery.addBindValue(nonNull(remoteEvent->rawPayload));
       revisionQuery.addBindValue(nonNull(remoteEvent->rawFormat));
-      revisionQuery.addBindValue(isoUtc(nowUtc()));
+      // Advancing an earlier acknowledgement must not redate the newer local
+      // edit that remains queued; its content has not changed here.
       revisionQuery.addBindValue(eventId);
       if (!revisionQuery.exec()) {
         if (errorMessage != nullptr) {
@@ -5285,10 +5287,16 @@ int Database::resolveNewestConflicts(bool* queuedLocalWrites, QString* errorMess
     const Event local = eventFromJson(conflict.localSnapshot);
     const Event remote = eventFromJson(conflict.remoteSnapshot);
     const QDateTime localUpdated = local.updatedAt;
-    const QDateTime remoteUpdated =
-        remote.updatedAt.isValid() ? remote.updatedAt : conflict.createdAt;
-    const bool keepLocal = localUpdated.isValid() && remoteUpdated.isValid() &&
-                           localUpdated > remoteUpdated;
+    const QDateTime remoteUpdated = remote.updatedAt;
+    // Observing a conflict says nothing about when the provider was edited.
+    // Missing timestamps (including remote deletion) must retain both choices.
+    // iCalendar timestamps have second precision, so subsecond local precision
+    // cannot establish an ordering within that same provider timestamp second.
+    if (!localUpdated.isValid() || !remoteUpdated.isValid() ||
+        localUpdated.toSecsSinceEpoch() == remoteUpdated.toSecsSinceEpoch()) {
+      continue;
+    }
+    const bool keepLocal = localUpdated > remoteUpdated;
     const QString strategy =
         keepLocal ? QStringLiteral("keep_local") : QStringLiteral("keep_remote");
     if (!resolveConflict(conflict.id, strategy, {}, errorMessage)) {

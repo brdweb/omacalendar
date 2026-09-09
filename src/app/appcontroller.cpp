@@ -264,7 +264,12 @@ QVariantMap AppController::preferences() const { return m_preferences; }
 bool AppController::widgetInstalled() const { return m_widgetInstalled; }
 QString AppController::activeCalendarSetId() const { return m_activeCalendarSetId; }
 bool AppController::preferencesLoaded() const { return m_preferencesLoaded; }
-QDate AppController::selectedDate() const { return m_selectedDate; }
+QDateTime AppController::selectedDate() const {
+  // QML converts QDate to UTC midnight, which is the previous local date west
+  // of UTC. A local noon preserves the calendar date used by JS Date getters
+  // and avoids ordinary daylight-saving transitions at midnight.
+  return QDateTime(m_selectedDate, QTime(12, 0), QTimeZone::LocalTime);
+}
 
 void AppController::reconnect() { m_client.connectTo(paths::socketFile()); }
 
@@ -1474,11 +1479,12 @@ void AppController::syncAccount(const QString& accountId) {
        });
 }
 
-void AppController::setSelectedDate(const QDate& date) {
-  if (!date.isValid() || date == m_selectedDate) {
+void AppController::setSelectedDate(const QDateTime& date) {
+  const QDate localDate = date.toLocalTime().date();
+  if (!date.isValid() || localDate == m_selectedDate) {
     return;
   }
-  m_selectedDate = date;
+  m_selectedDate = localDate;
   emit selectedDateChanged();
 }
 
