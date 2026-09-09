@@ -37,7 +37,7 @@ configured_version=$(cmake_release_version "${repository_root}")
 for guide in docs/INSTALL.md packaging/flatpak/README.md; do
   mapfile -t examples < <(grep -Eo 'omacalendar-[0-9][0-9A-Za-z.-]*-linux-x86_64\.flatpak' \
     "${repository_root}/${guide}" | LC_ALL=C sort -u)
-  if [[ ${#examples[@]} != 1 || ${examples[0]} != "omacalendar-${configured_version}-linux-x86_64.flatpak" ]]; then
+  if [[ ${#examples[@]} != 1 || ${examples[0]:-} != "omacalendar-${configured_version}-linux-x86_64.flatpak" ]]; then
     echo "${guide} has missing or stale Flatpak install examples" >&2
     exit 1
   fi

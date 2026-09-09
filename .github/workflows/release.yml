@@ -489,6 +489,9 @@ jobs:
           gh release download "${GITHUB_REF_NAME}" --dir "${download_directory}"
           # GitHub can normalize special characters in uploaded filenames.
           # Require the actual downloaded names and bytes to match the manifest.
+          diff -u \
+            <(find artifacts -maxdepth 1 -type f -printf '%f\n' | LC_ALL=C sort) \
+            <(find "${download_directory}" -maxdepth 1 -type f -printf '%f\n' | LC_ALL=C sort)
           (cd "${download_directory}" && sha256sum --check --strict SHA256SUMS)
           for asset in artifacts/*; do
             test -f "${asset}"
