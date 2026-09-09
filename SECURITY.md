@@ -2,11 +2,8 @@
 
 ## Supported versions
 
-`1.0.0-beta.1` is an unsupported public-testing prerelease. Security fixes may be
-issued while it is evaluated, but it is not suitable for production or as the
-sole copy of calendar data. Stable support begins with 1.0; after that, only the
-latest minor release line receives security updates unless the compatibility
-matrix states otherwise.
+The latest 1.0.x release receives security fixes. Upgrade to the latest patch
+release before reporting a vulnerability. Prereleases are no longer supported.
 
 ## Report a vulnerability
 

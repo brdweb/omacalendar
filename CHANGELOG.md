@@ -4,6 +4,16 @@ All notable changes to OmaCalendar are recorded here. The project follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and will use Semantic
 Versioning once public releases begin.
 
+## [1.0.0] - 2026-09-09
+
+- First stable release for current x86-64 Arch/Omarchy.
+- Full-month mini-calendar event indicators and calendar set ordering.
+- Persisted calendar visibility and sidebar filtering by selected calendar set.
+- Silent initial invitation import with notifications for later arrivals.
+- Clear identification of the built-in local Personal calendar.
+- Companion widget supports read-only event details and direct app activation.
+- Simplified public documentation and Arch-only installation.
+
 ## [Unreleased]
 
 ### Changed

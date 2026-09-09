@@ -35,6 +35,9 @@
   </recommends>
   <content_rating type="oars-1.1" />
   <releases>
+    <release version="1.0.0" date="2026-09-09" type="stable">
+      <description><p>First stable Arch release with calendar sets, offline calendars, invitations, reminders and the optional Omarchy widget.</p></description>
+    </release>
     <release version="1.0.0-rc.5" date="2026-09-09" type="development">
       <description>
         <p>Build-environment replacement that obtains Flatpak tools only from Ubuntu's signed package sources. Runtime behavior is unchanged from RC4; exact artifacts and remaining provider and owner acceptance require fresh qualification.</p>
