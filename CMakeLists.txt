@@ -258,6 +258,9 @@ install(FILES packaging/icons/org.omacalendar.OmaCalendar.svg
 install(FILES LICENSE README.md CHANGELOG.md
   DESTINATION ${CMAKE_INSTALL_DOCDIR}
 )
+install(FILES LICENSE
+  DESTINATION ${CMAKE_INSTALL_DATADIR}/licenses/omacalendar
+)
 install(FILES SECURITY.md SUPPORT.md
   DESTINATION ${CMAKE_INSTALL_DOCDIR}
 )
