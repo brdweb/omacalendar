@@ -10,6 +10,9 @@ Versioning once public releases begin.
 
 ### Fixed
 
+- Keep standard dialogs and buttons on the application theme so import, export
+  and confirmation text remains readable in dark desktop themes.
+
 - Preserve selected occurrence dates and existing overrides when recurring
   events receive partial edits; prevent duplicate floating instances.
 - Preserve all-day and floating CalDAV time kinds, recurrence wire identities,
