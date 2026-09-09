@@ -538,9 +538,9 @@ bool CalDavSync::refreshCachedTimeKinds(const QString& accountId,
                                         QString* errorMessage) {
   return m_database->refreshCalDavTimeKinds(
       accountId,
-      [](const Event& legacy, TimeKind* kind, QString* error) {
-        const ICalendarParseResult parsed =
-            ICalendarCodec::parse(legacy.rawPayload.toUtf8());
+      [](const QByteArray& payload, Database::CalDavTimeKindLookup* lookup,
+         QString* error) {
+        const ICalendarParseResult parsed = ICalendarCodec::parse(payload);
         if (!parsed.ok()) {
           if (error != nullptr) {
             *error =
@@ -549,29 +549,117 @@ bool CalDavSync::refreshCachedTimeKinds(const QString& accountId,
           }
           return false;
         }
-        const Event* master = nullptr;
+
+        struct RecurrenceContext final {
+          Event semantics;
+          QHash<QString, qsizetype> canonicalRecurrences;
+        };
+        struct SeriesIndex final {
+          qsizetype fallbackMasterIndex = -1;
+          QList<Event> sources;
+          QHash<QString, qsizetype> exactRecurrences;
+          QList<RecurrenceContext> contexts;
+          QHash<QString, qsizetype> contextPositions;
+        };
+        QHash<QString, SeriesIndex> seriesByUid;
         for (const Event& source : parsed.events) {
-          if (source.uid != legacy.uid) continue;
-          if (source.recurrenceId.isEmpty()) master = &source;
-          Event reference = legacy;
-          reference.timeKind = source.timeKind;
-          reference.startTimeZone = source.startTimeZone;
-          if (ICalendarCodec::sameRecurrenceIdentity(reference, source)) {
-            *kind = source.timeKind;
-            return true;
+          SeriesIndex& series = seriesByUid[source.uid];
+          const qsizetype index = series.sources.size();
+          series.sources.append(source);
+          if (source.recurrenceId.isEmpty()) {
+            series.fallbackMasterIndex = index;
           }
         }
-        // An unsent detached edit is absent from the acknowledged resource;
-        // its series master still supplies the original time semantics.
-        if (master != nullptr && legacy.dirty && !legacy.recurrenceId.isEmpty()) {
-          *kind = master->timeKind;
-          return true;
+        constexpr qsizetype kMaximumRecurrenceContexts = 32;
+        for (auto series = seriesByUid.begin(); series != seriesByUid.end(); ++series) {
+          for (qsizetype index = 0; index < series->sources.size(); ++index) {
+            const Event& source = series->sources.at(index);
+            series->exactRecurrences.tryInsert(source.recurrenceId.trimmed(), index);
+            const QString contextIdentity =
+                timeKindToString(source.timeKind) + QLatin1Char('\n') +
+                source.startTimeZone + QLatin1Char('\n') +
+                (source.allDay ? QStringLiteral("all-day") : QStringLiteral("timed"));
+            auto position = series->contextPositions.constFind(contextIdentity);
+            if (position == series->contextPositions.constEnd()) {
+              if (series->contexts.size() >= kMaximumRecurrenceContexts) {
+                // Provider-native identities still use the exact index. Bound
+                // presentation-form probing for malformed mixed-semantics series.
+                continue;
+              }
+              const qsizetype next = series->contexts.size();
+              RecurrenceContext context;
+              context.semantics = source;
+              series->contexts.append(std::move(context));
+              series->contextPositions.insert(contextIdentity, next);
+              position = series->contextPositions.constFind(contextIdentity);
+            }
+            RecurrenceContext& context = series->contexts[*position];
+            context.canonicalRecurrences.tryInsert(
+                ICalendarCodec::recurrenceIdentityKey(source, context.semantics),
+                index);
+          }
+          series->contextPositions.clear();
         }
-        if (error != nullptr) {
-          *error = QStringLiteral(
-              "Retained CalDAV source did not identify cached event metadata");
-        }
-        return false;
+
+        *lookup = [seriesByUid = std::move(seriesByUid)](
+                      const Event& legacy, TimeKind* kind, QString* lookupError) {
+          const auto found = seriesByUid.constFind(legacy.uid);
+          if (found == seriesByUid.constEnd()) {
+            if (lookupError != nullptr) {
+              *lookupError = QStringLiteral(
+                  "Retained CalDAV source did not identify cached event metadata");
+            }
+            return false;
+          }
+          const SeriesIndex& series = *found;
+          const auto matches = [&legacy, &series](const qsizetype index) {
+            const Event& source = series.sources.at(index);
+            Event reference = legacy;
+            reference.timeKind = source.timeKind;
+            reference.startTimeZone = source.startTimeZone;
+            return ICalendarCodec::sameRecurrenceIdentity(reference, source);
+          };
+          qsizetype matchIndex = -1;
+          const auto considerExact = [&series, &matches,
+                                      &matchIndex](const QString& recurrence) {
+            const auto exact = series.exactRecurrences.constFind(recurrence.trimmed());
+            if (exact != series.exactRecurrences.constEnd() &&
+                (matchIndex < 0 || *exact < matchIndex) && matches(*exact)) {
+              matchIndex = *exact;
+            }
+          };
+          considerExact(legacy.recurrenceId);
+          const qsizetype fragment = legacy.remoteId.indexOf(QLatin1Char('#'));
+          if (fragment >= 0) {
+            considerExact(legacy.remoteId.sliced(fragment + 1));
+          }
+          for (const RecurrenceContext& context : series.contexts) {
+            const QString canonical =
+                ICalendarCodec::recurrenceIdentityKey(legacy, context.semantics);
+            const auto equivalent = context.canonicalRecurrences.constFind(canonical);
+            if (equivalent != context.canonicalRecurrences.constEnd() &&
+                (matchIndex < 0 || *equivalent < matchIndex) && matches(*equivalent)) {
+              matchIndex = *equivalent;
+            }
+          }
+          if (matchIndex >= 0) {
+            *kind = series.sources.at(matchIndex).timeKind;
+            return true;
+          }
+          // An unsent detached edit is absent from the acknowledged resource;
+          // its series master still supplies the original time semantics.
+          if (series.fallbackMasterIndex >= 0 && legacy.dirty &&
+              !legacy.recurrenceId.isEmpty()) {
+            *kind = series.sources.at(series.fallbackMasterIndex).timeKind;
+            return true;
+          }
+          if (lookupError != nullptr) {
+            *lookupError = QStringLiteral(
+                "Retained CalDAV source did not identify cached event metadata");
+          }
+          return false;
+        };
+        return true;
       },
       errorMessage);
 }

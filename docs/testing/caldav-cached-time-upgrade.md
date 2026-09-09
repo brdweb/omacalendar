@@ -64,16 +64,37 @@ snapshots, and version idempotence.
 - Proposed source build and final test receipts are recorded separately from RC3;
   this document does not relabel the immutable RC3 payload as fixed.
 
-- Final frozen RC4 daemon
+- The pre-security-review development daemon
   `15c06c654225f2c1e1e502a22b65316a749c65b6c6769d0237bd90c2c2a5d205`
   passes the real RC3 upgrade and all nine floating provider checks. Receipt:
   `artifacts-acceptance-2026-09-09/reports/floating-upgrade-final-rc4.json`.
 - The full database suite passed initially (2.55 seconds) and parent-run combined
   validation passed again with the final conflict snapshot assertions.
 
+Security review then found that the refresh reparsed a retained iCalendar resource
+for every cached row. A sealed shared-resource reproducer completed 50 rows in
+1.472 seconds, 100 in 6.286 seconds and 200 in 26.413 seconds; 400 rows did not
+complete within 60 seconds. The corrected implementation builds one parsed lookup
+per retained provider resource, shares identical inline payload lookups, and caps
+canonical semantic probes while retaining exact provider and recurrence identity.
+
+The amended precommit daemon
+`9ff385acd6a27aedb08b5b5f190cc3bef283c96b7334d9f5ce96fba2e834fb4c`
+completed the same 400-row case in 1.015 seconds and an 800-row case in 1.824
+seconds. Both wrote the account checkpoint, classified every shared and individual
+row as floating, and left already-migrated zoned controls unchanged. The database
+regression verifies two lookup builds for 130 rows over two retained resources and
+no rebuild after checkpointing. The real CalDAV regression covers 129 cached rows,
+32 canonical zoned contexts, floating events, and an equivalent presentation-form
+recurrence beyond that context set. A fresh bypass review found no material
+security or correctness regression. The amended head passes all 22 CTest targets,
+including both performance targets and the hardware gate, in 47.49 seconds. These
+hashes identify development snapshots; the exact tagged and downloaded RC4
+packages still require qualification.
+
 ## Related local-time acceptance
 
-The same frozen RC4 daemon passes two additional isolated regressions found during
+The earlier development daemon passes two additional isolated regressions found during
 functional review. In a private bubblewrap filesystem with empty `/etc` and `TZ`
 unset, an all-day reminder now lands exactly at midnight; the earlier build fired
 one second early. In `America/New_York`, narrow UTC queries spanning the 2030
@@ -95,8 +116,8 @@ under `work/desktop-services/review-*.py`. No personal calendar, account, keyrin
 active desktop service was used. These checks qualify the identified local RC4
 snapshot; exported release packages require their own immutable qualification.
 
-Parent-run combined validation of this snapshot also passed all 20 functional
+Parent-run combined validation of that snapshot also passed all 20 functional
 CTest suites (34.51 seconds), qmllint, all 24 recurrence QtTest cases in the
 minimal `/etc` environment (43 milliseconds), and the floating wire-identity
-round-trip case. The frozen RC4 desktop passed all 16 AT-SPI checks at 125% scale;
+round-trip case. The development RC4 desktop passed all 16 AT-SPI checks at 125% scale;
 receipt: `artifacts-rc4-release/desktop-local-system-python/result.json`.

@@ -1068,6 +1068,19 @@ bool ICalendarCodec::sameRecurrenceIdentity(const Event& first, const Event& sec
   return recurrenceIdentityEqual(firstWire, secondWire);
 }
 
+QString ICalendarCodec::recurrenceIdentityKey(const Event& event,
+                                              const Event& seriesSemantics) {
+  Event wire = event;
+  wire.timeKind = seriesSemantics.timeKind;
+  wire.startTimeZone = seriesSemantics.startTimeZone;
+  wire.recurrenceId = normalizedRecurrenceId(wire);
+  return timeKindToString(wire.timeKind) + QLatin1Char('\n') +
+         (wire.allDay ? QStringLiteral("all-day") : QStringLiteral("timed")) +
+         QLatin1Char('\n') +
+         canonicalRecurrenceIdentity(wire.recurrenceId, wire.allDay, wire.timeKind,
+                                     wire.startTimeZone);
+}
+
 ICalendarParseResult ICalendarCodec::parse(const QByteArray& payload) {
   ICalendarParseResult result;
   if (payload.isEmpty()) {

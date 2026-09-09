@@ -3,6 +3,7 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QSet>
 #include <QSqlDatabase>
 #include <QSqlError>
 #include <QSqlQuery>
@@ -10,6 +11,7 @@
 #include <QUuid>
 #include <QtTest/QtTest>
 #include <algorithm>
+#include <utility>
 
 #include "core/database.h"
 
@@ -2005,20 +2007,38 @@ class DatabaseTest final : public QObject {
     const QJsonObject beforeSecond = toStorageJson(db.event(second.id));
     const QJsonObject beforeZone = toStorageJson(db.event(explicitZone.id));
     const qint64 revision = db.changeRevision();
-    const auto resolver = [](const Event& value, TimeKind* kind, QString*) {
-      if (value.rawPayload != QStringLiteral("retained floating source")) return false;
+    const auto resolver = [](const Event&, TimeKind* kind, QString*) {
       *kind = TimeKind::Floating;
+      return true;
+    };
+    const auto builder = [&resolver](const QByteArray& payload,
+                                     Database::CalDavTimeKindLookup* lookup,
+                                     QString* message) {
+      if (payload != QByteArrayLiteral("retained floating source")) {
+        if (message != nullptr) {
+          *message = QStringLiteral("unexpected retained payload: %1")
+                         .arg(QString::fromUtf8(payload));
+        }
+        return false;
+      }
+      *lookup = resolver;
       return true;
     };
     int calls = 0;
     QVERIFY(!db.refreshCalDavTimeKinds(
         account.id,
-        [&calls, &resolver](const Event& value, TimeKind* kind, QString* message) {
-          if (++calls == 2) {
-            *message = QStringLiteral("interrupted source parsing");
-            return false;
-          }
-          return resolver(value, kind, message);
+        [&calls, &resolver](const QByteArray& payload,
+                            Database::CalDavTimeKindLookup* lookup, QString*) {
+          if (payload != QByteArrayLiteral("retained floating source")) return false;
+          *lookup = [&calls, &resolver](const Event& value, TimeKind* kind,
+                                        QString* message) {
+            if (++calls == 2) {
+              *message = QStringLiteral("interrupted source lookup");
+              return false;
+            }
+            return resolver(value, kind, message);
+          };
+          return true;
         },
         &error));
     QCOMPARE(db.changeRevision(), revision);
@@ -2045,7 +2065,7 @@ class DatabaseTest final : public QObject {
           "WHEN new.key='caldav_time_kind_version' BEGIN SELECT "
           "RAISE(ABORT,'checkpoint unavailable'); END")));
       error.clear();
-      QVERIFY(!db.refreshCalDavTimeKinds(account.id, resolver, &error));
+      QVERIFY(!db.refreshCalDavTimeKinds(account.id, builder, &error));
       QVERIFY(error.contains(QStringLiteral("checkpoint unavailable")));
       QCOMPARE(toStorageJson(db.event(first.id)), beforeEvent);
       QCOMPARE(db.outboxItems().first().payload, queued.payload);
@@ -2057,8 +2077,7 @@ class DatabaseTest final : public QObject {
     db.close();
     QVERIFY(db.open(path, &error));
     error.clear();
-    QVERIFY2(db.refreshCalDavTimeKinds(account.id, resolver, &error),
-             qPrintable(error));
+    QVERIFY2(db.refreshCalDavTimeKinds(account.id, builder, &error), qPrintable(error));
     QJsonObject expected = beforeEvent;
     expected.insert(QStringLiteral("timeKind"), QStringLiteral("floating"));
     QCOMPARE(toStorageJson(db.event(first.id)), expected);
@@ -2092,8 +2111,92 @@ class DatabaseTest final : public QObject {
     db.close();
     QVERIFY(db.open(path, &error));
     QVERIFY(db.refreshCalDavTimeKinds(
-        account.id, [](const Event&, TimeKind*, QString*) { return false; }, &error));
+        account.id,
+        [](const QByteArray&, Database::CalDavTimeKindLookup*, QString*) {
+          return false;
+        },
+        &error));
     QCOMPARE(db.event(first.id).timeKind, TimeKind::Floating);
+  }
+
+  void calDavTimeMetadataBuildsOneLookupPerRetainedResource() {
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    Database db;
+    QString error;
+    QVERIFY2(db.open(directory.filePath(QStringLiteral("time-refresh-cache.sqlite")),
+                     &error),
+             qPrintable(error));
+    Account account =
+        makeAccount(QStringLiteral("refresh-cache-account"), QStringLiteral("CalDAV"));
+    account.provider = ProviderKind::CalDav;
+    QVERIFY2(db.upsertAccount(account, &error), qPrintable(error));
+    Calendar calendar =
+        makeCalendar(QStringLiteral("refresh-cache-calendar"), account.id);
+    QVERIFY2(db.upsertCalendar(calendar, &error), qPrintable(error));
+
+    const QString firstResource = QStringLiteral("https://example.test/a.ics");
+    const QString secondResource = QStringLiteral("https://example.test/b.ics");
+    const QString firstPayload = QStringLiteral("retained resource a");
+    const QString secondPayload = QStringLiteral("retained resource b");
+    QList<Event> events;
+    constexpr int kEventCount = 130;
+    events.reserve(kEventCount);
+    for (int index = 0; index < kEventCount; ++index) {
+      Event event = makeRemoteEvent(calendar.id, QStringLiteral("cached-%1").arg(index),
+                                    index % 8);
+      const int resourceIndex = index / (kEventCount / 2);
+      const int seriesIndex = index % (kEventCount / 2);
+      const QString resource = resourceIndex == 0 ? firstResource : secondResource;
+      event.uid = QStringLiteral("cached-series-%1").arg(resourceIndex);
+      event.remoteId = resource;
+      if (seriesIndex > 0) {
+        event.recurrenceId = QDate(2031, 1, 1)
+                                 .addDays(seriesIndex)
+                                 .toString(QStringLiteral("yyyyMMdd'T'090000'Z'"));
+        event.remoteId += QLatin1Char('#') + event.recurrenceId;
+      }
+      event.startTimeZone.clear();
+      event.endTimeZone.clear();
+      events.append(event);
+    }
+    const QList<ProviderResource> resources = {
+        {calendar.id, firstResource, QStringLiteral("etag-a"),
+         QStringLiteral("text/calendar"), firstPayload},
+        {calendar.id, secondResource, QStringLiteral("etag-b"),
+         QStringLiteral("text/calendar"), secondPayload},
+    };
+    QVERIFY2(db.applyRemoteSyncBatch(calendar, events, {}, {}, &error, resources),
+             qPrintable(error));
+
+    int builderCalls = 0;
+    int lookupCalls = 0;
+    QSet<QByteArray> observedPayloads;
+    const Database::CalDavTimeKindLookupBuilder builder =
+        [&builderCalls, &lookupCalls, &observedPayloads](
+            const QByteArray& payload, Database::CalDavTimeKindLookup* lookup,
+            QString*) {
+          ++builderCalls;
+          observedPayloads.insert(payload);
+          *lookup = [&lookupCalls](const Event&, TimeKind* kind, QString*) {
+            ++lookupCalls;
+            *kind = TimeKind::Floating;
+            return true;
+          };
+          return true;
+        };
+    QVERIFY2(db.refreshCalDavTimeKinds(account.id, builder, &error), qPrintable(error));
+    QCOMPARE(builderCalls, 2);
+    QCOMPARE(lookupCalls, kEventCount);
+    QCOMPARE(observedPayloads,
+             QSet<QByteArray>({firstPayload.toUtf8(), secondPayload.toUtf8()}));
+    for (const Event& event : std::as_const(events)) {
+      QCOMPARE(db.event(event.id).timeKind, TimeKind::Floating);
+    }
+
+    QVERIFY(db.refreshCalDavTimeKinds(account.id, builder, &error));
+    QCOMPARE(builderCalls, 2);
+    QCOMPARE(lookupCalls, kEventCount);
   }
 
   void providerResourcesAreNormalizedAndHydrated() {

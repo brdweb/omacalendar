@@ -1,5 +1,6 @@
 #pragma once
 
+#include <QByteArray>
 #include <QHash>
 #include <QJsonValue>
 #include <QList>
@@ -291,9 +292,11 @@ class Database final {
   // Reclassifies legacy CalDAV time metadata from retained provider source,
   // without replacing local edits. Rows, active mutation/conflict snapshots,
   // derived instances and the per-profile version checkpoint commit together.
-  using CalDavTimeKindResolver = std::function<bool(const Event&, TimeKind*, QString*)>;
+  using CalDavTimeKindLookup = std::function<bool(const Event&, TimeKind*, QString*)>;
+  using CalDavTimeKindLookupBuilder =
+      std::function<bool(const QByteArray&, CalDavTimeKindLookup*, QString*)>;
   bool refreshCalDavTimeKinds(const QString& accountId,
-                              const CalDavTimeKindResolver& resolve,
+                              const CalDavTimeKindLookupBuilder& buildLookup,
                               QString* errorMessage = nullptr);
 
   bool upsertIcsSubscription(const IcsSubscription& subscription,

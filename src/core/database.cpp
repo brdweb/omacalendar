@@ -1,5 +1,6 @@
 #include "core/database.h"
 
+#include <QCryptographicHash>
 #include <QFile>
 #include <QFileInfo>
 #include <QJsonDocument>
@@ -5310,7 +5311,7 @@ int Database::resolveNewestConflicts(bool* queuedLocalWrites, QString* errorMess
 }
 
 bool Database::refreshCalDavTimeKinds(const QString& accountId,
-                                      const CalDavTimeKindResolver& resolve,
+                                      const CalDavTimeKindLookupBuilder& buildLookup,
                                       QString* errorMessage) {
   const QString key = QStringLiteral("caldav_time_kind_version");
   QString error;
@@ -5332,7 +5333,66 @@ bool Database::refreshCalDavTimeKinds(const QString& accountId,
     execute(QStringLiteral("RELEASE refresh_caldav_time_kinds"), nullptr);
     return false;
   };
-  const auto normalize = [this, &resolve, errorMessage](Event* value) {
+  struct CachedLookup final {
+    QByteArray payload;
+    CalDavTimeKindLookup lookup;
+  };
+  QHash<QByteArray, QList<CachedLookup>> payloadLookups;
+  QHash<QString, CalDavTimeKindLookup> resourceLookups;
+  const auto lookupForPayload = [&buildLookup, &payloadLookups, errorMessage](
+                                    const QByteArray& payload,
+                                    CalDavTimeKindLookup* lookup) {
+    const QByteArray digest =
+        QCryptographicHash::hash(payload, QCryptographicHash::Sha256);
+    const auto cached = payloadLookups.constFind(digest);
+    if (cached != payloadLookups.constEnd()) {
+      for (const CachedLookup& candidate : *cached) {
+        if (candidate.payload == payload) {
+          *lookup = candidate.lookup;
+          return true;
+        }
+      }
+    }
+    CalDavTimeKindLookup built;
+    if (!buildLookup(payload, &built, errorMessage)) {
+      return false;
+    }
+    if (!built) {
+      if (errorMessage != nullptr) {
+        *errorMessage =
+            QStringLiteral("CalDAV time metadata lookup builder returned no lookup");
+      }
+      return false;
+    }
+    payloadLookups[digest].append({payload, built});
+    *lookup = std::move(built);
+    return true;
+  };
+  const auto lookupFor = [this, &lookupForPayload, &resourceLookups, errorMessage](
+                             const Event& value, CalDavTimeKindLookup* lookup) {
+    if (!value.rawPayload.isEmpty()) {
+      return lookupForPayload(value.rawPayload.toUtf8(), lookup);
+    }
+    const QString resourceIdentity =
+        value.calendarId + QLatin1Char('\n') + providerResourceKey(value.remoteId);
+    const auto cached = resourceLookups.constFind(resourceIdentity);
+    if (cached != resourceLookups.constEnd()) {
+      *lookup = *cached;
+      return true;
+    }
+    Event hydrated = value;
+    if (!hydrateProviderResource(&hydrated, errorMessage)) {
+      return false;
+    }
+    CalDavTimeKindLookup built;
+    if (!lookupForPayload(hydrated.rawPayload.toUtf8(), &built)) {
+      return false;
+    }
+    resourceLookups.insert(resourceIdentity, built);
+    *lookup = std::move(built);
+    return true;
+  };
+  const auto normalize = [&lookupFor, errorMessage](Event* value) {
     // A nonempty timezone may be an intentional local conversion. New local
     // events without provider source are also left as explicitly authored.
     if (value->timeKind != TimeKind::Zoned || !value->startTimeZone.isEmpty() ||
@@ -5343,13 +5403,11 @@ bool Database::refreshCalDavTimeKinds(const QString& accountId,
       value->timeKind = TimeKind::AllDay;
       return true;
     }
-    if (!hydrateProviderResource(value, errorMessage)) {
-      return false;
-    }
     if (value->rawPayload.isEmpty() && value->remoteId.isEmpty()) {
       return true;
     }
-    return resolve(*value, &value->timeKind, errorMessage);
+    CalDavTimeKindLookup lookup;
+    return lookupFor(*value, &lookup) && lookup(*value, &value->timeKind, errorMessage);
   };
   QSqlQuery events(m_database);
   events.prepare(

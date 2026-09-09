@@ -3,6 +3,7 @@
 #include <QFile>
 #include <QHash>
 #include <QScopeGuard>
+#include <QStringList>
 #include <QTcpServer>
 #include <QTcpSocket>
 #include <QTemporaryDir>
@@ -501,6 +502,7 @@ class CalDavHardeningTest final : public QObject {
   void schedulingRequiresProof();
   void calendarRevisionTimestampsRespectMethodAndPrecision();
   void parsedTimeKindsMatchMutationIdentity();
+  void cachedTimeKindMigrationIndexesSharedResources();
   void floatingOccurrenceReferencesRoundTripThroughWireIdentity();
   void valarmsParseIntoStructuredReminders();
   void multipleValarmsSerializeAndRoundTrip();
@@ -692,6 +694,147 @@ void CalDavHardeningTest::parsedTimeKindsMatchMutationIdentity() {
     QCOMPARE(roundTrip.events.first().timeKind, row.second);
     QVERIFY(recurrenceIdentityEqual(event, roundTrip.events.first()));
   }
+}
+
+void CalDavHardeningTest::cachedTimeKindMigrationIndexesSharedResources() {
+  QByteArray retained =
+      "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\n"
+      "UID:cached-floating@example.test\r\nDTSTAMP:20260909T120000Z\r\n"
+      "DTSTART:20300101T090000\r\nDTEND:20300101T100000\r\n"
+      "RRULE:FREQ=DAILY;COUNT=129\r\nSUMMARY:Cached floating series\r\n"
+      "END:VEVENT\r\n";
+  const QStringList zonedContexts = {
+      QStringLiteral("America/New_York"),
+      QStringLiteral("America/Chicago"),
+      QStringLiteral("America/Denver"),
+      QStringLiteral("America/Phoenix"),
+      QStringLiteral("America/Los_Angeles"),
+      QStringLiteral("America/Anchorage"),
+      QStringLiteral("Pacific/Honolulu"),
+      QStringLiteral("America/Toronto"),
+      QStringLiteral("America/Vancouver"),
+      QStringLiteral("America/Halifax"),
+      QStringLiteral("America/St_Johns"),
+      QStringLiteral("America/Mexico_City"),
+      QStringLiteral("America/Bogota"),
+      QStringLiteral("America/Lima"),
+      QStringLiteral("America/Sao_Paulo"),
+      QStringLiteral("America/Argentina/Buenos_Aires"),
+      QStringLiteral("America/Santiago"),
+      QStringLiteral("Europe/London"),
+      QStringLiteral("Europe/Paris"),
+      QStringLiteral("Europe/Berlin"),
+      QStringLiteral("Europe/Rome"),
+      QStringLiteral("Europe/Warsaw"),
+      QStringLiteral("Europe/Athens"),
+      QStringLiteral("Europe/Helsinki"),
+      QStringLiteral("Europe/Moscow"),
+      QStringLiteral("Asia/Dubai"),
+      QStringLiteral("Asia/Karachi"),
+      QStringLiteral("Asia/Kolkata"),
+      QStringLiteral("Asia/Bangkok"),
+      QStringLiteral("Asia/Shanghai"),
+      QStringLiteral("Asia/Tokyo"),
+      QStringLiteral("Australia/Sydney"),
+  };
+  constexpr int kZonedContextCount = 32;
+  QCOMPARE(zonedContexts.size(), kZonedContextCount);
+  for (int offset = 1; offset <= 128; ++offset) {
+    const QString date =
+        QDate(2030, 1, 1).addDays(offset).toString(QStringLiteral("yyyyMMdd"));
+    if (offset <= kZonedContextCount) {
+      const QByteArray zone = zonedContexts.at(offset - 1).toLatin1();
+      retained +=
+          "BEGIN:VEVENT\r\nUID:cached-floating@example.test\r\n"
+          "DTSTAMP:20260909T120000Z\r\n"
+          "RECURRENCE-ID;TZID=" +
+          zone + ':' + date.toLatin1() + "T090000\r\nDTSTART;TZID=" + zone + ':' +
+          date.toLatin1() + "T090000\r\nDTEND;TZID=" + zone + ':' + date.toLatin1() +
+          "T100000\r\nSUMMARY:Cached zoned exception\r\nEND:VEVENT\r\n";
+    } else {
+      retained +=
+          "BEGIN:VEVENT\r\nUID:cached-floating@example.test\r\n"
+          "DTSTAMP:20260909T120000Z\r\nRECURRENCE-ID:" +
+          date.toLatin1() + "T090000\r\nDTSTART:" + date.toLatin1() +
+          "T090000\r\nDTEND:" + date.toLatin1() +
+          "T100000\r\nSUMMARY:Cached floating exception\r\nEND:VEVENT\r\n";
+    }
+  }
+  retained += "END:VCALENDAR\r\n";
+  const auto parsed = caldav::ICalendarCodec::parse(retained);
+  QVERIFY2(parsed.ok(), qPrintable(parsed.error.message));
+  QCOMPARE(parsed.events.size(), 129);
+
+  Database database;
+  QString error;
+  QVERIFY2(database.open(QStringLiteral(":memory:"), &error), qPrintable(error));
+  Account account;
+  account.id = QStringLiteral("cached-time-kind-account");
+  account.provider = ProviderKind::CalDav;
+  account.displayName = QStringLiteral("Cached migration fixture");
+  account.enabled = false;
+  QVERIFY2(database.upsertAccount(account, &error), qPrintable(error));
+  Calendar calendar;
+  calendar.id = QStringLiteral("cached-time-kind-calendar");
+  calendar.accountId = account.id;
+  calendar.remoteId = QStringLiteral("https://example.test/calendar/");
+  calendar.href = calendar.remoteId;
+  calendar.name = QStringLiteral("Cached migration fixture");
+  QVERIFY2(database.upsertCalendar(calendar, &error), qPrintable(error));
+
+  const QString resourceId =
+      QStringLiteral("https://example.test/calendar/floating.ics");
+  QList<Event> legacyEvents;
+  legacyEvents.reserve(parsed.events.size());
+  for (qsizetype index = 0; index < parsed.events.size(); ++index) {
+    Event legacy = parsed.events.at(index);
+    legacy.id = QStringLiteral("cached-floating-%1").arg(index);
+    legacy.calendarId = calendar.id;
+    legacy.etag = QStringLiteral("etag-cached-floating");
+    legacy.remoteId = resourceId;
+    if (!legacy.recurrenceId.isEmpty()) {
+      legacy.remoteId += QLatin1Char('#') + legacy.recurrenceId;
+    }
+    if (index == static_cast<qsizetype>(kZonedContextCount)) {
+      legacy.recurrenceId = legacy.startUtc.toUTC().toString(Qt::ISODate);
+    }
+    legacy.timeKind = TimeKind::Zoned;
+    legacy.startTimeZone.clear();
+    legacy.endTimeZone.clear();
+    legacyEvents.append(legacy);
+  }
+  Event mixedReference = legacyEvents.at(kZonedContextCount);
+  const Event& mixedSource = parsed.events.at(kZonedContextCount);
+  mixedReference.timeKind = mixedSource.timeKind;
+  mixedReference.startTimeZone = mixedSource.startTimeZone;
+  QVERIFY(caldav::ICalendarCodec::sameRecurrenceIdentity(mixedReference, mixedSource));
+  QCOMPARE(caldav::ICalendarCodec::recurrenceIdentityKey(mixedReference, mixedSource),
+           caldav::ICalendarCodec::recurrenceIdentityKey(mixedSource, mixedSource));
+  const ProviderResource resource{
+      calendar.id, resourceId, QStringLiteral("etag-cached-floating"),
+      QStringLiteral("text/calendar"), QString::fromUtf8(retained)};
+  QVERIFY2(
+      database.applyRemoteSyncBatch(calendar, legacyEvents, {}, {}, &error, {resource}),
+      qPrintable(error));
+
+  caldav::CalDavSync sync(&database);
+  QVERIFY2(sync.refreshCachedTimeKinds(account.id, &error), qPrintable(error));
+  const QList<Event> migrated = database.eventsByUid(
+      calendar.id, QStringLiteral("cached-floating@example.test"), &error);
+  QCOMPARE(migrated.size(), legacyEvents.size());
+  for (const Event& event : migrated) {
+    bool validIndex = false;
+    const int index = event.id.section(QLatin1Char('-'), -1).toInt(&validIndex);
+    QVERIFY(validIndex);
+    QCOMPARE(event.timeKind, index > 0 && index <= kZonedContextCount
+                                 ? TimeKind::Zoned
+                                 : TimeKind::Floating);
+  }
+  QCOMPARE(
+      database
+          .providerState(account.id, {}, QStringLiteral("caldav_time_kind_version"), 0)
+          .toInt(),
+      1);
 }
 
 void CalDavHardeningTest::floatingOccurrenceReferencesRoundTripThroughWireIdentity() {
