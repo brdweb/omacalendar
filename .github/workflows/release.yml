@@ -31,7 +31,7 @@ jobs:
         run: |
           pacman -Syu --noconfirm --needed \
             appstream cmake desktop-file-utils git github-cli libical libsecret \
-            ninja pkgconf qt6-base qt6-declarative qt6-networkauth systemd zstd
+            ninja pkgconf python qt6-base qt6-declarative qt6-networkauth systemd zstd
 
       - name: Check out source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -199,6 +199,15 @@ jobs:
           cp aur-rendered/source/PKGBUILD artifacts/PKGBUILD
           cp aur-rendered/binary/PKGBUILD artifacts/PKGBUILD-bin
 
+      - name: Complete shipped-file SPDX inventory
+        env:
+          RELEASE_VERSION: ${{ steps.version.outputs.value }}
+        run: |
+          python3 packaging/release/finalize-sbom.py \
+            --input "artifacts/omacalendar-${RELEASE_VERSION}.spdx.json" \
+            --stage stage --version "${RELEASE_VERSION}" --format arch \
+            --output "artifacts/omacalendar-${RELEASE_VERSION}.spdx.json"
+
       - name: Attest archive provenance
         if: github.event_name == 'push'
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4
@@ -224,6 +233,30 @@ jobs:
           path: artifacts/
           if-no-files-found: error
           overwrite: true
+
+  arch-runtime:
+    name: Install and remove native Arch package in a clean runtime
+    needs: build-release-candidate
+    runs-on: ubuntu-24.04
+    env:
+      RELEASE_VERSION: ${{ needs.build-release-candidate.outputs.version }}
+      ARCH_PKGVER: ${{ needs.build-release-candidate.outputs.arch_pkgver }}
+    steps:
+      - name: Check out exact candidate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: Download built Arch candidate
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: omacalendar-${{ env.RELEASE_VERSION }}-arch-candidate
+          path: artifacts
+      - name: Install, exercise, and remove the native package
+        run: |
+          docker run --rm -v "$PWD:/source:ro" -v "$PWD/artifacts:/packages:ro" \
+            archlinux:base bash /source/packaging/release/test-arch-install.sh \
+              "${RELEASE_VERSION}" \
+              "/packages/omacalendar-${ARCH_PKGVER}-1-x86_64.pkg.tar.zst"
 
   debian:
     name: Build, install, and attest Debian package
@@ -268,6 +301,12 @@ jobs:
           output-file: artifacts/omacalendar-${{ env.RELEASE_VERSION }}-debian.spdx.json
           upload-artifact: false
           upload-release-assets: false
+      - name: Complete Debian shipped-file SPDX inventory
+        run: |
+          python3 packaging/release/finalize-sbom.py \
+            --input "artifacts/omacalendar-${RELEASE_VERSION}-debian.spdx.json" \
+            --stage debian-stage --version "${RELEASE_VERSION}" --format debian \
+            --output "artifacts/omacalendar-${RELEASE_VERSION}-debian.spdx.json"
       - name: Attest Debian provenance
         if: github.event_name == 'push'
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4
@@ -334,6 +373,12 @@ jobs:
           output-file: artifacts/omacalendar-${{ env.RELEASE_VERSION }}-flatpak.spdx.json
           upload-artifact: false
           upload-release-assets: false
+      - name: Complete Flatpak shipped-file SPDX inventory
+        run: |
+          python3 packaging/release/finalize-sbom.py \
+            --input "artifacts/omacalendar-${RELEASE_VERSION}-flatpak.spdx.json" \
+            --stage artifacts/flatpak-stage --version "${RELEASE_VERSION}" --format flatpak \
+            --output "artifacts/omacalendar-${RELEASE_VERSION}-flatpak.spdx.json"
       - name: Attest Flatpak provenance
         if: github.event_name == 'push'
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4
@@ -351,6 +396,7 @@ jobs:
           name: omacalendar-${{ env.RELEASE_VERSION }}-flatpak-candidate
           path: |
             artifacts/*.flatpak
+            artifacts/libsecret-*.tar.xz
             artifacts/*flatpak*.txt
             artifacts/*flatpak.spdx.json
           if-no-files-found: error
@@ -358,7 +404,7 @@ jobs:
 
   assemble:
     name: Assemble complete candidate draft
-    needs: [build-release-candidate, debian, flatpak]
+    needs: [build-release-candidate, arch-runtime, debian, flatpak]
     runs-on: ubuntu-24.04
     env:
       RELEASE_VERSION: ${{ needs.build-release-candidate.outputs.version }}
@@ -368,17 +414,17 @@ jobs:
         with:
           persist-credentials: false
       - name: Download Arch candidate
-        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: omacalendar-${{ env.RELEASE_VERSION }}-arch-candidate
           path: artifacts
       - name: Download Debian-format candidate
-        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: omacalendar-${{ env.RELEASE_VERSION }}-debian-candidate
           path: artifacts
       - name: Download Flatpak candidate
-        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: omacalendar-${{ env.RELEASE_VERSION }}-flatpak-candidate
           path: artifacts

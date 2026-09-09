@@ -107,6 +107,8 @@ directory. Build outputs are:
 
 - `omacalendar-VERSION-linux-x86_64.flatpak`: installable GitHub bundle.
 - `omacalendar-VERSION-flatpak-runtime.txt`: source hash and runtime/SDK commit receipt.
+- `libsecret-0.21.7.tar.xz`: the exact checksum-verified LGPL dependency source
+  accompanying the bundle (the release also includes the shared libical source archive).
 - `flatpak-stage/`: installed app files for generating a package-specific SPDX
   SBOM; this directory is build input for the SBOM step, not a release asset.
 

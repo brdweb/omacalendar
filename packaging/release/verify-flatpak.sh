@@ -8,12 +8,55 @@ fi
 bundle=$(realpath "$1")
 expected_version=$2
 app_id=org.omacalendar.OmaCalendar
-for command in flatpak jq timeout; do
+for command in flatpak jq timeout flock; do
   command -v "${command}" >/dev/null
 done
+# Even disposable installations share this app ID's runtime. Serialize the
+# entire acceptance run before preflight, keeping this inode outside the app's
+# endpoint directory and never unlinking it while another run could hold it.
+host_runtime=${XDG_RUNTIME_DIR:-/run/user/$(id -u)}
+acceptance_lock=${host_runtime}/omacalendar-flatpak-acceptance.lock
+if [[ ! -d ${host_runtime} || ! -O ${host_runtime} || -L ${acceptance_lock} ]]; then
+  echo 'Refusing acceptance without an owned runtime directory and regular lock path.' >&2
+  exit 1
+fi
+umask 077
+exec 8>>"${acceptance_lock}"
+if ! flock --exclusive --nonblock 8; then
+  echo 'Refusing acceptance while another Flatpak acceptance run is active.' >&2
+  exit 1
+fi
 if flatpak info --user "${app_id}" >/dev/null 2>&1; then
   echo 'Refusing to replace an existing OmaCalendar Flatpak; use a disposable installation.' >&2
   exit 1
+fi
+if env -u FLATPAK_USER_DIR flatpak info --user "${app_id}" >/dev/null 2>&1 ||
+   flatpak info --system "${app_id}" >/dev/null 2>&1; then
+  echo 'Refusing acceptance alongside a default user/system OmaCalendar install; use a dedicated test account.' >&2
+  exit 1
+fi
+# Installation directories are separate, but every installation of this app ID
+# shares its host runtime endpoint. Refuse real or stale endpoints rather than
+# letting a synthetic-profile client attach to an existing user's daemon.
+runtime_directory="${host_runtime}/app/${app_id}/omacalendar"
+if flatpak ps --columns=application | grep -Fxq "${app_id}"; then
+  echo 'Refusing acceptance while any OmaCalendar Flatpak instance is running.' >&2
+  exit 1
+fi
+for endpoint in daemon.sock app-instance.sock; do
+  if [[ -e ${runtime_directory}/${endpoint} || -L ${runtime_directory}/${endpoint} ]]; then
+    echo "Refusing acceptance with an existing Flatpak endpoint: ${runtime_directory}/${endpoint}" >&2
+    exit 1
+  fi
+done
+if [[ -e ${runtime_directory}/clients.lock ]]; then
+  exec 9>"${runtime_directory}/clients.lock"
+  if ! flock --exclusive --nonblock 9; then
+    echo 'Refusing acceptance while another Flatpak launcher owns the runtime.' >&2
+    exit 1
+  fi
+  flock --unlock 9
+  exec 9>&-
 fi
 smoke_root=$(mktemp -d /tmp/omacalendar-flatpak-smoke.XXXXXX)
 installed=false
@@ -133,6 +176,22 @@ start_instance owner
 wait_for_marker owner-ready
 start_instance peer
 wait_for_marker peer-ready
+# Exercise a peer crash/reopen while the independent daemon owner stays alive.
+# Namespace PIDs are often reused, so this catches stale PID-based GUI locks.
+touch "${smoke_root}/stop-peer"
+wait_for_marker peer-stopped
+wait "${instance_pids[1]}"
+instance_pids=("${instance_pids[0]}")
+mv "${smoke_root}/desktop.log" "${smoke_root}/first-desktop.log"
+rm -- "${smoke_root}/peer-ready" "${smoke_root}/peer-stopped" "${smoke_root}/stop-peer"
+start_instance peer
+wait_for_marker peer-ready
+# Perturb the second sandbox's process layout, then require the second desktop
+# invocation to activate the existing GUI and exit instead of becoming primary.
+timeout --signal=TERM --kill-after=5 15s flatpak run "${run_options[@]}" \
+  --command=env "${app_id}" "${profile_environment[@]}" \
+  bash -c 'sleep 1 & /app/bin/omacalendar omacalendar://settings/accounts; status=$?; wait; exit "$status"' \
+  >"${smoke_root}/second-activation.log" 2>&1
 touch "${smoke_root}/stop-owner"
 sleep 0.5
 [[ ! -e ${smoke_root}/owner-stopped ]]
@@ -145,7 +204,8 @@ for instance_pid in "${instance_pids[@]}"; do
   wait "${instance_pid}"
 done
 instance_pids=()
-if grep -Eq 'QQmlApplicationEngine failed|Error:|Type .* unavailable' "${smoke_root}/desktop.log"; then
+if grep -Eq 'QQmlApplicationEngine failed|Error:|Type .* unavailable' \
+  "${smoke_root}/desktop.log" "${smoke_root}/first-desktop.log" "${smoke_root}/second-activation.log"; then
   echo "Flatpak desktop smoke failed; see ${smoke_root}/desktop.log" >&2
   exit 1
 fi
@@ -153,4 +213,4 @@ run_app --cli system.health >"${smoke_root}/restarted-health.json"
 jq -e '.result.ok == true' "${smoke_root}/restarted-health.json" >/dev/null
 flatpak uninstall --user --noninteractive --assumeyes "${app_id}" >/dev/null
 installed=false
-printf 'PASS: Flatpak install, isolated IPC/profile, local CRUD/undo, persisted restart, permissions, rendered desktop, concurrent daemon lifetime, uninstall\nEvidence: %s\n' "${smoke_root}"
+printf 'PASS: Flatpak install, isolated IPC/profile, local CRUD/undo, persisted restart, permissions, rendered desktop, peer reopen, second activation, concurrent daemon lifetime, uninstall\nEvidence: %s\n' "${smoke_root}"

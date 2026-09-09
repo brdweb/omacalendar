@@ -16,7 +16,7 @@ validate_release_version "${release_version}"
 [[ $(uname -m) == x86_64 ]] || { echo 'The release Flatpak targets x86_64.' >&2; exit 1; }
 mkdir -p "$3"
 output_directory=$(realpath "$3")
-for command in flatpak flatpak-builder jq sha256sum; do
+for command in flatpak flatpak-builder jq sha256sum curl; do
   command -v "${command}" >/dev/null
 done
 export OMACALENDAR_FLATPAK_VERSION_SUFFIX
@@ -63,6 +63,20 @@ flatpak build-bundle --arch=x86_64 \
   exit 1
 }
 cp -a "${work_directory}/build/files" "${output_directory}/flatpak-stage"
+# Ship the exact LGPL dependency source with the binary. Prefer Builder's
+# already verified download, with a checksum-checked fetch for older layouts.
+libsecret_url=$(jq -er '.modules[] | select(.name == "libsecret") | .sources[0].url' "${manifest}")
+libsecret_hash=$(jq -er '.modules[] | select(.name == "libsecret") | .sources[0].sha256' "${manifest}")
+libsecret_filename=${libsecret_url##*/}
+libsecret_download="${work_directory}/state/downloads/${libsecret_hash}/${libsecret_filename}"
+if [[ -f ${libsecret_download} ]]; then
+  cp "${libsecret_download}" "${output_directory}/${libsecret_filename}"
+else
+  curl --fail --location --silent --show-error "${libsecret_url}" \
+    --output "${output_directory}/${libsecret_filename}"
+fi
+printf '%s  %s\n' "${libsecret_hash}" "${output_directory}/${libsecret_filename}" | \
+  sha256sum --check --status
 {
   printf 'source_sha256=%s\n' "${source_hash}"
   printf 'runtime=%s\n' 'org.kde.Platform/x86_64/6.10'

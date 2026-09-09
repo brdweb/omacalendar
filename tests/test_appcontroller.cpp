@@ -1,14 +1,17 @@
 #include <QFileInfo>
+#include <QProcess>
 #include <QScopeGuard>
 #include <QSignalSpy>
 #include <QTemporaryDir>
 #include <QTemporaryFile>
+#include <QTextStream>
 #include <QTimeZone>
 #include <QtTest/QtTest>
 
 #include "app/appcontroller.h"
 #include "app/applicationinstance.h"
 #include "app/startuprequest.h"
+#include "core/paths.h"
 
 using namespace omacalendar;
 
@@ -32,6 +35,7 @@ class AppControllerTest final : public QObject {
   void applicationInstanceAllowsOnePrimary();
   void applicationInstanceRoutesActivation();
   void nativeAndFlatpakInstancesAreIndependent();
+  void flatpakActivationRecoversAfterKilledPrimary();
 
  private:
   QTemporaryDir m_xdgRoot;
@@ -70,6 +74,51 @@ void AppControllerTest::nativeAndFlatpakInstancesAreIndependent() {
   qunsetenv("FLATPAK_ID");
   ApplicationInstance secondNative;
   QVERIFY(!secondNative.claimPrimary());
+}
+
+void AppControllerTest::flatpakActivationRecoversAfterKilledPrimary() {
+  QTemporaryDir runtime(QStringLiteral("/tmp/omac-crash-XXXXXX"));
+  QVERIFY(runtime.isValid());
+  const QByteArray originalFlatpak = qgetenv("FLATPAK_ID");
+  const QByteArray originalRuntime = qgetenv("XDG_RUNTIME_DIR");
+  const auto restore = qScopeGuard([&]() {
+    originalFlatpak.isNull() ? qunsetenv("FLATPAK_ID")
+                             : qputenv("FLATPAK_ID", originalFlatpak);
+    originalRuntime.isNull() ? qunsetenv("XDG_RUNTIME_DIR")
+                             : qputenv("XDG_RUNTIME_DIR", originalRuntime);
+  });
+  qputenv("XDG_RUNTIME_DIR", runtime.path().toUtf8());
+  qputenv("FLATPAK_ID", "org.omacalendar.OmaCalendar");
+  QVERIFY(QDir().mkpath(paths::runtimeDirectory()));
+  // Reproduce a legacy PID lock that appears owned by a currently live process
+  // after PID reuse. Flatpak primary ownership must not depend on this data.
+  QFile legacy(QDir(paths::runtimeDirectory())
+                   .filePath(QStringLiteral("app-instance.sock.lock")));
+  QVERIFY(legacy.open(QIODevice::WriteOnly));
+  QTextStream(&legacy) << QCoreApplication::applicationPid() << '\n'
+                       << QFileInfo(QCoreApplication::applicationFilePath()).fileName()
+                       << '\n'
+                       << QSysInfo::machineHostName() << "\n\n"
+                       << QSysInfo::bootUniqueId() << '\n';
+  legacy.close();
+
+  QProcess child;
+  child.start(QCoreApplication::applicationFilePath(),
+              {QStringLiteral("--hold-flatpak-activation-lock")});
+  QVERIFY(child.waitForStarted(2000));
+  QVERIFY(child.waitForReadyRead(2000));
+  QCOMPARE(child.readAllStandardOutput().trimmed(), QByteArray("ready"));
+  ApplicationInstance contender;
+  QVERIFY(!contender.claimPrimary());
+  child.kill();  // No Qt destructors: the kernel must release the file lock.
+  QVERIFY(child.waitForFinished(2000));
+  QCOMPARE(child.exitStatus(), QProcess::CrashExit);
+  {
+    ApplicationInstance recovered;
+    QVERIFY(recovered.claimPrimary());
+  }
+  ApplicationInstance reopened;
+  QVERIFY(reopened.claimPrimary());
 }
 
 void AppControllerTest::wallTimeConversionRejectsDstGap() {
@@ -259,6 +308,19 @@ void AppControllerTest::applicationInstanceAllowsOnePrimary() {
   QVERIFY(!secondary.claimPrimary());
 }
 
-QTEST_GUILESS_MAIN(AppControllerTest)
+int main(int argc, char* argv[]) {
+  QCoreApplication application(argc, argv);
+  if (application.arguments().contains(
+          QStringLiteral("--hold-flatpak-activation-lock"))) {
+    ApplicationInstance instance;
+    if (!instance.claimPrimary()) {
+      return 2;
+    }
+    QTextStream(stdout) << "ready" << Qt::endl;
+    return application.exec();
+  }
+  AppControllerTest test;
+  return QTest::qExec(&test, argc, argv);
+}
 
 #include "test_appcontroller.moc"

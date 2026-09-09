@@ -1,14 +1,14 @@
 # Install, update, and remove OmaCalendar
 
 The preparation candidate is `1.0.0-rc.1`. It is a GitHub **draft**, available
-to authenticated repository collaborators for owner testing. The public beta
+to authenticated repository collaborators with write access for owner testing. The public beta
 remains available separately. Do not rename or substitute beta assets for the
 candidate. [Owner testing](OWNER_TESTING.md) records the remaining stable gates.
 
 ## Download and verify
 
 Use an empty download directory and GitHub CLI authenticated with repository
-access. Download the selected package, checksums, and documentation from the
+write access. Download the selected package, checksums, and documentation from the
 same draft (omit the unused package patterns):
 
 ```bash
@@ -19,7 +19,7 @@ gh release download v1.0.0-rc.1 --repo brdweb/omacalendar \
   --pattern SHA256SUMS --pattern '*documentation.tar.gz'
 ```
 
-For each chosen file, set `package` to its exact filename and verify:
+For each selected install package, set `package` to its exact filename and verify:
 
 ```bash
 set -euo pipefail
@@ -37,12 +37,31 @@ gh attestation verify "./$package" --repo brdweb/omacalendar \
 
 Stop if any command fails. Each native/sandbox package has its own relevant
 SBOM. The documentation archive and source archive belong to the same commit.
+The SBOM describes the shipped app, files and bundled libraries; it is not an
+inventory of the user's operating system or the separately installed KDE
+runtime. The release also includes native build dependency inventories and
+the Flatpak runtime/SDK commit receipt. Original source archives accompany the
+privately bundled libical and libsecret libraries.
+The documentation archive has provenance, not a package SBOM; verify it with:
+
+```bash
+set -euo pipefail
+documentation=omacalendar-1.0.0-rc.1-documentation.tar.gz
+awk -v file="$documentation" '$2 == file { print; count++ } END { if (count != 1) exit 1 }' \
+  SHA256SUMS | sha256sum --check --strict
+gh attestation verify "./$documentation" --repo brdweb/omacalendar \
+  --source-ref refs/tags/v1.0.0-rc.1 \
+  --signer-workflow brdweb/omacalendar/.github/workflows/release.yml
+tar -xzf "$documentation"
+```
+
 After a release is public, GitHub's release page also supports browser downloads;
 draft assets require authentication and ordinary public download URLs will fail.
 
 ## Arch and Omarchy, x86-64
 
-Back up your existing profile, then install the verified native package:
+Use a fully updated current Arch/Omarchy installation. Back up your existing
+profile, then install the verified native package:
 
 ```bash
 sudo pacman -U ./omacalendar-1.0.0rc1-1-x86_64.pkg.tar.zst

@@ -22,7 +22,7 @@ jobs:
       - name: Install validation tools
         run: |
           pacman -Syu --noconfirm --needed \
-            appstream clang desktop-file-utils git
+            appstream clang desktop-file-utils git python
 
       - name: Check out source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -48,6 +48,9 @@ jobs:
 
       - name: Validate native Arch package assembly
         run: runuser -u package-test -- packaging/release/test-arch-package.sh
+
+      - name: Validate package SBOM finalization
+        run: python3 packaging/release/test-finalize-sbom.py
 
       - name: Validate desktop metadata
         run: desktop-file-validate packaging/org.omacalendar.OmaCalendar.desktop
