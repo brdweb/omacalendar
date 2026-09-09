@@ -521,6 +521,8 @@ class CalDavHardeningTest final : public QObject {
   void moveRequestIsConditionalAndSameOrigin();
   void mutationIdentitySurvivesPatch();
   void credentialStorageAndRestoreAreAsynchronous();
+  void restoreAccountsContinuesAfterCacheRefreshFailure_data();
+  void restoreAccountsContinuesAfterCacheRefreshFailure();
   void boundedCalendarQueryUsesRequestedUtcRange();
   void futureRangeRequiresProofAndCommitsCanonicalEcho();
   void futureRangeProbeRejectsNonRetention();
@@ -1633,6 +1635,101 @@ void CalDavHardeningTest::mutationIdentitySurvivesPatch() {
   QVERIFY2(patched.ok(), qPrintable(patched.error.message));
   QVERIFY(caldav::ICalendarCodec::hasClientMutationId(patched.payload,
                                                       QStringLiteral("mutation-123")));
+}
+
+void CalDavHardeningTest::restoreAccountsContinuesAfterCacheRefreshFailure_data() {
+  QTest::addColumn<bool>("enabled");
+  QTest::addColumn<bool>("malformed");
+  QTest::newRow("disabled-malformed") << false << true;
+  QTest::newRow("enabled-malformed") << true << true;
+  QTest::newRow("disabled-unmatched") << false << false;
+  QTest::newRow("enabled-unmatched") << true << false;
+}
+
+void CalDavHardeningTest::restoreAccountsContinuesAfterCacheRefreshFailure() {
+  QFETCH(bool, enabled);
+  QFETCH(bool, malformed);
+  QTemporaryDir helpers;
+  QVERIFY(helpers.isValid());
+  QFile helper(helpers.filePath(QStringLiteral("secret-tool")));
+  QVERIFY(helper.open(QIODevice::WriteOnly));
+  helper.write("#!/bin/sh\nprintf '%s\\n' 'fixture-password'\n");
+  helper.close();
+  QVERIFY(helper.setPermissions(QFileDevice::ReadOwner | QFileDevice::WriteOwner |
+                                QFileDevice::ExeOwner));
+  const QByteArray originalPath = qgetenv("PATH");
+  const auto restorePath = qScopeGuard([&]() { qputenv("PATH", originalPath); });
+  qputenv("PATH", helpers.path().toUtf8() + ':' + originalPath);
+  HttpFixture server("HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\n\r\n");
+  QVERIFY(server.listen());
+  Database database;
+  QString error;
+  QVERIFY2(database.open(QStringLiteral(":memory:"), &error), qPrintable(error));
+  Account broken;
+  broken.id = QStringLiteral("broken-cache");
+  broken.displayName = QStringLiteral("A broken cache");
+  broken.provider = ProviderKind::CalDav;
+  broken.enabled = enabled;
+  broken.endpoint = server.url().toString();
+  broken.principal = QStringLiteral("fixture-user");
+  QVERIFY2(database.upsertAccount(broken, &error), qPrintable(error));
+  Account healthy = broken;
+  healthy.id = QStringLiteral("healthy-cache");
+  healthy.displayName = QStringLiteral("Z healthy cache");
+  healthy.enabled = true;
+  QVERIFY2(database.upsertAccount(healthy, &error), qPrintable(error));
+  QCOMPARE(database.accounts().first().id, broken.id);
+  Calendar calendar;
+  calendar.id = QStringLiteral("broken-calendar");
+  calendar.accountId = broken.id;
+  calendar.remoteId = server.url(QStringLiteral("/dav/calendar/")).toString();
+  calendar.href = calendar.remoteId;
+  calendar.name = QStringLiteral("Synthetic cache");
+  QVERIFY2(database.upsertCalendar(calendar, &error), qPrintable(error));
+  const auto parsed = caldav::ICalendarCodec::parse(retainedResource());
+  QVERIFY(parsed.ok());
+  QVERIFY(!parsed.events.isEmpty());
+  Event legacy = parsed.events.first();
+  legacy.id = QStringLiteral("legacy-event");
+  legacy.calendarId = calendar.id;
+  legacy.remoteId = calendar.remoteId + QStringLiteral("legacy.ics");
+  legacy.timeKind = TimeKind::Zoned;
+  legacy.startTimeZone.clear();
+  legacy.endTimeZone.clear();
+  legacy.rawPayload.clear();
+  if (!malformed) legacy.uid = QStringLiteral("unmatched@example.test");
+  const ProviderResource resource{
+      calendar.id, legacy.remoteId, QStringLiteral("legacy-etag"),
+      QStringLiteral("text/calendar"),
+      malformed ? QStringLiteral("not an iCalendar resource")
+                : QString::fromUtf8(retainedResource())};
+  QVERIFY2(
+      database.applyRemoteSyncBatch(calendar, {legacy}, {}, {}, &error, {resource}),
+      qPrintable(error));
+  caldav::CalDavSync restored(&database);
+  QSignalSpy statusChanged(&restored, &caldav::CalDavSync::syncStatusChanged);
+  QVERIFY(!restored.restoreAccounts(&error));
+  QVERIFY(!error.isEmpty());
+  QTRY_VERIFY_WITH_TIMEOUT(server.connections() > 0, 2000);
+  bool brokenReported = false;
+  bool healthyStarted = false;
+  for (const QList<QVariant>& change : statusChanged) {
+    const QString accountId = change.at(0).toString();
+    brokenReported |= accountId == broken.id;
+    healthyStarted |= accountId == healthy.id;
+  }
+  QVERIFY(brokenReported);
+  QVERIFY(healthyStarted);
+  QCOMPARE(
+      database
+          .providerState(broken.id, {}, QStringLiteral("caldav_time_kind_version"), 0)
+          .toInt(),
+      0);
+  QCOMPARE(
+      database
+          .providerState(healthy.id, {}, QStringLiteral("caldav_time_kind_version"), 0)
+          .toInt(),
+      1);
 }
 
 void CalDavHardeningTest::credentialStorageAndRestoreAreAsynchronous() {

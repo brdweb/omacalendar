@@ -14,6 +14,8 @@ Versioning once public releases begin.
   events receive partial edits; prevent duplicate floating instances.
 - Preserve all-day and floating CalDAV time kinds, recurrence wire identities,
   acknowledgments, and client references across repeated edits and restart.
+- Continue restoring healthy CalDAV accounts when another account's legacy
+  cache cannot be refreshed; report the failure on the affected account.
 - Resolve competing edits using real modification times; retain ambiguous
   conflicts and prevent sync bookkeeping from changing edit chronology.
 - Preserve the selected local date west of UTC and expose accessible event

@@ -673,18 +673,29 @@ bool CalDavSync::restoreAccounts(QString* errorMessage) {
     }
     return false;
   }
+  bool restoredAll = true;
   for (const Account& account : accounts) {
     if (account.provider != ProviderKind::CalDav) {
       continue;
     }
     // This local refresh runs even offline or for disabled accounts. It uses
     // retained source before ctag/etag optimizations or queued writes can skip it.
-    if (!refreshCachedTimeKinds(account.id, errorMessage)) {
-      return false;
+    QString refreshError;
+    if (!refreshCachedTimeKinds(account.id, &refreshError)) {
+      if (restoredAll && errorMessage != nullptr) {
+        *errorMessage = refreshError;
+      }
+      restoredAll = false;
+      const QJsonObject value =
+          statusObject(QStringLiteral("error"),
+                       QStringLiteral("cache_metadata_refresh_failed"), refreshError);
+      m_status.insert(account.id, value);
+      emit syncStatusChanged(account.id, value);
+      continue;
     }
     if (account.enabled) syncAccount(account.id);
   }
-  return true;
+  return restoredAll;
 }
 
 bool CalDavSync::disconnectAccount(const QString& accountId,
