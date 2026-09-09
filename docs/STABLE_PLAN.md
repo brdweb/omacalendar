@@ -18,21 +18,25 @@ Use the [RC5 qualification results](testing/release-runtime-rc5.md) and
 [RC5 record](releases/1.0.0-rc.5.md); earlier preparation or development
 evidence does not automatically qualify the new downloaded artifacts.
 
+The distribution scope changed after RC5 qualification: future candidates and
+stable releases produce and support only the native x86-64 Arch package. RC5's
+experimental Ubuntu and Flatpak artifacts remain historical evidence and are
+not carried into the stable release.
+
 ## Delivery plan
 
 1. Reconcile both clean repositories and their published beta evidence.
-2. Add native Debian-family and sandboxed Flatpak builds alongside the Arch
-   package. Build every format from the same app commit, with the protected
+2. Build the native Arch package from the signed app commit, with the protected
    public Google Desktop client configuration supplied by CI.
-3. Compare downloaded bundle/package regular-file inventories and hashes with
-   their SPDX documents, and verify GitHub asset names against the checksum and
-   install instructions. Validate installation, launch, daemon restart, local
+3. Compare the downloaded package's regular-file inventory and hashes with its
+   SPDX document, and verify GitHub asset names against the checksum and install
+   instructions. Validate installation, launch, daemon restart, local
    data persistence, removal, and the existing compiler, sanitizer, QML,
    provider-contract, security-regression, and performance checks.
 4. Prepare the widget candidate independently, run its portable and Omarchy
    integration suites, and record its IPC compatibility with the app.
 5. Publish source changes and prepare GitHub draft candidate releases with
-   checksums, package-specific SBOMs, install/update/uninstall documentation,
+   checksums, an exact-package SBOM, install/update/uninstall documentation,
    and a focused owner checklist available together.
 6. Record results against the exact downloaded artifacts. Fix any
    observed defect, repeat affected qualification, and publish stable versions
@@ -54,13 +58,11 @@ links identify exactly what was tested.
 
 ## Distribution scope
 
-- Arch: native x86-64 package for current Arch/Omarchy, including user systemd
-  socket activation and the native widget integration.
-- Debian family: an independently compiled native amd64 package, with the
-  precise supported distribution baseline recorded after a clean build and
-  install test. An Arch binary repackaged as a `.deb` is not acceptable.
-- Flatpak: an installable x86-64 bundle, with its runtime obtained from
-  Flathub. A GitHub bundle does not imply a Flathub listing. Document its
-  sandbox permissions, data paths, backend lifecycle, and widget compatibility.
+- Native x86-64 Arch package for current Arch/Omarchy, including user systemd
+  socket activation and native widget integration.
+- Source and documentation archives accompany the package but are not separate
+  supported binary distributions.
+- No Debian-family package, Flatpak bundle, or cross-distribution binary is
+  produced or supported from the next candidate onward.
 
-No AUR or marketplace listing approval is inferred from GitHub publication.
+No widget marketplace approval is inferred from GitHub app publication.

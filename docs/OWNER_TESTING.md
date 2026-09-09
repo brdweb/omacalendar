@@ -28,9 +28,8 @@ does not erase the scoped checks already recorded in that report.
 2. Choose disposable provider calendars and synthetic event names. Google tests
    need a primary calendar plus a disposable owned secondary calendar. Never
    delete a personal calendar to satisfy a test.
-3. Install the native Arch candidate on Omarchy for app/widget tests. Test the
-   `.deb` package on Ubuntu 26.04. Test Flatpak separately: it has its own profile,
-   credentials, runtime, and daemon; the native widget does not use that profile.
+3. Install the native Arch candidate on current Omarchy for all app and widget
+   tests. This is the sole supported binary distribution and profile.
 4. Confirm the reported app version is `1.0.0-rc.5` and widget version is
    `0.1.0-rc.4`. Record the exact downloaded hashes before changing anything.
 
@@ -100,17 +99,6 @@ the marketplace/default-branch installation may still select the public beta.
 | Backend recovery | With daemon stopped, opening the widget activates it; restart/missed revisions reconnect with correct data | PENDING |
 | App focus | Open event/new event focuses one desktop instance on the intended monitor | PENDING |
 | Remove/reinstall | Removing widget leaves app/data intact; reinstall and settings behavior match documentation | PENDING |
-
-## Flatpak desktop
-
-| Check | Expected result | Owner result |
-|---|---|---|
-| Install and launch | Runtime installation completes, launcher opens, version is correct, no missing Qt/QML module | PENDING |
-| Isolation | Native and Flatpak can run together with separate data, sockets, windows and keyring identities | PENDING |
-| Google/CalDAV | Browser callback, keyring unlock, CRUD and restart work within the sandbox | PENDING |
-| Files/notifications | Portal file selection/import/export, external browser links and reminders work | PENDING |
-| Lifecycle | Documented daemon/reminder behavior matches closing/reopening the Flatpak | PENDING |
-| Update/remove | Installing the next bundle preserves profile; uninstall retains data unless explicitly requested | PENDING |
 
 ## Report and promotion
 

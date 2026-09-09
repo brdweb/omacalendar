@@ -6,6 +6,13 @@ Versioning once public releases begin.
 
 ## [Unreleased]
 
+### Changed
+
+- Make the native x86-64 Arch package the sole supported binary distribution.
+  Stop producing the generic binary archive, Debian package, Flatpak bundle,
+  and AUR recipes; retain source/documentation archives, checksums, the exact
+  Arch payload SBOM, and attestations.
+
 ## [1.0.0-rc.5] - 2026-09-09
 
 ### Fixed

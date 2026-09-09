@@ -40,8 +40,7 @@ jobs:
 
       - name: Validate shell scripts
         run: |
-          for script in packaging/arch/*.in packaging/aur/*.in packaging/release/*.sh \
-            packaging/flatpak/*.sh packaging/flatpak/omacalendar-launcher; do
+          for script in packaging/arch/*.in packaging/release/*.sh; do
             bash -n "${script}"
           done
           runuser -u package-test -- packaging/release/test-versioning.sh
@@ -50,9 +49,7 @@ jobs:
         run: runuser -u package-test -- packaging/release/test-arch-package.sh
 
       - name: Validate package SBOM finalization
-        run: |
-          python3 packaging/release/test-finalize-sbom.py
-          python3 packaging/release/test-flatpak-sbom.py
+        run: python3 packaging/release/test-finalize-sbom.py
 
       - name: Validate desktop metadata
         run: desktop-file-validate packaging/org.omacalendar.OmaCalendar.desktop
