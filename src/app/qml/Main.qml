@@ -8,6 +8,8 @@ import QtQuick.Layouts
 import OmaCalendar
 import "components"
 import "views"
+import "CalendarVisibility.js" as CalendarVisibility
+import "DateRange.js" as DateRange
 
 ApplicationWindow {
     id: window
@@ -41,7 +43,7 @@ ApplicationWindow {
     property string currentView: "month"
     property date visibleMonth: new Date(App.selectedDate.getFullYear(),
                                          App.selectedDate.getMonth(), 1)
-    property var hiddenCalendars: ({})
+    property var calendarVisibilityOverrides: ({})
     readonly property string activeCalendarSetId: String(
                                                      appValue("activeCalendarSetId",
                                                               "all-calendars"))
@@ -59,6 +61,10 @@ ApplicationWindow {
     readonly property var decoratedEvents: decorateEvents(App.events)
     readonly property var visibleEvents: filterVisibleEvents(decoratedEvents)
     readonly property var calendarSets: appList("calendarSets")
+    readonly property var sidebarCalendars: CalendarVisibility.calendarsForSidebar(
+                                                appList("calendars"), calendarSets,
+                                                activeCalendarSetId,
+                                                calendarVisibilityOverrides)
     readonly property var writableCalendars: appList("calendars").filter(
                                                  function(calendar) {
                                                      return calendar.enabled !== false
@@ -237,9 +243,9 @@ ApplicationWindow {
             Layout.fillHeight: true
             currentDate: App.selectedDate
             monthDate: window.visibleMonth
-            calendars: App.calendars
+            calendars: window.sidebarCalendars
             calendarSets: window.calendarSets
-            calendarsModel: window.appValue("calendarsModel", null)
+            calendarsModel: null
             calendarSetsModel: window.appValue("calendarSetsModel", null)
             activeSetId: window.activeCalendarSetId
             connected: App.connected
@@ -259,7 +265,7 @@ ApplicationWindow {
             }
             onMonthChanged: dateValue => {
                 window.visibleMonth = dateValue
-                window.loadRangeFor(dateValue, "month")
+                window.loadRangeFor(App.selectedDate, window.currentView)
             }
             onSetActivated: setId => window.activateCalendarSet(setId)
             onCalendarVisibilityRequested: (calendarId, visible) =>
@@ -1333,6 +1339,9 @@ ApplicationWindow {
                 window.search(activityPanel.searchText,
                               window.activeSearchFilters)
         }
+        function onCalendarsChanged() {
+            window.calendarVisibilityOverrides = ({})
+        }
         function onSelectedDateChanged() {
             window.visibleMonth = new Date(App.selectedDate.getFullYear(),
                                            App.selectedDate.getMonth(), 1)
@@ -1432,41 +1441,26 @@ ApplicationWindow {
     }
 
     function filterVisibleEvents(values) {
-        const allowed = activeSetCalendarIds()
-        const result = []
-        for (let index = 0; index < values.length; ++index) {
-            const value = values[index]
-            if (!calendarIsVisible(value.calendarId))
-                continue
-            if (allowed.length > 0 && allowed.indexOf(value.calendarId) < 0)
-                continue
-            result.push(value)
-        }
-        return result
+        return CalendarVisibility.filterEvents(
+                    values, appList("calendars"), calendarSets,
+                    activeCalendarSetId, calendarVisibilityOverrides)
     }
 
     function activeSetCalendarIds() {
-        if (!activeCalendarSetId)
-            return []
-        for (let index = 0; index < calendarSets.length; ++index) {
-            const value = calendarSets[index]
-            if (String(value.id) === activeCalendarSetId)
-                return value.calendarIds || []
-        }
-        return []
+        return CalendarVisibility.activeSetCalendarIds(calendarSets,
+                                                        activeCalendarSetId)
     }
 
     function calendarIsVisible(calendarId) {
-        return hiddenCalendars[calendarId] !== true
+        return CalendarVisibility.calendarIsVisible(
+                    appList("calendars"), calendarVisibilityOverrides,
+                    calendarId)
     }
 
     function setCalendarVisible(calendarId, visibleValue) {
-        const next = Object.assign({}, hiddenCalendars)
-        if (visibleValue)
-            delete next[calendarId]
-        else
-            next[calendarId] = true
-        hiddenCalendars = next
+        const next = Object.assign({}, calendarVisibilityOverrides)
+        next[String(calendarId)] = visibleValue === true
+        calendarVisibilityOverrides = next
         callApp("setCalendarVisibility", [calendarId, visibleValue])
     }
 
@@ -1622,16 +1616,13 @@ ApplicationWindow {
             start = new Date(anchorDate.getFullYear(), anchorDate.getMonth(), -7)
             end = new Date(anchorDate.getFullYear(), anchorDate.getMonth() + 1, 14)
         }
-        App.loadRange(start, end)
+        const requestedRange = DateRange.includeMonthGrid(
+                                 start, end, visibleMonth, firstDayOfWeek)
+        App.loadRange(requestedRange.start, requestedRange.end)
     }
 
     function startOfWeek(dateValue) {
-        const start = new Date(dateValue.getFullYear(), dateValue.getMonth(),
-                               dateValue.getDate())
-        const jsFirstDay = firstDayOfWeek === 7 ? 0 : firstDayOfWeek
-        const distance = (start.getDay() - jsFirstDay + 7) % 7
-        start.setDate(start.getDate() - distance)
-        return start
+        return DateRange.startOfWeek(dateValue, firstDayOfWeek)
     }
 
     function navigatePeriod(direction) {

@@ -842,6 +842,13 @@ Drawer {
                                         text: qsTr("Read only")
                                         tone: "neutral"
                                     }
+                                    StatusBadge {
+                                        objectName: "calendarProvider-"
+                                                    + String(calendarCard.modelData.id || "")
+                                        visible: calendarCard.modelData.id === "local-default"
+                                        text: qsTr("On this device · Built in")
+                                        tone: "neutral"
+                                    }
                                     AppButton {
                                         objectName: "deleteLocalCalendar-"
                                                     + String(calendarCard.modelData.id || "")
@@ -1088,6 +1095,7 @@ Drawer {
 
     Dialog {
         id: calendarSetDialog
+        objectName: "calendarSetDialog"
         property var setData: ({})
         property var selectedIds: []
         property string defaultCalendarId: ""
@@ -1134,6 +1142,18 @@ Drawer {
                         break
                     }
                 }
+            }
+            return values
+        }
+
+        function orderedCalendars() {
+            selectionRevision
+            const values = selectedCalendars()
+            for (let calendarIndex = 0; calendarIndex < root.calendars.length;
+                 ++calendarIndex) {
+                const calendar = root.calendars[calendarIndex]
+                if (selectedIds.indexOf(String(calendar.id)) < 0)
+                    values.push(calendar)
             }
             return values
         }
@@ -1187,9 +1207,10 @@ Drawer {
             ColumnLayout {
                 Layout.fillWidth: true
                 Repeater {
-                    model: root.effectiveCalendarsModel
+                    model: calendarSetDialog.orderedCalendars()
                     delegate: RowLayout {
                         id: membershipRow
+                        objectName: "calendarSetMembership-" + String(modelData.id)
                         required property var modelData
                         Layout.fillWidth: true
                         readonly property int selectedIndex:
@@ -1202,6 +1223,8 @@ Drawer {
                                            membershipRow.modelData.id, checked)
                         }
                         AppButton {
+                            objectName: "calendarSetMoveEarlier-" + String(
+                                            membershipRow.modelData.id)
                             visible: membershipRow.selectedIndex >= 0
                             iconText: "↑"
                             compact: true
@@ -1212,6 +1235,8 @@ Drawer {
                                            membershipRow.modelData.id, -1)
                         }
                         AppButton {
+                            objectName: "calendarSetMoveLater-" + String(
+                                            membershipRow.modelData.id)
                             visible: membershipRow.selectedIndex >= 0
                             iconText: "↓"
                             compact: true

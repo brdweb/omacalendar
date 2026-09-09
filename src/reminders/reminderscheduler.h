@@ -3,6 +3,7 @@
 #include <QDateTime>
 #include <QHash>
 #include <QObject>
+#include <QSet>
 #include <QTimer>
 #include <QUrl>
 #include <QVariantMap>
@@ -71,6 +72,7 @@ class ReminderScheduler final : public QObject {
   void stop();
   void checkNow();
   void eventsChanged(const QStringList& calendarIds);
+  void syncCompleted(const QString& accountId);
   void handlePrepareForSleep(bool sleeping);
 
  signals:
@@ -116,6 +118,7 @@ class ReminderScheduler final : public QObject {
   QHash<QString, PendingDelivery> m_pending;
   QHash<uint, PendingDelivery> m_active;
   QHash<QString, QString> m_invitationBaseline;
+  QSet<QString> m_initializedInvitationCalendars;
   QStringList m_deferredCalendarIds;
   bool m_sleeping = false;
 };

@@ -1009,15 +1009,20 @@ Item {
                      "displayName": "Google", "authStatus": "reauthorization_required"}
                 ],
                 "calendars": [
+                    {"id": "local-default", "accountId": "account-local",
+                     "name": "Personal", "color": "#89b4fa", "enabled": true,
+                     "readOnly": false, "position": 0,
+                     "capabilities": {"provider": "local",
+                                      "canDeleteCalendar": false}},
                     {"id": "calendar-writable", "accountId": "account-local",
                      "name": "Personal", "color": "#7aa2f7", "enabled": true,
-                     "readOnly": false, "position": 0},
+                     "readOnly": false, "position": 1},
                     {"id": "calendar-read-only", "accountId": "account-ics",
                      "name": "Subscribed", "color": "#9ece6a", "enabled": true,
-                     "readOnly": true, "position": 1},
+                     "readOnly": true, "position": 2},
                     {"id": "calendar-google", "accountId": "account-google",
                      "name": "Team", "color": "#f7768e", "enabled": true,
-                     "readOnly": false, "position": 2,
+                     "readOnly": false, "position": 3,
                      "capabilities": {"provider": "google",
                                       "canDeleteCalendar": true,
                                       "primary": false}}
@@ -1040,6 +1045,16 @@ Item {
             settings.open()
             tryCompare(settings, "opened", true)
             verifyFiniteGeometry(settings.contentItem, "account-settings")
+            const localDefaultProvider = findChild(
+                        scene.Window.window.contentItem,
+                        "calendarProvider-local-default")
+            verify(localDefaultProvider !== null)
+            compare(localDefaultProvider.text, "On this device · Built in")
+            const deleteLocalDefault = findChild(
+                        scene.Window.window.contentItem,
+                        "deleteLocalCalendar-local-default")
+            verify(deleteLocalDefault !== null)
+            verify(!deleteLocalDefault.visible)
             const deleteLocal = findChild(scene.Window.window.contentItem,
                                           "deleteLocalCalendar-calendar-writable")
             verify(deleteLocal !== null,
@@ -1060,12 +1075,12 @@ Item {
                         "defaultCalendarSelector")
             verify(defaultCalendarSelector !== null,
                    "calendar settings expose one default selector")
-            compare(defaultCalendarSelector.count, 2,
+            compare(defaultCalendarSelector.count, 3,
                     "read-only calendars are excluded from the default selector")
             compare(defaultCalendarSelector.currentValue, "calendar-writable")
             preferenceChangedSpy.target = settings
             preferenceChangedSpy.clear()
-            defaultCalendarSelector.activated(1)
+            defaultCalendarSelector.activated(2)
             compare(preferenceChangedSpy.count, 1)
             compare(preferenceChangedSpy.signalArguments[0][0],
                     "defaultCalendarId")
@@ -1086,6 +1101,26 @@ Item {
             compare(preferenceChangedSpy.signalArguments[1][1],
                     "full_details")
             preferenceChangedSpy.target = null
+
+            const calendarSetDialog = findChild(
+                        scene.Window.window.contentItem, "calendarSetDialog")
+            verify(calendarSetDialog !== null)
+            calendarSetDialog.openExisting(settings.calendarSets[0])
+            tryCompare(calendarSetDialog, "opened", true)
+            const moveReadOnlyEarlier = findChild(
+                        scene.Window.window.contentItem,
+                        "calendarSetMoveEarlier-calendar-read-only")
+            verify(moveReadOnlyEarlier !== null)
+            verify(moveReadOnlyEarlier.enabled)
+            moveReadOnlyEarlier.clicked()
+            compare(calendarSetDialog.selectedIds[0], "calendar-read-only")
+            compare(calendarSetDialog.selectedIds[1], "calendar-writable")
+            compare(calendarSetDialog.orderedCalendars()[0].id,
+                    "calendar-read-only")
+            compare(calendarSetDialog.orderedCalendars()[1].id,
+                    "calendar-writable")
+            calendarSetDialog.close()
+            tryCompare(calendarSetDialog, "opened", false)
 
             const calendarColorPicker = findChild(
                         scene.Window.window.contentItem,
@@ -1136,7 +1171,7 @@ Item {
             compare(calendarPreferenceSpy.signalArguments[0][0],
                     "calendar-google")
             compare(calendarPreferenceSpy.signalArguments[0][1], "position")
-            compare(calendarPreferenceSpy.signalArguments[0][2], 0)
+            compare(calendarPreferenceSpy.signalArguments[0][2], 1)
             calendarPreferenceSpy.target = null
 
             const deleteGoogle = findChild(scene.Window.window.contentItem,

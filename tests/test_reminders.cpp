@@ -790,6 +790,62 @@ class ReminderSchedulerTest final : public QObject {
     QCOMPARE(backend.sent.size(), 6);
   }
 
+  void existingInvitationsInNewCalendarEstablishBaselineOnFirstSync() {
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    Database database;
+    QString error;
+    QVERIFY2(database.open(directory.filePath(QStringLiteral("store.sqlite")), &error),
+             qPrintable(error));
+    QDateTime current(QDate(2027, 5, 6), QTime(11, 0), QTimeZone::UTC);
+    FakeNotificationBackend backend;
+    ReminderScheduler scheduler(
+        &database, &backend, [&current]() { return current; },
+        [](const QUrl&) { return true; });
+    scheduler.start();
+    scheduler.stop();
+    QCoreApplication::processEvents();
+
+    Account account;
+    account.id = QStringLiteral("new-account");
+    account.provider = ProviderKind::Google;
+    account.displayName = QStringLiteral("New account");
+    account.principal = QStringLiteral("user@example.test");
+    account.enabled = true;
+    account.authStatus = QStringLiteral("connected");
+    QVERIFY2(database.upsertAccount(account, &error), qPrintable(error));
+
+    Calendar calendar;
+    calendar.id = QStringLiteral("new-calendar");
+    calendar.accountId = account.id;
+    calendar.remoteId = QStringLiteral("remote-new-calendar");
+    calendar.name = QStringLiteral("Imported calendar");
+    calendar.enabled = true;
+    QVERIFY2(database.upsertCalendar(calendar, &error), qPrintable(error));
+
+    Event imported =
+        invitationEvent(QStringLiteral("Existing invitation"), current.addDays(1));
+    imported.calendarId = calendar.id;
+    imported.remoteId = QStringLiteral("existing-invitation");
+    imported.uid = QStringLiteral("existing-invitation@example.test");
+    QVERIFY2(database.applyRemoteEvent(imported, &error), qPrintable(error));
+    scheduler.eventsChanged({calendar.id});
+    QCOMPARE(backend.sent.size(), 0);
+    scheduler.syncCompleted(account.id);
+    QCOMPARE(backend.sent.size(), 0);
+
+    Event arriving =
+        invitationEvent(QStringLiteral("New invitation"), current.addDays(2));
+    arriving.calendarId = calendar.id;
+    arriving.remoteId = QStringLiteral("new-invitation");
+    arriving.uid = QStringLiteral("new-invitation@example.test");
+    QVERIFY2(database.applyRemoteEvent(arriving, &error), qPrintable(error));
+    scheduler.eventsChanged({calendar.id});
+    QCOMPARE(backend.sent.size(), 1);
+    QCOMPARE(backend.sent.constFirst().summary,
+             QStringLiteral("New calendar invitation"));
+  }
+
   void existingSchemaRepairAndInvitationCrashWindow() {
     QTemporaryDir directory;
     QVERIFY(directory.isValid());

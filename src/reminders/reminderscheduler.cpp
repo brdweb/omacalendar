@@ -212,6 +212,9 @@ void ReminderScheduler::start() {
     emit notificationError(QStringLiteral("invitation-scan"), error);
   } else {
     baselineInvitations(calendarIds);
+    for (const QString& calendarId : std::as_const(calendarIds)) {
+      m_initializedInvitationCalendars.insert(calendarId);
+    }
   }
   m_timer.start();
   QTimer::singleShot(0, this, &ReminderScheduler::checkNow);
@@ -258,8 +261,35 @@ void ReminderScheduler::eventsChanged(const QStringList& calendarIds) {
     }
     return;
   }
-  scanInvitations(calendarIds);
+  QStringList initializedCalendarIds;
+  for (const QString& calendarId : calendarIds) {
+    if (m_initializedInvitationCalendars.contains(calendarId)) {
+      initializedCalendarIds.append(calendarId);
+    }
+  }
+  scanInvitations(initializedCalendarIds);
   checkNow();
+}
+
+void ReminderScheduler::syncCompleted(const QString& accountId) {
+  if (m_database == nullptr || !m_database->isOpen() || accountId.isEmpty()) {
+    return;
+  }
+  QString error;
+  QStringList newCalendarIds;
+  for (const Calendar& calendar : m_database->calendars(accountId, &error)) {
+    if (calendar.enabled && !m_initializedInvitationCalendars.contains(calendar.id)) {
+      newCalendarIds.append(calendar.id);
+    }
+  }
+  if (!error.isEmpty()) {
+    emit notificationError(QStringLiteral("invitation-baseline"), error);
+    return;
+  }
+  baselineInvitations(newCalendarIds);
+  for (const QString& calendarId : std::as_const(newCalendarIds)) {
+    m_initializedInvitationCalendars.insert(calendarId);
+  }
 }
 
 void ReminderScheduler::handlePrepareForSleep(const bool sleeping) {
@@ -268,9 +298,10 @@ void ReminderScheduler::handlePrepareForSleep(const bool sleeping) {
     const QStringList changedCalendars = std::exchange(m_deferredCalendarIds, {});
     QTimer::singleShot(0, this, [this, changedCalendars]() {
       if (!changedCalendars.isEmpty()) {
-        scanInvitations(changedCalendars);
+        eventsChanged(changedCalendars);
+      } else {
+        checkNow();
       }
-      checkNow();
     });
   }
 }
