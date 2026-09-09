@@ -101,12 +101,20 @@ def snapshot(h: DaemonHarness, ids: list[str], settings: dict[str, Any], interva
     sets = {k: v for k, v in h.call("calendarSets.list").items() if k != "revision"}
     # Sync timestamps can advance after restart; account identity/status cannot.
     accounts = [{k: a.get(k) for k in fields} for a in h.call("accounts.list")["accounts"]]
+    calendars = [{k: v for k, v in c.items() if k != "lastSyncAt"}
+                 for c in h.call("calendars.list")["calendars"]]
+    # RC4 explicitly advertises the previously absent/unsupported future RSVP
+    # capability. Normalize only that absent false default, retaining all
+    # existing capabilities and detecting any true/false behavior change.
+    for calendar in calendars:
+        capabilities = calendar.get("capabilities", {})
+        if capabilities.get("provider") == "caldav":
+            capabilities.setdefault("rsvpThisAndFuture", False)
     return {
         "events": [h.call("events.get", {"eventId": item}) for item in ids],
         "occurrences": h.call("events.list", interval)["events"],
         "settings": {key: h.call("settings.get", {"key": key}) for key in settings},
-        "calendars": [{k: v for k, v in c.items() if k != "lastSyncAt"}
-                      for c in h.call("calendars.list")["calendars"]], "sets": sets,
+        "calendars": calendars, "sets": sets,
         "accounts": sorted(accounts, key=lambda item: item["id"]),
         "reminders": sorted(h.call("reminders.list", {"limit": 500})["reminders"], key=lambda item: item["id"]),
     }

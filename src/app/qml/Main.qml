@@ -21,6 +21,23 @@ ApplicationWindow {
     color: Theme.background
     font.pixelSize: Theme.fontSize
 
+    // Basic-style dialogs and standard buttons inherit this palette. Keep
+    // their surfaces and labels in the same theme as custom content.
+    palette.window: Theme.surface
+    palette.windowText: Theme.text
+    palette.base: Theme.background
+    palette.alternateBase: Theme.surfaceAlt
+    palette.text: Theme.text
+    palette.button: Theme.surfaceAlt
+    palette.buttonText: Theme.text
+    palette.highlight: Theme.accent
+    palette.highlightedText: Theme.accentText
+    palette.placeholderText: Theme.mutedText
+    palette.dark: Theme.border
+    palette.mid: Theme.border
+    palette.light: Theme.surfaceAlt
+    palette.shadow: Theme.darkBackground
+
     property string currentView: "month"
     property date visibleMonth: new Date(App.selectedDate.getFullYear(),
                                          App.selectedDate.getMonth(), 1)
