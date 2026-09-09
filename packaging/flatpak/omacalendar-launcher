@@ -27,6 +27,9 @@ cleanup() {
     flock --exclusive 8
     kill "${daemon_pid}" 2>/dev/null || true
     wait "${daemon_pid}" 2>/dev/null || true
+    # SIGTERM does not run Qt destructors. The exclusive client lock ensures
+    # nobody can acquire this endpoint while its stale socket is removed.
+    rm -f -- "${runtime_directory}/daemon.sock"
   fi
 }
 trap cleanup EXIT

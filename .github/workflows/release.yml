@@ -301,6 +301,11 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y flatpak flatpak-builder dbus-x11 jq
+          # Ubuntu hosted runners restrict the user namespaces bubblewrap
+          # needs. This changes only this disposable CI runner, never a user's
+          # workstation or any installed package's permissions.
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          sudo systemctl reload apparmor
           flatpak remote-add --user --if-not-exists flathub \
             https://dl.flathub.org/repo/flathub.flatpakrepo
           flatpak install --user --noninteractive flathub \

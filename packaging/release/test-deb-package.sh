@@ -18,7 +18,13 @@ package_path=$(realpath "$2")
 [[ $(dpkg-deb --field "${package_path}" Version) == "${package_version}" ]]
 [[ $(dpkg-deb --field "${package_path}" Package) == omacalendar ]]
 apt-get update
-DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends "${package_path}"
+# The official minimal Ubuntu image excludes /usr/share/doc by default. Restore
+# this package's documentation so the clean-install test verifies the manuals
+# and bundled dependency license notices as well as the executable payload.
+DEBIAN_FRONTEND=noninteractive apt-get \
+  -o 'Dpkg::Options::=--path-include=/usr/share/doc/OmaCalendar*' \
+  -o 'Dpkg::Options::=--path-include=/usr/share/doc/omacalendar*' \
+  install -y --no-install-recommends "${package_path}"
 [[ $(dpkg-query -W -f='${Status}' omacalendar) == 'install ok installed' ]]
 [[ -z $(dpkg --verify omacalendar) ]]
 command -v secret-tool >/dev/null

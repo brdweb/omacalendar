@@ -18,6 +18,9 @@ required_paths=(
   usr/share/icons/hicolor/scalable/apps/org.omacalendar.OmaCalendar.svg
   usr/share/metainfo/org.omacalendar.OmaCalendar.metainfo.xml
   usr/share/doc/OmaCalendar/docs/GETTING_STARTED.md
+  usr/share/doc/OmaCalendar/docs/INSTALL.md
+  usr/share/doc/OmaCalendar/docs/OWNER_TESTING.md
+  usr/share/doc/OmaCalendar/docs/STABLE_PLAN.md
   usr/share/doc/OmaCalendar/docs/GOOGLE_TESTING.md
   usr/share/doc/OmaCalendar/docs/RELEASE.md
 )
