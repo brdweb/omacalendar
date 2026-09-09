@@ -33,6 +33,28 @@ for version in 1.0.0-alpha.2 1.0.0-beta.1 1.0.0-rc.1 1.0.0-rc.2 1.0.0-rc.3 1.0.0
 done
 
 configured_version=$(cmake_release_version "${repository_root}")
+# Active install guides must not silently retain a superseded candidate.
+for guide in docs/INSTALL.md packaging/flatpak/README.md; do
+  mapfile -t examples < <(grep -Eo 'omacalendar-[0-9][0-9A-Za-z.-]*-linux-x86_64\.flatpak' \
+    "${repository_root}/${guide}" | LC_ALL=C sort -u)
+  if [[ ${#examples[@]} != 1 || ${examples[0]} != "omacalendar-${configured_version}-linux-x86_64.flatpak" ]]; then
+    echo "${guide} has missing or stale Flatpak install examples" >&2
+    exit 1
+  fi
+done
+for guide in docs/INSTALL.md packaging/debian/README.md; do
+  mapfile -t examples < <(grep -Eo 'omacalendar_[0-9][0-9A-Za-z.~+-]*_amd64\.deb' \
+    "${repository_root}/${guide}" | LC_ALL=C sort -u)
+  # The Debian packaging guide also explains the invariant stable filename.
+  for example in "${examples[@]}"; do
+    if [[ ${example} != "$(deb_package_filename "${configured_version}")" &&
+          ${example} != "$(deb_package_filename "$(release_base_version "${configured_version}")")" ]]; then
+      echo "${guide} has a stale Debian asset filename: ${example}" >&2
+      exit 1
+    fi
+  done
+  [[ ${#examples[@]} -gt 0 ]] || { echo "${guide} has no Debian filename example" >&2; exit 1; }
+done
 "${repository_root}/packaging/release/verify-release-metadata.sh" \
   "${configured_version}"
 acceptance_record="${repository_root}/docs/releases/${configured_version}.md"
