@@ -4,6 +4,7 @@ set -euo pipefail
 repository_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 # shellcheck source=packaging/release/version-lib.sh
 source "${repository_root}/packaging/release/version-lib.sh"
+source "${repository_root}/packaging/release/deb-version-lib.sh"
 
 for version in 0.0.0 1.0.0 1.0.0-alpha 1.0.0-alpha.1 2.3.4-rc-1; do
   if ! validate_release_version "${version}"; then
@@ -24,7 +25,7 @@ if requires_public_release_gates 1.0.0-alpha; then
   echo "the already-published 1.0.0-alpha unexpectedly requires the expanded release gates" >&2
   exit 1
 fi
-for version in 1.0.0-alpha.2 1.0.0-beta.1 1.0.0-rc.1 1.0.0-rc.2 1.0.0; do
+for version in 1.0.0-alpha.2 1.0.0-beta.1 1.0.0-rc.1 1.0.0-rc.2 1.0.0-rc.3 1.0.0; do
   if ! requires_public_release_gates "${version}"; then
     echo "future public release did not require the expanded gates: ${version}" >&2
     exit 1
@@ -101,8 +102,38 @@ done <<'SUPPORTED_ARCH_VERSIONS'
 1.0.0-rc 1.0.0rc
 1.0.0-rc.1 1.0.0rc1
 1.0.0-rc.2 1.0.0rc2
+1.0.0-rc.3 1.0.0rc3
 1.0.0-rc.12 1.0.0rc12
 SUPPORTED_ARCH_VERSIONS
+
+# The control Version retains Debian's tilde ordering, but the download name
+# must survive GitHub release-asset sanitization unchanged.
+while read -r version expected_control expected_filename; do
+  [[ $(deb_package_version "${version}") == "${expected_control}" ]]
+  actual_filename=$(deb_package_filename "${version}")
+  [[ ${actual_filename} == "${expected_filename}" ]]
+  [[ ${actual_filename} =~ ^[A-Za-z0-9][A-Za-z0-9._-]*[A-Za-z0-9]$ ]]
+  [[ ${actual_filename} != *'~'* ]]
+done <<'SUPPORTED_DEBIAN_VERSIONS'
+1.0.0 1.0.0-1 omacalendar_1.0.0-1_amd64.deb
+1.0.0-alpha.0 1.0.0~alpha.0-1 omacalendar_1.0.0-alpha.0-1_amd64.deb
+1.0.0-beta.1 1.0.0~beta.1-1 omacalendar_1.0.0-beta.1-1_amd64.deb
+1.0.0-rc.1 1.0.0~rc.1-1 omacalendar_1.0.0-rc.1-1_amd64.deb
+1.0.0-rc.2 1.0.0~rc.2-1 omacalendar_1.0.0-rc.2-1_amd64.deb
+1.0.0-rc.3 1.0.0~rc.3-1 omacalendar_1.0.0-rc.3-1_amd64.deb
+2.3.4-rc-1 2.3.4~rc-1-1 omacalendar_2.3.4-rc-1-1_amd64.deb
+SUPPORTED_DEBIAN_VERSIONS
+for invalid_version in '' v1.0.0 01.0.0 1.0.0-rc.03 1.0.0+build \
+  '1.0.0~rc.3' '1.0.0-rc/3' '1.0.0-rc 3'; do
+  if deb_package_filename "${invalid_version}"; then
+    echo "invalid version produced a Debian asset filename: ${invalid_version}" >&2
+    exit 1
+  fi
+done
+if deb_package_filename || deb_package_filename 1.0.0 unexpected; then
+  echo "Debian filename helper accepted the wrong argument count" >&2
+  exit 1
+fi
 
 for version in \
   1.0.0-rc-1 \
@@ -154,7 +185,8 @@ grep -Fq "releases/download/v${upstream_reference}/omacalendar-${upstream_refere
 if [[ $(vercmp 1.0.0beta1 1.0.0) -ge 0 ]] || \
   [[ $(vercmp 1.0.0beta1 1.0.0beta2) -ge 0 ]] || \
   [[ $(vercmp 1.0.0rc1 1.0.0rc2) -ge 0 ]] || \
-  [[ $(vercmp 1.0.0rc2 1.0.0) -ge 0 ]]; then
+  [[ $(vercmp 1.0.0rc2 1.0.0rc3) -ge 0 ]] || \
+  [[ $(vercmp 1.0.0rc3 1.0.0) -ge 0 ]]; then
   echo "Arch prerelease pkgver ordering is invalid" >&2
   exit 1
 fi

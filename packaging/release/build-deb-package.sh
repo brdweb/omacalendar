@@ -11,6 +11,7 @@ source "${repository_root}/packaging/release/deb-version-lib.sh"
 release_version=$1
 stage_root=$(realpath "$2")
 package_version=$(deb_package_version "${release_version}")
+package_filename=$(deb_package_filename "${release_version}")
 if [[ ! ${SOURCE_DATE_EPOCH:-} =~ ^[1-9][0-9]*$ ]]; then
   echo "SOURCE_DATE_EPOCH must be a positive Unix timestamp" >&2
   exit 2
@@ -28,7 +29,7 @@ for required in usr/bin/omacalendar usr/bin/omacalendard usr/bin/omacalendarctl 
 done
 mkdir -p "$3"
 output_directory=$(realpath "$3")
-package_path="${output_directory}/omacalendar_${package_version}_amd64.deb"
+package_path="${output_directory}/${package_filename}"
 if [[ -e ${package_path} || -L ${package_path} ]]; then
   echo "refusing to overwrite existing Debian package: ${package_path}" >&2
   exit 1

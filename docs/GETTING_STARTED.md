@@ -1,6 +1,6 @@
 # Getting started
 
-For the next `1.0.0-rc.2` draft candidate, use
+For the next `1.0.0-rc.3` draft candidate, use
 [the Arch, Ubuntu `.deb`, and Flatpak installation guide](INSTALL.md) and
 [owner checklist](OWNER_TESTING.md). The beta instructions below refer to the
 last public release and deliberately retain its immutable filenames.

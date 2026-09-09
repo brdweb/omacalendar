@@ -1,11 +1,19 @@
 # Release procedure
 
-For `1.0.0-rc.2`, follow [STABLE_PLAN.md](STABLE_PLAN.md). The owner requested
+For `1.0.0-rc.3`, follow [STABLE_PLAN.md](STABLE_PLAN.md). The owner requested
 draft packages for testing on 2026-09-09; stable acceptance remains pending.
-`verify-release.sh --draft-candidate v1.0.0-rc.2` verifies the signed, clean RC
+`verify-release.sh --draft-candidate v1.0.0-rc.3` verifies the signed, clean RC
 tree, metadata, draft-only disposition and scoped tag authorization. This mode
 rejects stable/beta versions and never qualifies public acceptance. Ordinary
 `verify-release.sh TAG` retains every strict public gate.
+
+RC3 supersedes RC2's Flatpak inventory mismatch (61 locale files listed in
+the staged SPDX but absent from the bundle) and its GitHub-normalized Debian
+filename. Preserve earlier tags, drafts, and records; verify rebuilt RC3 assets
+independently. The Debian transport filename is
+`omacalendar_1.0.0-rc.3-1_amd64.deb`; internal version `1.0.0~rc.3-1` is unchanged
+in meaning. Flatpak SPDX must match the exact exported bundle, not merely the
+pre-export staging tree.
 
 The release workflow builds Arch first, then Ubuntu 26.04 `.deb` and Flatpak
 from the same commit, tests their actual installations and emits separate
@@ -16,6 +24,12 @@ build without tags, attestations or releases. Signed RC tags produce drafts
 for owner testing, not published releases. The oldest build API requirement
 is Qt 6.9: [Qt's OAuth2 API](https://doc.qt.io/qt-6/qabstractoauth2.html)
 documents the token, refresh and scope functions used here as introduced in 6.9.
+
+For future prereleases, preflight GitHub-safe asset filenames and test a fresh
+download of every actual draft asset against its checksum/install instructions
+before handing off the release. Keep transport filenames separate from Debian
+version ordering; never repair a filename mismatch by changing signed bytes or
+rewriting an existing tag.
 
 The historical beta procedure below remains useful background. For current
 package filenames, download verification, upgrade and removal commands use

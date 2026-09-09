@@ -35,6 +35,11 @@
   </recommends>
   <content_rating type="oars-1.1" />
   <releases>
+    <release version="1.0.0-rc.3" date="2026-09-08" type="development">
+      <description>
+        <p>Replacement candidate correcting Flatpak bundle inventory and GitHub-safe Debian filenames. Exact downloaded artifacts require fresh verification; runtime logic and pending owner acceptance gates are unchanged.</p>
+      </description>
+    </release>
     <release version="1.0.0-rc.2" date="2026-09-08" type="development">
       <description>
         <p>Replacement paired release candidate after the widget RC1 tagger email could not be verified. Version metadata and documentation change only; runtime behavior and pending acceptance gates are unchanged.</p>
