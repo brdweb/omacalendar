@@ -20,7 +20,7 @@ option(OMACALENDAR_BUILD_TESTS "Build automated tests" ON)
 option(OMACALENDAR_ENABLE_WERROR "Treat compiler warnings as errors" OFF)
 option(OMACALENDAR_ENABLE_SANITIZERS
        "Enable AddressSanitizer and UndefinedBehaviorSanitizer" OFF)
-set(OMACALENDAR_VERSION_SUFFIX "-rc.5" CACHE STRING
+set(OMACALENDAR_VERSION_SUFFIX "" CACHE STRING
     "Suffix appended to the numeric project version (empty for a release)")
 set(OMACALENDAR_FULL_VERSION "${PROJECT_VERSION}${OMACALENDAR_VERSION_SUFFIX}")
 option(OMACALENDAR_REQUIRE_GOOGLE_OAUTH_CONFIG

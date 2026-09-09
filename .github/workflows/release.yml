@@ -9,7 +9,7 @@ on:
       version:
         description: Semantic version to build without creating a release
         required: true
-        default: 1.0.0-rc.5
+        default: 1.0.0
         type: string
 
 permissions:
@@ -265,8 +265,7 @@ jobs:
             --output="artifacts/omacalendar-${RELEASE_VERSION}-documentation.tar.gz" \
             HEAD README.md CHANGELOG.md LICENSE SECURITY.md SUPPORT.md docs
           cp docs/INSTALL.md artifacts/INSTALL.md
-          cp docs/OWNER_TESTING.md artifacts/OWNER_TESTING.md
-          cp "docs/releases/${RELEASE_VERSION}.md" artifacts/CANDIDATE-ACCEPTANCE.md
+          cp "docs/releases/${RELEASE_VERSION}.md" artifacts/RELEASE-NOTES.md
           cd artifacts
           mapfile -t assets < <(find . -maxdepth 1 -type f ! -name SHA256SUMS \
             -printf '%f\n' | LC_ALL=C sort)
@@ -302,7 +301,7 @@ jobs:
             fi
             gh release create "${GITHUB_REF_NAME}" artifacts/* \
               "${release_flags[@]}" --notes-file "docs/releases/${RELEASE_VERSION}.md" \
-              --title "OmaCalendar ${RELEASE_VERSION} - owner testing candidate"
+              --title "OmaCalendar ${RELEASE_VERSION}"
           fi
       - name: Verify draft download names and bytes
         if: github.event_name == 'push'

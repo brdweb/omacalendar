@@ -20,6 +20,8 @@ qt_add_qml_module(omacalendar
   URI OmaCalendar
   VERSION 1.0
   QML_FILES
+    qml/CalendarVisibility.js
+    qml/DateRange.js
     qml/Main.qml
     qml/Theme.qml
     qml/components/AppButton.qml

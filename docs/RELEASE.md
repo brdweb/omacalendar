@@ -6,10 +6,6 @@ checksums, an SPDX SBOM, and attestations accompany it. The release workflow
 does not produce a generic binary archive, Debian package, Flatpak bundle, or
 AUR recipe.
 
-RC5 predates this scope decision. Preserve its signed tag, draft, assets, and
-qualification records unchanged. Future candidates and stable releases follow
-this procedure.
-
 The optional `org.omacalendar.widget` Quickshell plugin has its own repository,
 version, qualification gates, tag, and publication schedule. It consumes the
 native daemon installed by the Arch package.
@@ -17,13 +13,11 @@ native daemon installed by the Arch package.
 ## 1. Close the qualification gates
 
 Stable `1.0.0` requires every applicable app criterion in [PLAN.md](PLAN.md),
-the complete [owner checklist](OWNER_TESTING.md), and no unresolved critical or
+[release validation](OWNER_TESTING.md), and no unresolved critical or
 high defect. Provider, desktop, widget, security, and exact-package evidence
 remain separate; one kind of pass does not imply another.
 
-Every public version also requires the historical Google installed-app OAuth
-credential recorded in commit `2414615` to remain revoked and the repository
-history decision to remain documented. Release notes, support scope, privacy
+Credential incidents must be resolved before publication. Release notes, support scope, privacy
 claims, screenshots, and package metadata must agree with shipped behavior.
 
 ## 2. Prepare metadata

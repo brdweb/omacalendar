@@ -391,6 +391,7 @@ Daemon::Daemon(QObject* parent)
   };
   const auto syncChanged = [this](const QString& accountId, const QJsonObject& status) {
     if (status.value(QStringLiteral("state")).toString() == QStringLiteral("idle")) {
+      m_reminders.syncCompleted(accountId);
       bool queuedLocalWrites = false;
       QString error;
       const int resolved =

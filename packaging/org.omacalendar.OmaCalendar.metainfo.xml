@@ -35,40 +35,8 @@
   </recommends>
   <content_rating type="oars-1.1" />
   <releases>
-    <release version="1.0.0-rc.5" date="2026-09-09" type="development">
-      <description>
-        <p>Build-environment replacement that obtains Flatpak tools only from Ubuntu's signed package sources. Runtime behavior is unchanged from RC4; exact artifacts and remaining provider and owner acceptance require fresh qualification.</p>
-      </description>
-    </release>
-    <release version="1.0.0-rc.4" date="2026-09-09" type="development">
-      <description>
-        <p>Replacement candidate with recurrence, CalDAV synchronization, conflict chronology, local date selection, and accessibility fixes found during expanded acceptance testing. Exact artifacts and complete provider and desktop acceptance require fresh qualification.</p>
-      </description>
-    </release>
-    <release version="1.0.0-rc.3" date="2026-09-08" type="development">
-      <description>
-        <p>Replacement candidate correcting Flatpak bundle inventory and GitHub-safe Debian filenames. Exact downloaded artifacts require fresh verification; runtime logic and pending owner acceptance gates are unchanged.</p>
-      </description>
-    </release>
-    <release version="1.0.0-rc.2" date="2026-09-08" type="development">
-      <description>
-        <p>Replacement paired release candidate after the widget RC1 tagger email could not be verified. Version metadata and documentation change only; runtime behavior and pending acceptance gates are unchanged.</p>
-      </description>
-    </release>
-    <release version="1.0.0-rc.1" date="2026-09-08" type="development">
-      <description>
-        <p>Release candidate with Arch, Debian, and Flatpak packages for acceptance testing. Stable owner and live-provider acceptance remain pending.</p>
-      </description>
-    </release>
-    <release version="1.0.0-beta.1" date="2026-09-06" type="development">
-      <description>
-        <p>Public beta for current Omarchy with an attested native package, Google Calendar authorization, and IPC 2 widget compatibility.</p>
-      </description>
-    </release>
-    <release version="1.0.0-alpha" date="2026-08-30" type="development">
-      <description>
-        <p>Unsupported evaluation prerelease for test calendars; stable provider and owner-acceptance gates remain open.</p>
-      </description>
+    <release version="1.0.0" date="2026-09-09" type="stable">
+      <description><p>First stable Arch release with calendar sets, offline calendars, invitations, reminders and the optional Omarchy widget.</p></description>
     </release>
   </releases>
 </component>

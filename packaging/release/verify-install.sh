@@ -21,7 +21,7 @@ required_paths=(
   usr/share/doc/OmaCalendar/docs/GETTING_STARTED.md
   usr/share/doc/OmaCalendar/docs/INSTALL.md
   usr/share/doc/OmaCalendar/docs/OWNER_TESTING.md
-  usr/share/doc/OmaCalendar/docs/STABLE_PLAN.md
+  usr/share/doc/OmaCalendar/docs/OWNER_TESTING.md
   usr/share/doc/OmaCalendar/docs/GOOGLE_TESTING.md
   usr/share/doc/OmaCalendar/docs/RELEASE.md
 )

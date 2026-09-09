@@ -18,7 +18,7 @@ WIDGETCTL = REPOSITORY / "scripts" / "omacalendar-widgetctl"
 PLUGIN_ID = "org.omacalendar.widget"
 CLOCK_ID = "omarchy.clock"
 OFFICIAL_SOURCE = "https://github.com/brdweb/omacalendar-widget.git"
-OFFICIAL_REF = "v0.1.0-beta.1"
+OFFICIAL_REF = "v0.1.0"
 VERIFIED_COMMIT = "a" * 40
 
 
@@ -107,7 +107,7 @@ elif name == "git":
             source_ref = arguments[arguments.index("--branch") + 1]
         except (ValueError, IndexError):
             fail("clone did not specify an explicit branch or tag")
-        if source_ref != "v0.1.0-beta.1":
+        if source_ref != "v0.1.0":
             fail("unexpected source ref: " + source_ref)
         source = Path(os.environ["FAKE_WIDGET_SOURCE"])
         destination = Path(arguments[-1])

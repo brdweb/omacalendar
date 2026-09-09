@@ -101,8 +101,7 @@ visible blocked/conflict state, invalid credentials result in
 cached resources after a successful full rebuild.
 
 The September 9 RC4 development evidence includes
-[15 real Radicale/HTTPS ICS scenario groups](testing/provider-rc4.md) and
-[8 baseline plus 10 expanded Nextcloud groups](testing/nextcloud-rc4.md).
+Radicale/HTTPS ICS and Nextcloud integration scenarios.
 Those records identify exact binary hashes, tested capabilities and remaining
 limits. Fastmail still needs a controlled hosted account. Repeat applicable
 checks against the final downloaded candidate; development results do not
