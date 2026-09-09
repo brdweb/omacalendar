@@ -61,6 +61,8 @@ class Daemon final : public QObject {
                                              ipc::Error* error);
   [[nodiscard]] QJsonValue onCalendarsUpdatePreferences(const QJsonObject& params,
                                                         ipc::Error* error);
+  [[nodiscard]] QJsonValue onCalendarsProbeThisAndFuture(const QJsonObject& params,
+                                                         ipc::Error* error);
   [[nodiscard]] QJsonValue onCalendarSetsList(const QJsonObject& params,
                                               ipc::Error* error);
   [[nodiscard]] QJsonValue onCalendarSetsUpsert(const QJsonObject& params,

@@ -106,10 +106,11 @@ void parsePrivilegeSet(QXmlStreamReader& reader, PropertyValues* properties) {
       if (reader.namespaceUri() == kDavNamespace &&
           (reader.name() == QLatin1StringView("write") ||
            reader.name() == QLatin1StringView("write-content") ||
-           reader.name() == QLatin1StringView("write-properties") ||
            reader.name() == QLatin1StringView("bind") ||
            reader.name() == QLatin1StringView("unbind") ||
            reader.name() == QLatin1StringView("all"))) {
+        // Calendar properties (for example a sharee's display name/color) can
+        // be writable even when the server forbids every event mutation.
         properties->canWrite = true;
       }
       if (reader.namespaceUri() == kDavNamespace &&

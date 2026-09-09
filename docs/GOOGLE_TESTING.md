@@ -1,5 +1,10 @@
 # Google Calendar credential test guide
 
+For the packaged candidate, use the verified downloads in [INSTALL.md](INSTALL.md)
+and continue at **3. Connect the test account**. Release binaries already
+contain the public desktop client configuration; test-account passwords and
+MFA are entered directly in Google's browser flow.
+
 This guide is for the pre-release owner test. Source builds do not contain an
 OAuth credential. Paste the client ID from a Google Desktop OAuth client in a
 test project, or provide `OMACALENDAR_GOOGLE_CLIENT_ID` and the matching
@@ -25,7 +30,8 @@ calendar database.
 
 Google approved OmaCalendar's production OAuth branding and requested Calendar
 scopes; Branding and Data Access both showed verified status when checked on
-2026-09-06. Before the beta is accepted, a new external account that was never
+2026-09-06. The approval email was checked again on 2026-09-09. Before the
+replacement candidate is accepted, a new external account that was never
 on the test-user allowlist must still complete code exchange, calendar
 discovery, one event write, Secret Service token persistence, and app/daemon
 restart without an unverified-app bypass.

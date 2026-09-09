@@ -1,14 +1,19 @@
 # Candidate testing for 2026-09-09
 
-Test app `1.0.0-rc.3` and widget `0.1.0-rc.3`. These are candidate drafts;
+Agent-executed results and reproduced candidate failures are recorded in
+[the September 9 acceptance report](ACCEPTANCE_2026-09-09.md). Its scoped
+passes supplement this checklist; the original RC3 candidate remains failed,
+and unperformed portions of each row remain pending.
+
+Test app `1.0.0-rc.4` and widget `0.1.0-rc.3`. These are candidate drafts;
 the last public release remains beta until acceptance is complete. Use the
 [installation guide](INSTALL.md) and the `SHA256SUMS` shipped with the draft.
 Record the app/widget commit, package filename and hash, OS/desktop version,
 provider/server version, and pass/fail/unavailable for each row. Do not include
 credentials, private calendar names, personal events, or provider URLs in reports.
 
-Use fresh RC3 downloads. RC2 was superseded after its Flatpak inventory and
-Debian asset-name verification failed; earlier receipts do not qualify RC3.
+Use fresh RC4 downloads when its replacement draft is available. RC3 failed
+expanded runtime acceptance; older receipts do not qualify the new artifacts.
 
 ## Before starting
 
@@ -21,7 +26,7 @@ Debian asset-name verification failed; earlier receipts do not qualify RC3.
 3. Install the native Arch candidate on Omarchy for app/widget tests. Test the
    `.deb` package on Ubuntu 26.04. Test Flatpak separately: it has its own profile,
    credentials, runtime, and daemon; the native widget does not use that profile.
-4. Confirm the reported app version is `1.0.0-rc.3` and widget version is
+4. Confirm the reported app version is `1.0.0-rc.4` and widget version is
    `0.1.0-rc.3`. Record the exact downloaded hashes before changing anything.
 
 ## Native installation and upgrade

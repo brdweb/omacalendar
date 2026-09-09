@@ -33,6 +33,7 @@ class CalDavSync final : public Provider {
                          QString* errorMessage = nullptr);
   bool updateCredentials(const QString& accountId, const QString& username,
                          const QString& password, QString* errorMessage = nullptr);
+  bool probeThisAndFuture(const QString& calendarId, QString* errorMessage = nullptr);
 
   [[nodiscard]] ProviderCapabilities capabilities() const override;
   void syncAll() override;
@@ -71,6 +72,7 @@ class CalDavSync final : public Provider {
   struct SyncJob;
   struct FutureCapabilityProbe;
 
+  bool refreshCachedTimeKinds(const QString& accountId, QString* errorMessage);
   void loadCredentialsAsync(const Account& account);
   void storeCredentialsAsync(const Account& account, const QString& password);
   void handleCredentialFailure(const QString& accountId, const QString& message);

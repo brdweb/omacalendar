@@ -1,4 +1,5 @@
 #include <QFileInfo>
+#include <QJSEngine>
 #include <QProcess>
 #include <QScopeGuard>
 #include <QSignalSpy>
@@ -7,6 +8,7 @@
 #include <QTextStream>
 #include <QTimeZone>
 #include <QtTest/QtTest>
+#include <ctime>
 
 #include "app/appcontroller.h"
 #include "app/applicationinstance.h"
@@ -20,9 +22,12 @@ class AppControllerTest final : public QObject {
 
  private slots:
   void initTestCase();
+  void selectedDateKeepsLocalCalendarDate_data();
+  void selectedDateKeepsLocalCalendarDate();
   void wallTimeConversionRejectsDstGap();
   void wallTimeConversionResolvesDstOverlapToStandardTime();
   void wallTimeConversionRejectsInvalidInput();
+  void localTimeConversionsMatchDesktopTime();
   void exposesSystemTimeZoneChoices();
   void freshPreferencesDefaultToGenericNotifications();
   void browserGoogleFlowRejectsEmptyClientId();
@@ -48,6 +53,55 @@ void AppControllerTest::initTestCase() {
   qputenv("XDG_CONFIG_HOME", m_xdgRoot.filePath(QStringLiteral("config")).toUtf8());
   qputenv("XDG_RUNTIME_DIR", m_xdgRoot.filePath(QStringLiteral("runtime")).toUtf8());
   qputenv("OMACALENDAR_DISABLE_DAEMON_AUTOSTART", "1");
+}
+
+void AppControllerTest::selectedDateKeepsLocalCalendarDate_data() {
+  QTest::addColumn<QByteArray>("zone");
+  for (const auto& zone : {"UTC", "America/New_York", "America/Los_Angeles",
+                           "Europe/Berlin", "Pacific/Kiritimati"}) {
+    QTest::newRow(zone) << QByteArray(zone);
+  }
+}
+
+void AppControllerTest::selectedDateKeepsLocalCalendarDate() {
+  QFETCH(QByteArray, zone);
+  const auto originalZone = qgetenv("TZ");
+  const auto restore = qScopeGuard([&] {
+    originalZone.isNull() ? qunsetenv("TZ") : qputenv("TZ", originalZone);
+    tzset();
+  });
+  qputenv("TZ", zone);
+  tzset();
+  AppController controller;
+  QJSEngine engine;
+  QJSEngine::setObjectOwnership(&controller, QJSEngine::CppOwnership);
+  engine.globalObject().setProperty(QStringLiteral("controller"),
+                                    engine.newQObject(&controller));
+  // Exercise the real native property conversion used by QML Date getters,
+  // including navigation across year boundaries and both US DST transitions.
+  for (const auto& date :
+       {QDate(2026, 9, 9), QDate(2027, 1, 1), QDate(2026, 3, 8), QDate(2026, 11, 1)}) {
+    for (const bool propertyWrite : {false, true}) {
+      const auto value = QStringLiteral("new Date(%1, %2, %3)")
+                             .arg(date.year())
+                             .arg(date.month() - 1)
+                             .arg(date.day());
+      const auto script =
+          propertyWrite ? QStringLiteral("controller.selectedDate = %1").arg(value)
+                        : QStringLiteral("controller.setSelectedDate(%1)").arg(value);
+      const auto result = engine.evaluate(script);
+      QVERIFY2(!result.isError(), qPrintable(result.toString()));
+      QCOMPARE(engine.evaluate(QStringLiteral("controller.selectedDate.getFullYear()"))
+                   .toInt(),
+               date.year());
+      QCOMPARE(
+          engine.evaluate(QStringLiteral("controller.selectedDate.getMonth()")).toInt(),
+          date.month() - 1);
+      QCOMPARE(
+          engine.evaluate(QStringLiteral("controller.selectedDate.getDate()")).toInt(),
+          date.day());
+    }
+  }
 }
 
 void AppControllerTest::nativeAndFlatpakInstancesAreIndependent() {
@@ -154,6 +208,25 @@ void AppControllerTest::wallTimeConversionRejectsInvalidInput() {
   QCOMPARE(
       controller.utcToWallTime(QStringLiteral("not-a-date"), QStringLiteral("UTC")),
       QString());
+}
+
+void AppControllerTest::localTimeConversionsMatchDesktopTime() {
+  AppController controller;
+  // Do not force TZ: this also covers minimal /etc environments where the
+  // named system-zone fallback can disagree with Qt's actual local clock.
+  for (const auto& date : {QDate(2030, 1, 15), QDate(2030, 7, 15)}) {
+    const QDateTime local(date, QTime(9, 30), QTimeZone::LocalTime);
+    const QString utc = local.toUTC().toString(Qt::ISODateWithMs);
+    QCOMPARE(controller.wallTimeToUtc(date.toString(Qt::ISODate),
+                                      QStringLiteral("09:30"), {}),
+             utc);
+    QCOMPARE(controller.utcToWallTime(utc, {}),
+             local.toString(QStringLiteral("yyyy-MM-dd'T'HH:mm:ss.zzz")));
+    // An explicit named zone is independent of the desktop's local clock.
+    QCOMPARE(controller.wallTimeToUtc(date.toString(Qt::ISODate),
+                                      QStringLiteral("09:30"), QStringLiteral("UTC")),
+             date.toString(Qt::ISODate) + QStringLiteral("T09:30:00.000Z"));
+  }
 }
 
 void AppControllerTest::exposesSystemTimeZoneChoices() {

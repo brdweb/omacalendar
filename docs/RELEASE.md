@@ -1,17 +1,17 @@
 # Release procedure
 
-For `1.0.0-rc.3`, follow [STABLE_PLAN.md](STABLE_PLAN.md). The owner requested
-draft packages for testing on 2026-09-09; stable acceptance remains pending.
-`verify-release.sh --draft-candidate v1.0.0-rc.3` verifies the signed, clean RC
+For `1.0.0-rc.4`, follow [STABLE_PLAN.md](STABLE_PLAN.md). On 2026-09-09 the owner
+authorized committing the fixes and continuing through qualification and
+release; remaining technical acceptance is still required.
+`verify-release.sh --draft-candidate v1.0.0-rc.4` verifies the signed, clean RC
 tree, metadata, draft-only disposition and scoped tag authorization. This mode
 rejects stable/beta versions and never qualifies public acceptance. Ordinary
 `verify-release.sh TAG` retains every strict public gate.
 
-RC3 supersedes RC2's Flatpak inventory mismatch (61 locale files listed in
-the staged SPDX but absent from the bundle) and its GitHub-normalized Debian
-filename. Preserve earlier tags, drafts, and records; verify rebuilt RC3 assets
+RC4 replaces runtime failures found during expanded RC3 acceptance. Preserve
+earlier tags, drafts, and records; qualify the freshly built RC4 assets
 independently. The Debian transport filename is
-`omacalendar_1.0.0-rc.3-1_amd64.deb`; internal version `1.0.0~rc.3-1` is unchanged
+`omacalendar_1.0.0-rc.4-1_amd64.deb`; internal version `1.0.0~rc.4-1` is unchanged
 in meaning. Flatpak SPDX must match the exact exported bundle, not merely the
 pre-export staging tree.
 

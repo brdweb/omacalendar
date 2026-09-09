@@ -106,8 +106,17 @@ QString occurrenceKey(const Event& event) {
 
 QString recurrenceKey(const Event& exception, const Event& master) {
   const TimeKind timeKind = master.allDay ? TimeKind::AllDay : master.timeKind;
-  const QString canonical = canonicalRecurrenceIdentity(
-      exception.recurrenceId, master.allDay, timeKind, master.startTimeZone);
+  QString canonical = canonicalRecurrenceIdentity(exception.recurrenceId, master.allDay,
+                                                  timeKind, master.startTimeZone);
+  if (timeKind == TimeKind::Floating &&
+      canonical.startsWith(QStringLiteral("F:offset:"))) {
+    // Generated occurrences have historically exposed UTC recurrence IDs,
+    // including for floating series. Accept those returned IDs as instants
+    // when finding their exception slot, while keeping true floating wall
+    // identities distinct in the general canonical identity comparison.
+    canonical = canonicalRecurrenceIdentity(exception.recurrenceId, false,
+                                            TimeKind::Zoned, QStringLiteral("UTC"));
+  }
   if (canonical.startsWith(QStringLiteral("D:"))) {
     return canonical;
   }
@@ -125,7 +134,7 @@ QString recurrenceKey(const Event& exception, const Event& master) {
   if (!wall.isValid()) {
     return {};
   }
-  const QDateTime local(wall.date(), wall.time(), QTimeZone::systemTimeZone());
+  const QDateTime local(wall.date(), wall.time(), QTimeZone::LocalTime);
   return QStringLiteral("T:") + QString::number(local.toMSecsSinceEpoch());
 }
 
@@ -255,18 +264,32 @@ icaltimetype dateTimeValue(const QDateTime& utc, const QString& timeZone) {
         static_cast<icaltime_t>(utc.toUTC().toSecsSinceEpoch()), false, zone);
   }
   if (timeZone.isEmpty()) {
-    // Floating RFC 5545 values follow the desktop's current zone. Keep the
-    // canonical field empty, but give libical the system zone while iterating
-    // so local wall time remains stable across DST boundaries.
-    const QString systemZone = QString::fromUtf8(QTimeZone::systemTimeZoneId());
-    if (icaltimezone* zone = zoneFor(systemZone)) {
-      return icaltime_from_timet_with_zone(
-          static_cast<icaltime_t>(utc.toUTC().toSecsSinceEpoch()), false, zone);
-    }
+    // Keep floating values as wall times while libical iterates. Qt's local
+    // time conversion also works when a minimal system has no named zone.
+    const QByteArray wall =
+        utc.toLocalTime().toString(QStringLiteral("yyyyMMdd'T'HHmmss")).toLatin1();
+    return icaltime_from_string(wall.constData());
   }
   return icaltime_from_timet_with_zone(
       static_cast<icaltime_t>(utc.toUTC().toSecsSinceEpoch()), false,
       icaltimezone_get_utc_timezone());
+}
+
+icaltimetype floatingBoundaryValue(const QDateTime& utc, bool upper) {
+  const QDateTime local = utc.toLocalTime();
+  // Wall time is not monotonic across a clock change. Include the adjacent
+  // offset spread so a repeated hour or a normalized gap cannot fall outside
+  // the iterator window. Exact UTC overlap filtering below removes the margin.
+  const int before = utc.addDays(-1).toLocalTime().offsetFromUtc();
+  const int after = utc.addDays(1).toLocalTime().offsetFromUtc();
+  const int offset = local.offsetFromUtc();
+  const int margin =
+      std::max({before, offset, after}) - std::min({before, offset, after});
+  const QDateTime wall = QDateTime(local.date(), local.time(), QTimeZone::UTC)
+                             .addSecs(upper ? margin : -margin);
+  const QByteArray value =
+      wall.toString(QStringLiteral("yyyyMMdd'T'HHmmss")).toLatin1();
+  return icaltime_from_string(value.constData());
 }
 
 icalproperty* dateTimeProperty(const icalproperty_kind kind, const QDateTime& utc,
@@ -390,12 +413,15 @@ QDateTime occurrenceUtc(const icaltimetype& value, const Event& master) {
     return {};
   }
   const icaltimezone* valueZone = icaltime_get_timezone(value);
+  if (valueZone == nullptr && master.startTimeZone.isEmpty()) {
+    return QDateTime(QDate(value.year, value.month, value.day),
+                     QTime(value.hour, value.minute, value.second),
+                     QTimeZone::LocalTime)
+        .toUTC();
+  }
   icaltimezone* fallback = nullptr;
   if (valueZone == nullptr) {
-    const QString zoneName = master.startTimeZone.isEmpty()
-                                 ? QString::fromUtf8(QTimeZone::systemTimeZoneId())
-                                 : master.startTimeZone;
-    fallback = zoneFor(zoneName);
+    fallback = zoneFor(master.startTimeZone);
   }
   if (valueZone == nullptr && fallback == nullptr) {
     fallback = icaltimezone_get_utc_timezone();
@@ -547,13 +573,13 @@ QList<Event> expandMaster(const Event& master, const QDateTime& startUtc,
     duration = std::max<qint64>(0, master.startUtc.secsTo(master.endUtc));
   }
   const QDateTime scanStart = startUtc.addSecs(-duration);
-  const icaltimetype from = icaltime_from_timet_with_zone(
-      static_cast<icaltime_t>(scanStart.toSecsSinceEpoch()), false,
-      icaltimezone_get_utc_timezone());
-  const icaltimetype until =
-      icaltime_from_timet_with_zone(static_cast<icaltime_t>(endUtc.toSecsSinceEpoch()),
-                                    false, icaltimezone_get_utc_timezone());
   const icaltimetype dtstart = icalcomponent_get_dtstart(component.event);
+  const bool floating = !master.allDay && master.startTimeZone.isEmpty() &&
+                        icaltime_get_timezone(dtstart) == nullptr;
+  const icaltimetype from = floating ? floatingBoundaryValue(scanStart, false)
+                                     : dateTimeValue(scanStart, QStringLiteral("UTC"));
+  const icaltimetype until = floating ? floatingBoundaryValue(endUtc, true)
+                                      : dateTimeValue(endUtc, QStringLiteral("UTC"));
 
   QList<Event> excluded;
   for (icalproperty* property =

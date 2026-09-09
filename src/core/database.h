@@ -1,11 +1,13 @@
 #pragma once
 
+#include <QByteArray>
 #include <QHash>
 #include <QJsonValue>
 #include <QList>
 #include <QSqlDatabase>
 #include <QSqlQuery>
 #include <QString>
+#include <functional>
 
 #include "core/domain.h"
 
@@ -286,6 +288,16 @@ class Database final {
                         QString* errorMessage = nullptr);
   bool clearProviderState(const QString& accountId, const QString& calendarId = {},
                           QString* errorMessage = nullptr);
+
+  // Reclassifies legacy CalDAV time metadata from retained provider source,
+  // without replacing local edits. Rows, active mutation/conflict snapshots,
+  // derived instances and the per-profile version checkpoint commit together.
+  using CalDavTimeKindLookup = std::function<bool(const Event&, TimeKind*, QString*)>;
+  using CalDavTimeKindLookupBuilder =
+      std::function<bool(const QByteArray&, CalDavTimeKindLookup*, QString*)>;
+  bool refreshCalDavTimeKinds(const QString& accountId,
+                              const CalDavTimeKindLookupBuilder& buildLookup,
+                              QString* errorMessage = nullptr);
 
   bool upsertIcsSubscription(const IcsSubscription& subscription,
                              QString* errorMessage = nullptr);

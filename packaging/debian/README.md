@@ -26,13 +26,13 @@ docker run --rm \
   -v "$PWD:/source:ro" -v "$PWD/artifacts-debian:/output" \
   -e SOURCE_DATE_EPOCH="$(git show -s --format=%ct HEAD)" \
   omacalendar-debian-builder \
-  bash packaging/release/build-deb-release.sh 1.0.0-rc.3 /output
+  bash packaging/release/build-deb-release.sh 1.0.0-rc.4 /output
 ```
 
 Replace the example version with the exact version being built. Canonical SemVer
 prereleases retain Debian's `~` ordering in the package's internal `Version`
-field: `1.0.0-rc.3` becomes `1.0.0~rc.3-1`. The download filename is separately
-`omacalendar_1.0.0-rc.3-1_amd64.deb`, using GitHub-safe characters because
+field: `1.0.0-rc.4` becomes `1.0.0~rc.4-1`. The download filename is separately
+`omacalendar_1.0.0-rc.4-1_amd64.deb`, using GitHub-safe characters because
 GitHub normalizes tildes in asset names. Stable `1.0.0` still produces
 `omacalendar_1.0.0-1_amd64.deb` with internal version `1.0.0-1`. Package-manager
 upgrades compare internal versions, not filenames. The build runs the automated suite and
@@ -55,7 +55,7 @@ docker run --rm \
   -v "$PWD:/source:ro" -v "$PWD/artifacts-debian:/packages:ro" \
   ubuntu:26.04 \
   bash /source/packaging/release/test-deb-package.sh \
-    1.0.0-rc.3 /packages/omacalendar_1.0.0-rc.3-1_amd64.deb
+    1.0.0-rc.4 /packages/omacalendar_1.0.0-rc.4-1_amd64.deb
 ```
 
 This installs with apt, verifies dependencies and package contents, runs the
@@ -67,14 +67,14 @@ systemd user activation in a complete desktop session.
 
 ## Install, update, and remove
 
-Follow the [candidate download and verification guide](https://github.com/brdweb/omacalendar/blob/v1.0.0-rc.3/docs/INSTALL.md)
+Follow the [candidate download and verification guide](https://github.com/brdweb/omacalendar/blob/v1.0.0-rc.4/docs/INSTALL.md)
 to obtain the `.deb` and `SHA256SUMS` from the same GitHub release. In the download
 directory, verify the checksum for the exact filename, then install it:
 
 ```bash
 set -euo pipefail
-grep ' omacalendar_1.0.0-rc.3-1_amd64.deb$' SHA256SUMS | sha256sum --check
-sudo apt install ./omacalendar_1.0.0-rc.3-1_amd64.deb
+grep ' omacalendar_1.0.0-rc.4-1_amd64.deb$' SHA256SUMS | sha256sum --check
+sudo apt install ./omacalendar_1.0.0-rc.4-1_amd64.deb
 systemctl --user daemon-reload
 systemctl --user enable --now omacalendard.socket
 systemctl --user try-restart omacalendard.service
@@ -87,7 +87,7 @@ not already supply one. On KDE, enable the wallet's Secret Service integration.
 Download and install a newer release `.deb` in the same way to update; installing
 this file does not add an apt repository or automatic update channel. Back up
 your calendar profile before upgrading as described in
-[the backup and recovery guide](https://github.com/brdweb/omacalendar/blob/v1.0.0-rc.3/docs/BACKUP_AND_RECOVERY.md).
+[the backup and recovery guide](https://github.com/brdweb/omacalendar/blob/v1.0.0-rc.4/docs/BACKUP_AND_RECOVERY.md).
 
 ```bash
 systemctl --user disable --now omacalendard.socket
@@ -97,7 +97,7 @@ systemctl --user daemon-reload
 ```
 
 Removing or purging the package retains user calendar data and stored provider
-credentials. See [the uninstall guide](https://github.com/brdweb/omacalendar/blob/v1.0.0-rc.3/docs/UNINSTALL.md) for explicit
+credentials. See [the uninstall guide](https://github.com/brdweb/omacalendar/blob/v1.0.0-rc.4/docs/UNINSTALL.md) for explicit
 profile and credential removal. Full application documentation is installed
 under `/usr/share/doc/OmaCalendar/docs/`; the Debian package and bundled library
 license notices are under `/usr/share/doc/omacalendar/`.

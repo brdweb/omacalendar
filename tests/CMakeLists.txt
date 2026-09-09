@@ -158,6 +158,7 @@ target_link_libraries(omacalendar-appcontroller-test
     Qt6::Core
     Qt6::Gui
     Qt6::Network
+    Qt6::Qml
     omacalendar_core
     omacalendar_ipc
 )

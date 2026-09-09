@@ -56,7 +56,7 @@ QString remoteResourceHref(const QString& remoteId) {
 }
 
 bool sameRecurrenceIdentity(const Event& first, const Event& second) {
-  return recurrenceIdentityEqual(first, second);
+  return ICalendarCodec::sameRecurrenceIdentity(first, second);
 }
 
 QUrl eventResourceUrl(const QUrl& calendarUrl, const Event& event) {
@@ -217,7 +217,7 @@ bool attendeeMutation(const Event& event) {
     return !event.attendees.isEmpty();
   }
   for (const Event& retained : parsed.events) {
-    if (retained.uid == event.uid && recurrenceIdentityEqual(retained, event)) {
+    if (retained.uid == event.uid && sameRecurrenceIdentity(retained, event)) {
       return canonicalAttendees(retained.attendees) !=
              canonicalAttendees(event.attendees);
     }
@@ -534,6 +534,136 @@ void CalDavSync::handleCredentialFailure(const QString& accountId,
   emit syncStatusChanged(accountId, value);
 }
 
+bool CalDavSync::refreshCachedTimeKinds(const QString& accountId,
+                                        QString* errorMessage) {
+  return m_database->refreshCalDavTimeKinds(
+      accountId,
+      [](const QByteArray& payload, Database::CalDavTimeKindLookup* lookup,
+         QString* error) {
+        const ICalendarParseResult parsed = ICalendarCodec::parse(payload);
+        if (!parsed.ok()) {
+          if (error != nullptr) {
+            *error =
+                QStringLiteral("Could not refresh retained CalDAV time metadata: ") +
+                parsed.error.message;
+          }
+          return false;
+        }
+
+        struct RecurrenceContext final {
+          Event semantics;
+          QHash<QString, qsizetype> canonicalRecurrences;
+        };
+        struct SeriesIndex final {
+          qsizetype fallbackMasterIndex = -1;
+          QList<Event> sources;
+          QHash<QString, qsizetype> exactRecurrences;
+          QList<RecurrenceContext> contexts;
+          QHash<QString, qsizetype> contextPositions;
+        };
+        QHash<QString, SeriesIndex> seriesByUid;
+        for (const Event& source : parsed.events) {
+          SeriesIndex& series = seriesByUid[source.uid];
+          const qsizetype index = series.sources.size();
+          series.sources.append(source);
+          if (source.recurrenceId.isEmpty()) {
+            series.fallbackMasterIndex = index;
+          }
+        }
+        constexpr qsizetype kMaximumRecurrenceContexts = 32;
+        for (auto series = seriesByUid.begin(); series != seriesByUid.end(); ++series) {
+          for (qsizetype index = 0; index < series->sources.size(); ++index) {
+            const Event& source = series->sources.at(index);
+            series->exactRecurrences.tryInsert(source.recurrenceId.trimmed(), index);
+            const QString contextIdentity =
+                timeKindToString(source.timeKind) + QLatin1Char('\n') +
+                source.startTimeZone + QLatin1Char('\n') +
+                (source.allDay ? QStringLiteral("all-day") : QStringLiteral("timed"));
+            auto position = series->contextPositions.constFind(contextIdentity);
+            if (position == series->contextPositions.constEnd()) {
+              if (series->contexts.size() >= kMaximumRecurrenceContexts) {
+                // Provider-native identities still use the exact index. Bound
+                // presentation-form probing for malformed mixed-semantics series.
+                continue;
+              }
+              const qsizetype next = series->contexts.size();
+              RecurrenceContext context;
+              context.semantics = source;
+              series->contexts.append(std::move(context));
+              series->contextPositions.insert(contextIdentity, next);
+              position = series->contextPositions.constFind(contextIdentity);
+            }
+            RecurrenceContext& context = series->contexts[*position];
+            context.canonicalRecurrences.tryInsert(
+                ICalendarCodec::recurrenceIdentityKey(source, context.semantics),
+                index);
+          }
+          series->contextPositions.clear();
+        }
+
+        *lookup = [seriesByUid = std::move(seriesByUid)](
+                      const Event& legacy, TimeKind* kind, QString* lookupError) {
+          const auto found = seriesByUid.constFind(legacy.uid);
+          if (found == seriesByUid.constEnd()) {
+            if (lookupError != nullptr) {
+              *lookupError = QStringLiteral(
+                  "Retained CalDAV source did not identify cached event metadata");
+            }
+            return false;
+          }
+          const SeriesIndex& series = *found;
+          const auto matches = [&legacy, &series](const qsizetype index) {
+            const Event& source = series.sources.at(index);
+            Event reference = legacy;
+            reference.timeKind = source.timeKind;
+            reference.startTimeZone = source.startTimeZone;
+            return ICalendarCodec::sameRecurrenceIdentity(reference, source);
+          };
+          qsizetype matchIndex = -1;
+          const auto considerExact = [&series, &matches,
+                                      &matchIndex](const QString& recurrence) {
+            const auto exact = series.exactRecurrences.constFind(recurrence.trimmed());
+            if (exact != series.exactRecurrences.constEnd() &&
+                (matchIndex < 0 || *exact < matchIndex) && matches(*exact)) {
+              matchIndex = *exact;
+            }
+          };
+          considerExact(legacy.recurrenceId);
+          const qsizetype fragment = legacy.remoteId.indexOf(QLatin1Char('#'));
+          if (fragment >= 0) {
+            considerExact(legacy.remoteId.sliced(fragment + 1));
+          }
+          for (const RecurrenceContext& context : series.contexts) {
+            const QString canonical =
+                ICalendarCodec::recurrenceIdentityKey(legacy, context.semantics);
+            const auto equivalent = context.canonicalRecurrences.constFind(canonical);
+            if (equivalent != context.canonicalRecurrences.constEnd() &&
+                (matchIndex < 0 || *equivalent < matchIndex) && matches(*equivalent)) {
+              matchIndex = *equivalent;
+            }
+          }
+          if (matchIndex >= 0) {
+            *kind = series.sources.at(matchIndex).timeKind;
+            return true;
+          }
+          // An unsent detached edit is absent from the acknowledged resource;
+          // its series master still supplies the original time semantics.
+          if (series.fallbackMasterIndex >= 0 && legacy.dirty &&
+              !legacy.recurrenceId.isEmpty()) {
+            *kind = series.sources.at(series.fallbackMasterIndex).timeKind;
+            return true;
+          }
+          if (lookupError != nullptr) {
+            *lookupError = QStringLiteral(
+                "Retained CalDAV source did not identify cached event metadata");
+          }
+          return false;
+        };
+        return true;
+      },
+      errorMessage);
+}
+
 bool CalDavSync::restoreAccounts(QString* errorMessage) {
   QString databaseError;
   const QList<Account> accounts = m_database->accounts(&databaseError);
@@ -543,18 +673,42 @@ bool CalDavSync::restoreAccounts(QString* errorMessage) {
     }
     return false;
   }
+  bool restoredAll = true;
   for (const Account& account : accounts) {
-    if (account.provider != ProviderKind::CalDav || !account.enabled) {
+    if (account.provider != ProviderKind::CalDav) {
       continue;
     }
-    syncAccount(account.id);
+    // This local refresh runs even offline or for disabled accounts. It uses
+    // retained source before ctag/etag optimizations or queued writes can skip it.
+    QString refreshError;
+    if (!refreshCachedTimeKinds(account.id, &refreshError)) {
+      if (restoredAll && errorMessage != nullptr) {
+        *errorMessage = refreshError;
+      }
+      restoredAll = false;
+      const QJsonObject value =
+          statusObject(QStringLiteral("error"),
+                       QStringLiteral("cache_metadata_refresh_failed"), refreshError);
+      m_status.insert(account.id, value);
+      emit syncStatusChanged(account.id, value);
+      continue;
+    }
+    if (account.enabled) syncAccount(account.id);
   }
-  return true;
+  return restoredAll;
 }
 
 bool CalDavSync::disconnectAccount(const QString& accountId,
                                    const bool removeCachedData, QString* errorMessage) {
   if (SyncJob* job = m_jobs.value(accountId, nullptr); job != nullptr) {
+    if (job->futureProbeInProgress) {
+      if (errorMessage != nullptr) {
+        *errorMessage = QStringLiteral(
+            "Wait for the calendar support check to finish cleaning up, then "
+            "disconnect");
+      }
+      return false;
+    }
     // A QNetworkReply may still own a callback that references this job. Keep
     // the small job object alive until that callback returns, but prevent it
     // from touching an account that is being removed.
@@ -618,6 +772,14 @@ bool CalDavSync::updateCredentials(const QString& accountId, const QString& user
     return false;
   }
   if (SyncJob* job = m_jobs.value(accountId, nullptr); job != nullptr) {
+    if (job->futureProbeInProgress) {
+      if (errorMessage != nullptr) {
+        *errorMessage = QStringLiteral(
+            "Wait for the calendar support check to finish cleaning up, then update "
+            "credentials");
+      }
+      return false;
+    }
     job->cancelled = true;
   }
   m_client.forgetCredentials(accountId);
@@ -630,6 +792,51 @@ bool CalDavSync::updateCredentials(const QString& accountId, const QString& user
   }
   emit accountChanged(accountId);
   storeCredentialsAsync(account, password);
+  return true;
+}
+
+bool CalDavSync::probeThisAndFuture(const QString& calendarId, QString* errorMessage) {
+  const Calendar calendar = m_database->calendar(calendarId, errorMessage);
+  const Account account = m_database->account(calendar.accountId, errorMessage);
+  if (calendar.id.isEmpty() || account.provider != ProviderKind::CalDav ||
+      calendar.readOnly || !calendar.enabled || !account.enabled) {
+    if (errorMessage != nullptr) {
+      *errorMessage = QStringLiteral("Choose an enabled, writable CalDAV calendar");
+    }
+    return false;
+  }
+  if (calendar.capabilities.value(QStringLiteral("thisAndFutureProven")).toBool()) {
+    return true;
+  }
+  if (m_jobs.contains(account.id) || !m_loadedCredentials.contains(account.id)) {
+    if (errorMessage != nullptr) {
+      *errorMessage = QStringLiteral(
+          "Wait for this account to finish syncing, then check support again");
+    }
+    return false;
+  }
+  const QUrl calendarUrl = QUrl(account.endpoint).resolved(QUrl(calendar.href));
+  if (calendar.href.isEmpty() || !calendarUrl.isValid()) {
+    if (errorMessage != nullptr) {
+      *errorMessage = QStringLiteral("Sync this calendar before checking support");
+    }
+    return false;
+  }
+  auto* job = new SyncJob;
+  job->resourceBudget = m_resourceBudgetLimits;
+  job->accountId = account.id;
+  job->account = account;
+  job->endpoint = QUrl(account.endpoint);
+  job->futureProbeInProgress = true;
+  m_jobs.insert(account.id, job);
+  const QJsonObject value = statusObject(QStringLiteral("syncing"));
+  m_status.insert(account.id, value);
+  emit syncStatusChanged(account.id, value);
+  // A stable, daemon-owned identity lets a retry remove a probe left behind
+  // by an interrupted process. No user event or outbox mutation is created.
+  OutboxItem standalone;
+  standalone.idempotencyKey = QStringLiteral("explicit-this-and-future-check");
+  startFutureCapabilityProbe(job, standalone, calendar, calendarUrl);
   return true;
 }
 
@@ -654,6 +861,14 @@ void CalDavSync::syncAccount(const QString& accountId) {
   const Account account = m_database->account(accountId, &error);
   if (account.id.isEmpty() || account.provider != ProviderKind::CalDav ||
       !account.enabled) {
+    return;
+  }
+  if (!refreshCachedTimeKinds(accountId, &error)) {
+    const QJsonObject value =
+        statusObject(QStringLiteral("error"),
+                     QStringLiteral("cache_metadata_refresh_failed"), error);
+    m_status.insert(accountId, value);
+    emit syncStatusChanged(accountId, value);
     return;
   }
   if (!m_loadedCredentials.contains(accountId)) {
@@ -883,6 +1098,9 @@ void CalDavSync::discoverCollections(SyncJob* job, const QUrl& homeUrl) {
               {QStringLiteral("serverScheduling"), schedulingWritable},
               {QStringLiteral("attendeeWrites"), schedulingWritable},
               {QStringLiteral("rsvp"), schedulingWritable},
+              // RANGE storage/readback does not prove the scheduling server
+              // propagates a ranged attendee reply to the organizer.
+              {QStringLiteral("rsvpThisAndFuture"), false},
               {QStringLiteral("thisAndFuture"), thisAndFutureProven},
               {QStringLiteral("thisAndFutureProven"), thisAndFutureProven},
               {QStringLiteral("resourceMove"),
@@ -896,6 +1114,12 @@ void CalDavSync::discoverCollections(SyncJob* job, const QUrl& homeUrl) {
             calendar.capabilities.insert(
                 QStringLiteral("syncedCtag"),
                 existing.capabilities.value(QStringLiteral("syncedCtag")));
+            for (const QString& key : {QStringLiteral("thisAndFutureProbeState"),
+                                       QStringLiteral("thisAndFutureProbeMessage")}) {
+              if (existing.capabilities.contains(key)) {
+                calendar.capabilities.insert(key, existing.capabilities.value(key));
+              }
+            }
           } else {
             calendar.id = newUuid();
           }
@@ -1599,7 +1823,13 @@ void CalDavSync::startFutureCapabilityProbe(SyncJob* job, const OutboxItem& item
   const QString token = QString::fromLatin1(
       QCryptographicHash::hash(identity, QCryptographicHash::Sha256).toHex().left(32));
   probe->uid = QStringLiteral("omacalendar-capability-%1@example.invalid").arg(token);
-  const QString fileName = QStringLiteral(".omacalendar-capability-%1.ics").arg(token);
+  // Radicale rejects dot-prefixed storage names. The new standalone check
+  // uses a portable name; existing mutation IDs keep their legacy recovery
+  // path so an interrupted older probe can still be removed on retry.
+  const QString fileName =
+      (item.id == 0 ? QStringLiteral("omacalendar-capability-%1.ics")
+                    : QStringLiteral(".omacalendar-capability-%1.ics"))
+          .arg(token);
   QUrl resourceUrl = calendarUrl;
   QString path = resourceUrl.path();
   if (!path.endsWith(QLatin1Char('/'))) {
@@ -1699,8 +1929,9 @@ void CalDavSync::probeReadUpdated(SyncJob* job,
     const ICalendarParseResult parsed = ICalendarCodec::parse(resource.body);
     if (parsed.ok()) {
       retainedRange = std::any_of(
-          parsed.events.cbegin(), parsed.events.cend(), [](const Event& event) {
-            return event.recurrenceId.contains(QStringLiteral("RANGE=THISANDFUTURE"),
+          parsed.events.cbegin(), parsed.events.cend(), [probe](const Event& event) {
+            return event.uid == probe->uid &&
+                   event.recurrenceId.contains(QStringLiteral("RANGE=THISANDFUTURE"),
                                                Qt::CaseInsensitive);
           });
     }
@@ -1738,6 +1969,44 @@ void CalDavSync::finishFutureCapabilityProbe(
       message = QStringLiteral(
           "The CalDAV capability probe could not clean up its "
           "temporary resource");
+    }
+    if (probe->item.id == 0) {
+      // Standalone qualification never advances or blocks a user mutation.
+      // Store proof and its visible result together only after cleanup.
+      Calendar calendar = m_database->calendar(probe->calendar.id);
+      if (!calendar.id.isEmpty() && !job->cancelled) {
+        if (!success && message.isEmpty()) {
+          message =
+              QStringLiteral("The server could not prove safe this-and-future support");
+        }
+        calendar.capabilities.insert(QStringLiteral("thisAndFuture"), success);
+        calendar.capabilities.insert(QStringLiteral("thisAndFutureProven"), success);
+        calendar.capabilities.insert(
+            QStringLiteral("thisAndFutureProbeState"),
+            success ? QStringLiteral("supported") : QStringLiteral("failed"));
+        calendar.capabilities.insert(
+            QStringLiteral("thisAndFutureProbeMessage"),
+            success ? QStringLiteral("This and future occurrences are supported")
+                    : message);
+        QString storageError;
+        if (!m_database->upsertCalendar(calendar, &storageError)) {
+          code = QStringLiteral("database_error");
+          message = storageError;
+          success = false;
+        }
+        emit calendarsChanged(job->accountId);
+      } else if (calendar.id.isEmpty()) {
+        success = false;
+        code = QStringLiteral("database_error");
+        message =
+            QStringLiteral("The calendar disappeared before proof could be stored");
+      }
+      if (!success && code.isEmpty()) {
+        code = QStringLiteral("recurrence_capability_probe_failed");
+      }
+      job->futureProbeInProgress = false;
+      finish(job, success ? QString() : code, success ? QString() : message);
+      return;
     }
     if (success) {
       Calendar proven = m_database->calendar(probe->calendar.id, &message);

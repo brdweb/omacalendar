@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Window
 import QtTest
+import OmaCalendar
 import "../../src/app/qml/views" as Views
 import "../../src/app/qml/components" as Components
 
@@ -795,6 +796,65 @@ Item {
             verify(!readOnlyEvent.editable)
             readOnlyEvent.destroy()
             wait(0)
+        }
+
+        function test_caldav_storage_proof_does_not_enable_future_rsvp() {
+            const activity = createTemporaryObject(activityFactory, scene, {
+                "mode": "invitations",
+                "calendars": [{"id": "range-storage", "accountId": "caldav",
+                    "readOnly": false, "capabilities": {"provider": "caldav",
+                        "serverScheduling": true, "attendeeWrites": true,
+                        "thisAndFuture": true, "rsvpThisAndFuture": false}}],
+                "accounts": [{"id": "caldav", "provider": "caldav"}]
+            })
+            verify(activity !== null)
+            activity.open()
+            tryCompare(activity, "opened", true)
+            invitationResponseSpy.target = activity
+            invitationResponseSpy.clear()
+            activity.requestInvitationResponse({"id": "scoped-invite",
+                "calendarId": "range-storage", "recurrenceRule": "FREQ=DAILY;COUNT=3",
+                "recurrenceId": "2030-03-10T13:00:00Z", "seen": true,
+                "localRevision": 1}, "accepted")
+            wait(0)
+            const choices = activity.invitationScopeChoices()
+            compare(choices.length, 3)
+            verify(!choices.some(function(choice) { return choice.value === "future" }))
+            const message = findChild(scene.Window.window.contentItem, "invitationFutureScopeMessage")
+            verify(message !== null)
+            tryCompare(message, "visible", true)
+            activity.completeInvitationResponse("future")
+            compare(invitationResponseSpy.count, 0)
+            activity.completeInvitationResponse("occurrence")
+            compare(invitationResponseSpy.count, 1)
+            compare(invitationResponseSpy.signalArguments[0][4], "occurrence")
+        }
+
+        function test_future_support_requires_successful_check() {
+            const editor = createTemporaryObject(editorFactory, scene)
+            verify(editor !== null)
+            for (const calendarId of ["calendar-unproven-caldav", "calendar-failed-caldav"]) {
+                const event = Object.assign({}, representativeEvents()[0], {
+                    "recurrenceRule": "FREQ=WEEKLY", "calendarId": calendarId
+                })
+                editor.openExisting(event)
+                tryCompare(editor, "opened", true)
+                verify(!editor.futureScopeSupported)
+                verify(editor.futureScopeCheckAvailable)
+                const check = findChild(scene.Window.window.contentItem, "checkFutureSupport")
+                const scope = findChild(scene.Window.window.contentItem, "eventRecurrenceScope")
+                const message = findChild(scene.Window.window.contentItem, "futureSupportMessage")
+                verify(check !== null && check.visible && check.enabled)
+                compare(scope.count, 3)
+                App.lastProbeCalendarId = ""
+                check.clicked()
+                compare(App.lastProbeCalendarId, calendarId)
+                compare(scope.count, 3, "requesting a check must not grant future scope")
+                verify(message.text.indexOf(calendarId === "calendar-failed-caldav"
+                                            ? "remain disabled" : "temporary test event") >= 0)
+                editor.close()
+                tryCompare(editor, "opened", false)
+            }
         }
 
         function test_editor_activity_and_settings_surfaces() {

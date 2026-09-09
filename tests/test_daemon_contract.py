@@ -9,6 +9,7 @@ or write the user's real OmaCalendar state.
 from __future__ import annotations
 
 import argparse
+from datetime import datetime, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import os
@@ -548,6 +549,11 @@ def run_account_lifecycle_contract(
     methods: set[str],
     initial_revision: int,
 ) -> None:
+    require("calendars.probeThisAndFuture" in methods, "calendar capability check was not advertised")
+    for calendar_id, expected in (("local-default", "capability_probe_unavailable"),
+                                  ("missing-calendar", "not_found")):
+        probe_error = harness.call_error("calendars.probeThisAndFuture", {"calendarId": calendar_id})
+        assert_ipc_error(probe_error, expected, "unavailable calendar capability check")
     require("accounts.addLocal" not in methods, "device-only account add was advertised")
     local_add_error = harness.call_error(
         "accounts.addLocal", {"displayName": "Second local account"}
@@ -2228,10 +2234,134 @@ def run_contract(harness: DaemonHarness) -> None:
     )
 
 
+def run_occurrence_patch_contract(harness: DaemonHarness) -> None:
+    """A title-only occurrence edit must retain the selected occurrence's time."""
+    harness.stop()
+    harness.env["TZ"] = "America/New_York"
+    harness.start()
+    cases = (
+        ("utc", {
+            "startUtc": "2030-02-10T13:00:00Z", "endUtc": "2030-02-10T14:00:00Z",
+            "startTimeZone": "UTC", "endTimeZone": "UTC", "timeKind": "zoned",
+        }, "2030-02-09T00:00:00Z", "2030-02-15T00:00:00Z",
+            "20300211T130000Z", ("2030-02-11T13:00:00.000Z", "2030-02-11T14:00:00.000Z")),
+        ("spring-dst", {
+            "startUtc": "2030-03-09T14:00:00Z", "endUtc": "2030-03-09T15:30:00Z",
+            "startTimeZone": "America/New_York", "endTimeZone": "America/New_York", "timeKind": "zoned",
+        }, "2030-03-08T00:00:00Z", "2030-03-13T00:00:00Z",
+            "TZID=America/New_York:20300310T090000", ("2030-03-10T13:00:00.000Z", "2030-03-10T14:30:00.000Z")),
+        ("fall-dst", {
+            "startUtc": "2030-11-02T13:00:00Z", "endUtc": "2030-11-02T14:30:00Z",
+            "startTimeZone": "America/New_York", "endTimeZone": "America/New_York", "timeKind": "zoned",
+        }, "2030-11-01T00:00:00Z", "2030-11-06T00:00:00Z",
+            "TZID=America/New_York:20301103T090000", ("2030-11-03T14:00:00.000Z", "2030-11-03T15:30:00.000Z")),
+        ("floating-dst", {
+            "startUtc": "2030-03-09T14:00:00Z", "endUtc": "2030-03-09T15:30:00Z",
+            "startTimeZone": "", "endTimeZone": "", "timeKind": "floating",
+        }, "2030-03-08T00:00:00Z", "2030-03-13T00:00:00Z",
+            "20300310T130000Z", ("2030-03-10T13:00:00.000Z", "2030-03-10T14:30:00.000Z")),
+        ("all-day-multiday", {
+            "startDate": "2030-02-10", "endDate": "2030-02-12", "allDay": True,
+            "timeKind": "all_day",
+        }, "2030-02-09T00:00:00Z", "2030-02-15T00:00:00Z",
+            "20300211", ("2030-02-11", "2030-02-13")),
+    )
+    for name, times, window_start, window_end, reference, expected_times in cases:
+        calendar_id = "occurrence-patch-" + name
+        harness.call("calendars.upsert", {"calendar": {
+            "id": calendar_id, "accountId": "local-account", "name": "Occurrence patch " + name,
+            "timeZone": "UTC", "enabled": True,
+        }})
+        master = harness.call("events.create", {
+            "clientMutationId": "occurrence-patch-create-" + name,
+            "event": {"calendarId": calendar_id, "summary": "Series " + name,
+                "description": "Retained notes " + name, "location": "Retained room",
+                "recurrenceRule": "FREQ=DAILY;COUNT=3", "reminders": [10, 30], **times},
+        })
+        def series_events() -> list[dict[str, Any]]:
+            return harness.call("events.list", {
+                "start": window_start, "end": window_end, "calendarIds": [calendar_id],
+            })["events"]
+        before = series_events()
+        require(len(before) == 3, f"{name}: recurrence did not produce three occurrences")
+        selected = before[1]
+        time_fields = ("startDate", "endDate") if times.get("allDay") else ("startUtc", "endUtc")
+        require(tuple(selected[field] for field in time_fields) == expected_times,
+                f"{name}: selected occurrence did not have the independently expected dates")
+        updated = harness.call("events.update", {
+            "eventRef": {"eventId": master["id"], "recurrenceId": reference},
+            "expectedLocalRevision": selected["localRevision"],
+            "clientMutationId": "occurrence-title-only-" + name,
+            "recurrenceScope": "occurrence", "patch": {"summary": "Edited " + name},
+        })
+        require(tuple(updated[field] for field in time_fields) == expected_times,
+                f"{name}: title-only occurrence patch changed selected time/date: "
+                f"expected {expected_times}, got {tuple(updated[field] for field in time_fields)}")
+        for field in ("description", "location", "reminders", "timeKind", "startTimeZone", "endTimeZone"):
+            require(updated.get(field) == selected.get(field), f"{name}: title patch changed {field}")
+        after = series_events()
+        require(len(after) == 3, f"{name}: title patch duplicated or lost an occurrence")
+        require([(e[time_fields[0]], e[time_fields[1]]) for e in after] ==
+                [(e[time_fields[0]], e[time_fields[1]]) for e in before],
+                f"{name}: title patch changed another occurrence's dates")
+        require([e["summary"] for e in after] == ["Series " + name, "Edited " + name, "Series " + name],
+                f"{name}: title patch affected the wrong occurrence")
+
+        # Resolve the existing exception by the master ID plus an equivalent
+        # ISO identity. The merge must retain its own overrides and identity.
+        second = harness.call("events.update", {
+            "eventRef": {"eventId": master["id"], "recurrenceId": selected["recurrenceId"]},
+            "expectedLocalRevision": updated["localRevision"],
+            "clientMutationId": "occurrence-notes-only-" + name,
+            "recurrenceScope": "occurrence", "patch": {"description": "Detached notes " + name},
+        })
+        require(second["id"] == updated["id"] and second["summary"] == updated["summary"],
+                f"{name}: a second patch recreated the exception or lost its title")
+        require(tuple(second[field] for field in time_fields) == expected_times,
+                f"{name}: a second patch changed the occurrence dates")
+        require(len(series_events()) == 3, f"{name}: second patch duplicated an occurrence")
+
+        # Explicit resize remains a partial edit: changing only the end must
+        # preserve the selected start and all earlier detached field edits.
+        if times.get("allDay"):
+            changed_end = (datetime.fromisoformat(second[time_fields[1]]) + timedelta(days=1)).date().isoformat()
+        else:
+            changed_end = (datetime.fromisoformat(second[time_fields[1]].replace("Z", "+00:00"))
+                           + timedelta(minutes=15)).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+        resized = harness.call("events.update", {
+            "eventRef": {"eventId": second["id"], "recurrenceId": reference},
+            "expectedLocalRevision": second["localRevision"],
+            "clientMutationId": "occurrence-end-only-" + name,
+            "recurrenceScope": "occurrence", "patch": {time_fields[1]: changed_end},
+        })
+        require(resized[time_fields[0]] == expected_times[0] and resized[time_fields[1]] == changed_end,
+                f"{name}: explicit end-only patch did not preserve the selected start")
+        require(resized["description"] == second["description"] and resized["summary"] == second["summary"],
+                f"{name}: end-only patch lost earlier detached fields")
+        harness.stop()
+        harness.start()
+        restarted = harness.call("events.get", {"eventId": master["id"], "recurrenceId": selected["recurrenceId"]})
+        for field in (*time_fields, "summary", "description", "location", "reminders", "timeKind"):
+            require(restarted.get(field) == resized.get(field), f"{name}: restart changed {field}")
+        print(f"PASS: occurrence partial patch {name}: selected dates, canonical identity, detached reuse, resize and restart")
+
+    before_revision = revision(harness.call("system.info"), "missing occurrence before")
+    missing = harness.call_error("events.update", {
+        "eventRef": {"eventId": master["id"], "recurrenceId": "2030-02-25"},
+        "clientMutationId": "occurrence-outside-series", "recurrenceScope": "occurrence",
+        "patch": {"summary": "Must not create an invented occurrence"},
+    })
+    require(missing.get("code") == "not_found", "nonexistent occurrence was not rejected")
+    require(revision(harness.call("system.info"), "missing occurrence after") == before_revision,
+            "rejected occurrence patch changed durable state")
+    print("PASS: nonexistent occurrence patch rejected without durable mutation")
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--daemon", required=True, type=Path)
     parser.add_argument("--cli", required=True, type=Path)
+    parser.add_argument("--occurrence-patch-only", action="store_true")
     return parser.parse_args()
 
 
@@ -2253,7 +2383,9 @@ def main() -> int:
         ) as directory:
             harness = DaemonHarness(daemon, cli, Path(directory))
             try:
-                run_contract(harness)
+                if not args.occurrence_patch_only:
+                    run_contract(harness)
+                run_occurrence_patch_contract(harness)
             except Exception as error:  # noqa: BLE001 - show diagnostics
                 harness.stop()
                 print(f"daemon contract failed: {error}", file=sys.stderr)

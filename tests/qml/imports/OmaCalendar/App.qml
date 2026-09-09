@@ -7,6 +7,9 @@ QtObject {
                                                   "Europe/London"]
     readonly property bool bundledGoogleOAuthAvailable: false
     readonly property bool googleOAuthConfigured: false
+    readonly property bool connected: true
+    readonly property bool busy: false
+    property string lastProbeCalendarId: ""
 
     readonly property var calendars: [
         {
@@ -26,6 +29,24 @@ QtObject {
             "readOnly": true
         },
         {
+            "id": "calendar-unproven-caldav",
+            "accountId": "account-caldav",
+            "name": "Unproven CalDAV",
+            "enabled": true,
+            "readOnly": false,
+            "capabilities": {"provider": "caldav", "thisAndFuture": false}
+        },
+        {
+            "id": "calendar-failed-caldav",
+            "accountId": "account-caldav",
+            "name": "Unsupported CalDAV",
+            "enabled": true,
+            "readOnly": false,
+            "capabilities": {"provider": "caldav", "thisAndFuture": false,
+                "thisAndFutureProbeState": "failed",
+                "thisAndFutureProbeMessage": "Server did not retain recurrence data"}
+        },
+        {
             "id": "calendar-future-scope",
             "accountId": "account-local",
             "name": "Future scope fixture",
@@ -35,6 +56,10 @@ QtObject {
             "capabilities": {"thisAndFuture": true}
         }
     ]
+
+    function probeThisAndFuture(calendarId) {
+        lastProbeCalendarId = calendarId
+    }
 
     function wallTimeToUtc(dateText, timeText, timeZone) {
         timeZone

@@ -2,6 +2,8 @@
 #include <QEventLoop>
 #include <QFile>
 #include <QHash>
+#include <QScopeGuard>
+#include <QStringList>
 #include <QTcpServer>
 #include <QTcpSocket>
 #include <QTemporaryDir>
@@ -133,6 +135,7 @@ class CalDavRangeFixture final : public QObject {
   [[nodiscard]] int probeDeleteCount() const { return m_probeDeleteCount; }
   [[nodiscard]] bool staleProbeWasSeeded() const { return m_staleProbeWasSeeded; }
   [[nodiscard]] bool probeResourceExists() const { return m_probeExists; }
+  void failCleanupAfterCreate(bool fail) { m_failCleanupAfterCreate = fail; }
   [[nodiscard]] QByteArray lastPut() const { return m_lastPut; }
 
  private:
@@ -241,7 +244,8 @@ class CalDavRangeFixture final : public QObject {
                           QByteArrayLiteral("text/calendar"),
                           QByteArrayLiteral("ETag: \"v2\"\r\n"));
     }
-    if (firstLine.startsWith("PUT /calendar/.omacalendar-capability-")) {
+    if (firstLine.startsWith("PUT /calendar/.omacalendar-capability-") ||
+        firstLine.startsWith("PUT /calendar/omacalendar-capability-")) {
       ++m_probePutCount;
       const qsizetype pathStart = firstLine.indexOf(' ') + 1;
       const qsizetype pathEnd = firstLine.indexOf(' ', pathStart);
@@ -261,7 +265,8 @@ class CalDavRangeFixture final : public QObject {
           QByteArrayLiteral("204 No Content"), {}, QByteArrayLiteral("text/calendar"),
           QByteArrayLiteral("ETag: \"") + m_probeEtag + QByteArrayLiteral("\"\r\n"));
     }
-    if (firstLine.startsWith("DELETE /calendar/.omacalendar-capability-")) {
+    if (firstLine.startsWith("DELETE /calendar/.omacalendar-capability-") ||
+        firstLine.startsWith("DELETE /calendar/omacalendar-capability-")) {
       ++m_probeDeleteCount;
       if (m_seedStaleProbe) {
         m_seedStaleProbe = false;
@@ -272,7 +277,8 @@ class CalDavRangeFixture final : public QObject {
         m_probeResource = retainedResource();
         m_probeExists = true;
       }
-      if (!m_probeCleanupSucceeds) {
+      if (!m_probeCleanupSucceeds ||
+          (m_failCleanupAfterCreate && m_probePutCount > 0)) {
         return httpResponse(QByteArrayLiteral("500 Internal Server Error"), {},
                             QByteArrayLiteral("text/plain"));
       }
@@ -301,6 +307,7 @@ class CalDavRangeFixture final : public QObject {
   bool m_probeExists = false;
   bool m_retainProbeRange = true;
   bool m_probeCleanupSucceeds = true;
+  bool m_failCleanupAfterCreate = false;
   bool m_seedStaleProbe = false;
   bool m_loseProbeCreateAck = false;
   bool m_staleProbeWasSeeded = false;
@@ -493,6 +500,10 @@ class CalDavHardeningTest final : public QObject {
   void oversizedResponseIsRejectedBeforeBuffering();
   void crossOriginRedirectIsNotFollowed();
   void schedulingRequiresProof();
+  void calendarRevisionTimestampsRespectMethodAndPrecision();
+  void parsedTimeKindsMatchMutationIdentity();
+  void cachedTimeKindMigrationIndexesSharedResources();
+  void floatingOccurrenceReferencesRoundTripThroughWireIdentity();
   void valarmsParseIntoStructuredReminders();
   void multipleValarmsSerializeAndRoundTrip();
   void invalidAndEmptyReminderWritesAreSafe();
@@ -510,13 +521,379 @@ class CalDavHardeningTest final : public QObject {
   void moveRequestIsConditionalAndSameOrigin();
   void mutationIdentitySurvivesPatch();
   void credentialStorageAndRestoreAreAsynchronous();
+  void restoreAccountsContinuesAfterCacheRefreshFailure_data();
+  void restoreAccountsContinuesAfterCacheRefreshFailure();
   void boundedCalendarQueryUsesRequestedUtcRange();
   void futureRangeRequiresProofAndCommitsCanonicalEcho();
   void futureRangeProbeRejectsNonRetention();
   void futureRangeProbeRequiresCleanup();
   void futureRangeProbeRemovesDeterministicStaleResource();
   void futureRangeProbeCleansUpLostCreateAcknowledgment();
+  void standaloneFutureProbe_data();
+  void standaloneFutureProbe();
+  void calendarEventWritePrivileges_data();
+  void calendarEventWritePrivileges();
 };
+
+void CalDavHardeningTest::standaloneFutureProbe_data() {
+  QTest::addColumn<bool>("retainRange");
+  QTest::addColumn<bool>("initialCleanup");
+  QTest::addColumn<bool>("finalCleanup");
+  QTest::addColumn<bool>("loseCreateAck");
+  QTest::newRow("supported") << true << true << true << false;
+  QTest::newRow("unsupported") << false << true << true << false;
+  QTest::newRow("initial-cleanup-fails") << true << false << true << false;
+  QTest::newRow("final-cleanup-fails") << true << true << false << false;
+  QTest::newRow("lost-create-ack") << true << true << true << true;
+}
+
+void CalDavHardeningTest::standaloneFutureProbe() {
+  QFETCH(bool, retainRange);
+  QFETCH(bool, initialCleanup);
+  QFETCH(bool, finalCleanup);
+  QFETCH(bool, loseCreateAck);
+  QTemporaryDir helperDirectory;
+  QByteArray originalPath;
+  QVERIFY(installFastSecretTool(&helperDirectory, &originalPath));
+  const auto restorePath = qScopeGuard([&]() { qputenv("PATH", originalPath); });
+  CalDavRangeFixture server(retainRange, initialCleanup, false, loseCreateAck);
+  server.failCleanupAfterCreate(!finalCleanup);
+  QVERIFY(server.listen());
+  Database database;
+  QString error;
+  QVERIFY(database.open(QStringLiteral(":memory:"), &error));
+  caldav::CalDavSync sync(&database);
+  const QString accountId = setupRangeAccount(&server, &database, &sync, &error);
+  QVERIFY2(!accountId.isEmpty(), qPrintable(error));
+  const Calendar original = database.calendars(accountId).first();
+  QVERIFY(!original.capabilities.value(QStringLiteral("thisAndFuture")).toBool());
+  const auto before = database.eventsForCalendars({original.id});
+  QVERIFY2(sync.probeThisAndFuture(original.id, &error), qPrintable(error));
+  QVERIFY(!sync.probeThisAndFuture(original.id, &error));
+  QVERIFY(error.contains(QStringLiteral("finish syncing")));
+  QVERIFY(!sync.disconnectAccount(accountId, true, &error));
+  QVERIFY(error.contains(QStringLiteral("finish cleaning up")));
+  QVERIFY(!sync.updateCredentials(accountId, QStringLiteral("fixture-user"),
+                                  QStringLiteral("replacement-password"), &error));
+  QVERIFY(error.contains(QStringLiteral("finish cleaning up")));
+  QVERIFY(database.account(accountId).enabled);
+  QTRY_VERIFY_WITH_TIMEOUT(
+      sync.status(accountId).value(QStringLiteral("state")) != QJsonValue("syncing"),
+      5000);
+  const bool expectedSupport =
+      retainRange && initialCleanup && finalCleanup && !loseCreateAck;
+  const Calendar result = database.calendar(original.id);
+  QVERIFY(result.capabilities.contains(QStringLiteral("rsvpThisAndFuture")));
+  QVERIFY(!result.capabilities.value(QStringLiteral("rsvpThisAndFuture")).toBool());
+  QCOMPARE(result.capabilities.value(QStringLiteral("thisAndFuture")).toBool(),
+           expectedSupport);
+  QCOMPARE(result.capabilities.value(QStringLiteral("thisAndFutureProven")).toBool(),
+           expectedSupport);
+  QCOMPARE(
+      result.capabilities.value(QStringLiteral("thisAndFutureProbeState")).toString(),
+      expectedSupport ? QStringLiteral("supported") : QStringLiteral("failed"));
+  QCOMPARE(server.putCount(), 0);
+  QVERIFY(database.outboxItems(100).isEmpty());
+  const auto after = database.eventsForCalendars({original.id});
+  QCOMPARE(after.size(), before.size());
+  for (qsizetype i = 0; i < before.size(); ++i) {
+    QCOMPARE(toJson(after.at(i)), toJson(before.at(i)));
+  }
+  QCOMPARE(server.probeResourceExists(), !finalCleanup);
+  if (!finalCleanup) {
+    // Cleanup failure cannot grant proof. Retrying uses the same owned URL,
+    // removes the leftover resource, and then qualifies safely.
+    server.failCleanupAfterCreate(false);
+    QVERIFY2(sync.probeThisAndFuture(original.id, &error), qPrintable(error));
+    QTRY_VERIFY_WITH_TIMEOUT(database.calendar(original.id)
+                                 .capabilities.value(QStringLiteral("thisAndFuture"))
+                                 .toBool(),
+                             5000);
+    QVERIFY(!server.probeResourceExists());
+  }
+  Calendar readOnly = database.calendar(original.id);
+  readOnly.readOnly = true;
+  QVERIFY(database.upsertCalendar(readOnly, &error));
+  QVERIFY(!sync.probeThisAndFuture(original.id, &error));
+}
+
+void CalDavHardeningTest::calendarRevisionTimestampsRespectMethodAndPrecision() {
+  const auto parse = [](const QByteArray& timestamps,
+                        const QByteArray& method = QByteArray()) {
+    return caldav::ICalendarCodec::parse(
+        "BEGIN:VCALENDAR\r\nVERSION:2.0\r\n" + method +
+        "BEGIN:VEVENT\r\nUID:revision@example.test\r\n"
+        "DTSTART:20260910T130000Z\r\nDTEND:20260910T140000Z\r\n" +
+        timestamps + "SUMMARY:Revision test\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n");
+  };
+  const QDateTime modified(QDate(2026, 9, 8), QTime(11, 0), QTimeZone::UTC);
+  const QByteArray stamp = "DTSTAMP:20260909T120000Z\r\n";
+  auto result =
+      parse(stamp + "CREATED:20260901T100000Z\r\nLAST-MODIFIED:20260908T110000Z\r\n");
+  QVERIFY2(result.ok(), qPrintable(result.error.message));
+  QCOMPARE(result.events.first().updatedAt, modified);
+  QCOMPARE(result.events.first().createdAt,
+           QDateTime(QDate(2026, 9, 1), QTime(10, 0), QTimeZone::UTC));
+  result = parse(stamp);
+  QVERIFY(result.ok());
+  QCOMPARE(result.events.first().updatedAt,
+           QDateTime(QDate(2026, 9, 9), QTime(12, 0), QTimeZone::UTC));
+  result = parse(stamp, "METHOD:REQUEST\r\n");
+  QVERIFY(result.ok());
+  QVERIFY(!result.events.first().updatedAt.isValid());
+  result = parse(stamp + "LAST-MODIFIED:20260908T110000Z\r\n", "METHOD:REQUEST\r\n");
+  QVERIFY(result.ok());
+  QCOMPARE(result.events.first().updatedAt, modified);
+  for (const QByteArray& uncertain :
+       {QByteArray(), QByteArray("DTSTAMP:20260909T120000\r\n"),
+        stamp + "LAST-MODIFIED:20260908T110000\r\n",
+        stamp +
+            "LAST-MODIFIED:20260908T110000Z\r\nLAST-MODIFIED:20260909T120000Z\r\n"}) {
+    result = parse(uncertain);
+    QVERIFY2(result.ok(), qPrintable(result.error.message));
+    QVERIFY(!result.events.first().updatedAt.isValid());
+  }
+  const auto original = parse(stamp + "LAST-MODIFIED:20260908T110000Z\r\n");
+  Event changed = original.events.first();
+  changed.updatedAt = modified.addSecs(3600);
+  const auto serialized = caldav::ICalendarCodec::serialize(changed);
+  QVERIFY(serialized.ok());
+  const auto reparsed = caldav::ICalendarCodec::parse(serialized.payload);
+  QVERIFY(reparsed.ok());
+  QCOMPARE(reparsed.events.first().updatedAt, changed.updatedAt);
+  const auto patched = caldav::ICalendarCodec::patch(
+      changed,
+      "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\nUID:revision@example.test\r\n"
+      "DTSTART:20260910T130000Z\r\nDTEND:20260910T140000Z\r\n"
+      "DTSTAMP:20260908T110000Z\r\nLAST-MODIFIED:20260908T110000Z\r\n"
+      "SUMMARY:Old revision\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n");
+  QVERIFY2(patched.ok(), qPrintable(patched.error.message));
+  QCOMPARE(caldav::ICalendarCodec::parse(patched.payload).events.first().updatedAt,
+           changed.updatedAt);
+}
+
+void CalDavHardeningTest::parsedTimeKindsMatchMutationIdentity() {
+  for (const auto& row :
+       {std::pair{
+            QByteArray("DTSTART;VALUE=DATE:20260910\r\nDTEND;VALUE=DATE:20260913\r\n"),
+            TimeKind::AllDay},
+        std::pair{QByteArray("DTSTART:20260910T130000\r\nDTEND:20260910T140000\r\n"),
+                  TimeKind::Floating},
+        std::pair{QByteArray("DTSTART:20260910T130000Z\r\nDTEND:20260910T140000Z\r\n"),
+                  TimeKind::Zoned}}) {
+    const auto parsed = caldav::ICalendarCodec::parse(
+        "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\nUID:kind@example.test\r\n"
+        "DTSTAMP:20260909T120000Z\r\n" +
+        row.first + "END:VEVENT\r\nEND:VCALENDAR\r\n");
+    QVERIFY2(parsed.ok(), qPrintable(parsed.error.message));
+    const Event event = parsed.events.first();
+    QCOMPARE(event.timeKind, row.second);
+    QVERIFY(recurrenceIdentityEqual(event, eventFromJson(toJson(event))));
+    const auto serialized = caldav::ICalendarCodec::serialize(event);
+    QVERIFY2(serialized.ok(), qPrintable(serialized.error.message));
+    const auto roundTrip = caldav::ICalendarCodec::parse(serialized.payload);
+    QVERIFY(roundTrip.ok());
+    QCOMPARE(roundTrip.events.first().timeKind, row.second);
+    QVERIFY(recurrenceIdentityEqual(event, roundTrip.events.first()));
+  }
+}
+
+void CalDavHardeningTest::cachedTimeKindMigrationIndexesSharedResources() {
+  QByteArray retained =
+      "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\n"
+      "UID:cached-floating@example.test\r\nDTSTAMP:20260909T120000Z\r\n"
+      "DTSTART:20300101T090000\r\nDTEND:20300101T100000\r\n"
+      "RRULE:FREQ=DAILY;COUNT=129\r\nSUMMARY:Cached floating series\r\n"
+      "END:VEVENT\r\n";
+  const QStringList zonedContexts = {
+      QStringLiteral("America/New_York"),
+      QStringLiteral("America/Chicago"),
+      QStringLiteral("America/Denver"),
+      QStringLiteral("America/Phoenix"),
+      QStringLiteral("America/Los_Angeles"),
+      QStringLiteral("America/Anchorage"),
+      QStringLiteral("Pacific/Honolulu"),
+      QStringLiteral("America/Toronto"),
+      QStringLiteral("America/Vancouver"),
+      QStringLiteral("America/Halifax"),
+      QStringLiteral("America/St_Johns"),
+      QStringLiteral("America/Mexico_City"),
+      QStringLiteral("America/Bogota"),
+      QStringLiteral("America/Lima"),
+      QStringLiteral("America/Sao_Paulo"),
+      QStringLiteral("America/Argentina/Buenos_Aires"),
+      QStringLiteral("America/Santiago"),
+      QStringLiteral("Europe/London"),
+      QStringLiteral("Europe/Paris"),
+      QStringLiteral("Europe/Berlin"),
+      QStringLiteral("Europe/Rome"),
+      QStringLiteral("Europe/Warsaw"),
+      QStringLiteral("Europe/Athens"),
+      QStringLiteral("Europe/Helsinki"),
+      QStringLiteral("Europe/Moscow"),
+      QStringLiteral("Asia/Dubai"),
+      QStringLiteral("Asia/Karachi"),
+      QStringLiteral("Asia/Kolkata"),
+      QStringLiteral("Asia/Bangkok"),
+      QStringLiteral("Asia/Shanghai"),
+      QStringLiteral("Asia/Tokyo"),
+      QStringLiteral("Australia/Sydney"),
+  };
+  constexpr int kZonedContextCount = 32;
+  QCOMPARE(zonedContexts.size(), kZonedContextCount);
+  for (int offset = 1; offset <= 128; ++offset) {
+    const QString date =
+        QDate(2030, 1, 1).addDays(offset).toString(QStringLiteral("yyyyMMdd"));
+    if (offset <= kZonedContextCount) {
+      const QByteArray zone = zonedContexts.at(offset - 1).toLatin1();
+      retained +=
+          "BEGIN:VEVENT\r\nUID:cached-floating@example.test\r\n"
+          "DTSTAMP:20260909T120000Z\r\n"
+          "RECURRENCE-ID;TZID=" +
+          zone + ':' + date.toLatin1() + "T090000\r\nDTSTART;TZID=" + zone + ':' +
+          date.toLatin1() + "T090000\r\nDTEND;TZID=" + zone + ':' + date.toLatin1() +
+          "T100000\r\nSUMMARY:Cached zoned exception\r\nEND:VEVENT\r\n";
+    } else {
+      retained +=
+          "BEGIN:VEVENT\r\nUID:cached-floating@example.test\r\n"
+          "DTSTAMP:20260909T120000Z\r\nRECURRENCE-ID:" +
+          date.toLatin1() + "T090000\r\nDTSTART:" + date.toLatin1() +
+          "T090000\r\nDTEND:" + date.toLatin1() +
+          "T100000\r\nSUMMARY:Cached floating exception\r\nEND:VEVENT\r\n";
+    }
+  }
+  retained += "END:VCALENDAR\r\n";
+  const auto parsed = caldav::ICalendarCodec::parse(retained);
+  QVERIFY2(parsed.ok(), qPrintable(parsed.error.message));
+  QCOMPARE(parsed.events.size(), 129);
+
+  Database database;
+  QString error;
+  QVERIFY2(database.open(QStringLiteral(":memory:"), &error), qPrintable(error));
+  Account account;
+  account.id = QStringLiteral("cached-time-kind-account");
+  account.provider = ProviderKind::CalDav;
+  account.displayName = QStringLiteral("Cached migration fixture");
+  account.enabled = false;
+  QVERIFY2(database.upsertAccount(account, &error), qPrintable(error));
+  Calendar calendar;
+  calendar.id = QStringLiteral("cached-time-kind-calendar");
+  calendar.accountId = account.id;
+  calendar.remoteId = QStringLiteral("https://example.test/calendar/");
+  calendar.href = calendar.remoteId;
+  calendar.name = QStringLiteral("Cached migration fixture");
+  QVERIFY2(database.upsertCalendar(calendar, &error), qPrintable(error));
+
+  const QString resourceId =
+      QStringLiteral("https://example.test/calendar/floating.ics");
+  QList<Event> legacyEvents;
+  legacyEvents.reserve(parsed.events.size());
+  for (qsizetype index = 0; index < parsed.events.size(); ++index) {
+    Event legacy = parsed.events.at(index);
+    legacy.id = QStringLiteral("cached-floating-%1").arg(index);
+    legacy.calendarId = calendar.id;
+    legacy.etag = QStringLiteral("etag-cached-floating");
+    legacy.remoteId = resourceId;
+    if (!legacy.recurrenceId.isEmpty()) {
+      legacy.remoteId += QLatin1Char('#') + legacy.recurrenceId;
+    }
+    if (index == static_cast<qsizetype>(kZonedContextCount)) {
+      legacy.recurrenceId = legacy.startUtc.toUTC().toString(Qt::ISODate);
+    }
+    legacy.timeKind = TimeKind::Zoned;
+    legacy.startTimeZone.clear();
+    legacy.endTimeZone.clear();
+    legacyEvents.append(legacy);
+  }
+  Event mixedReference = legacyEvents.at(kZonedContextCount);
+  const Event& mixedSource = parsed.events.at(kZonedContextCount);
+  mixedReference.timeKind = mixedSource.timeKind;
+  mixedReference.startTimeZone = mixedSource.startTimeZone;
+  QVERIFY(caldav::ICalendarCodec::sameRecurrenceIdentity(mixedReference, mixedSource));
+  QCOMPARE(caldav::ICalendarCodec::recurrenceIdentityKey(mixedReference, mixedSource),
+           caldav::ICalendarCodec::recurrenceIdentityKey(mixedSource, mixedSource));
+  const ProviderResource resource{
+      calendar.id, resourceId, QStringLiteral("etag-cached-floating"),
+      QStringLiteral("text/calendar"), QString::fromUtf8(retained)};
+  QVERIFY2(
+      database.applyRemoteSyncBatch(calendar, legacyEvents, {}, {}, &error, {resource}),
+      qPrintable(error));
+
+  caldav::CalDavSync sync(&database);
+  QVERIFY2(sync.refreshCachedTimeKinds(account.id, &error), qPrintable(error));
+  const QList<Event> migrated = database.eventsByUid(
+      calendar.id, QStringLiteral("cached-floating@example.test"), &error);
+  QCOMPARE(migrated.size(), legacyEvents.size());
+  for (const Event& event : migrated) {
+    bool validIndex = false;
+    const int index = event.id.section(QLatin1Char('-'), -1).toInt(&validIndex);
+    QVERIFY(validIndex);
+    QCOMPARE(event.timeKind, index > 0 && index <= kZonedContextCount
+                                 ? TimeKind::Zoned
+                                 : TimeKind::Floating);
+  }
+  QCOMPARE(
+      database
+          .providerState(account.id, {}, QStringLiteral("caldav_time_kind_version"), 0)
+          .toInt(),
+      1);
+}
+
+void CalDavHardeningTest::floatingOccurrenceReferencesRoundTripThroughWireIdentity() {
+  const QByteArray retained =
+      "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\nUID:floating@example.test\r\n"
+      "DTSTAMP:20300301T120000Z\r\nDTSTART:20300309T090000\r\nDTEND:20300309T100000\r\n"
+      "RRULE:FREQ=DAILY;COUNT=3\r\nSUMMARY:Floating "
+      "series\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
+  const auto parsed = caldav::ICalendarCodec::parse(retained);
+  QVERIFY2(parsed.ok(), qPrintable(parsed.error.message));
+  const QDateTime selected(QDate(2030, 3, 10), QTime(9, 0), QTimeZone::LocalTime);
+  QCOMPARE(parsed.events.first().startUtc,
+           QDateTime(QDate(2030, 3, 9), QTime(9, 0), QTimeZone::LocalTime).toUTC());
+  for (const QString& reference : {
+           selected.toUTC().toString(Qt::ISODateWithMs),
+           selected.toUTC().toString(QStringLiteral("yyyyMMdd'T'HHmmss'Z'")),
+           selected.toOffsetFromUtc(3600).toString(Qt::ISODateWithMs),
+           QStringLiteral("20300310T090000"),
+       }) {
+    Event draft = parsed.events.first();
+    draft.summary = QStringLiteral("Moved floating occurrence");
+    draft.recurrenceRule.clear();
+    draft.recurrenceId = reference;
+    draft.startUtc = selected.addSecs(3600).toUTC();
+    draft.endUtc = selected.addSecs(7200).toUTC();
+    draft.updatedAt = QDateTime(QDate(2030, 3, 1), QTime(13, 0), QTimeZone::UTC);
+    for (const QString& scope :
+         {QStringLiteral("occurrence"), QStringLiteral("future")}) {
+      const auto patched = caldav::ICalendarCodec::patchScoped(draft, retained, scope);
+      QVERIFY2(patched.ok(), qPrintable(patched.error.message));
+      QVERIFY(patched.payload.contains("DTSTART:20300310T100000\r\n"));
+      QVERIFY(patched.payload.contains(
+          scope == QStringLiteral("future")
+              ? "RECURRENCE-ID;RANGE=THISANDFUTURE:20300310T090000\r\n"
+              : "RECURRENCE-ID:20300310T090000\r\n"));
+      const auto readback = caldav::ICalendarCodec::parse(patched.payload);
+      QVERIFY2(readback.ok(), qPrintable(readback.error.message));
+      QCOMPARE(readback.events.size(), 2);
+      const auto found = std::find_if(
+          readback.events.cbegin(), readback.events.cend(),
+          [&draft](const Event& candidate) {
+            return caldav::ICalendarCodec::sameRecurrenceIdentity(candidate, draft);
+          });
+      QVERIFY(found != readback.events.cend());
+      QCOMPARE(found->startUtc, draft.startUtc);
+      QCOMPARE(found->endUtc, draft.endUtc);
+      QCOMPARE(found->timeKind, TimeKind::Floating);
+      Event wrongOccurrence = draft;
+      wrongOccurrence.recurrenceId = QStringLiteral("20300310T100000");
+      QVERIFY(!caldav::ICalendarCodec::sameRecurrenceIdentity(*found, wrongOccurrence));
+      const auto repeated =
+          caldav::ICalendarCodec::patchScoped(draft, patched.payload, scope);
+      QVERIFY2(repeated.ok(), qPrintable(repeated.error.message));
+      QCOMPARE(caldav::ICalendarCodec::parse(repeated.payload).events.size(), 2);
+    }
+  }
+}
 
 void CalDavHardeningTest::endpointAndHrefSafety() {
   QString error;
@@ -1260,6 +1637,101 @@ void CalDavHardeningTest::mutationIdentitySurvivesPatch() {
                                                       QStringLiteral("mutation-123")));
 }
 
+void CalDavHardeningTest::restoreAccountsContinuesAfterCacheRefreshFailure_data() {
+  QTest::addColumn<bool>("enabled");
+  QTest::addColumn<bool>("malformed");
+  QTest::newRow("disabled-malformed") << false << true;
+  QTest::newRow("enabled-malformed") << true << true;
+  QTest::newRow("disabled-unmatched") << false << false;
+  QTest::newRow("enabled-unmatched") << true << false;
+}
+
+void CalDavHardeningTest::restoreAccountsContinuesAfterCacheRefreshFailure() {
+  QFETCH(bool, enabled);
+  QFETCH(bool, malformed);
+  QTemporaryDir helpers;
+  QVERIFY(helpers.isValid());
+  QFile helper(helpers.filePath(QStringLiteral("secret-tool")));
+  QVERIFY(helper.open(QIODevice::WriteOnly));
+  helper.write("#!/bin/sh\nprintf '%s\\n' 'fixture-password'\n");
+  helper.close();
+  QVERIFY(helper.setPermissions(QFileDevice::ReadOwner | QFileDevice::WriteOwner |
+                                QFileDevice::ExeOwner));
+  const QByteArray originalPath = qgetenv("PATH");
+  const auto restorePath = qScopeGuard([&]() { qputenv("PATH", originalPath); });
+  qputenv("PATH", helpers.path().toUtf8() + ':' + originalPath);
+  HttpFixture server("HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\n\r\n");
+  QVERIFY(server.listen());
+  Database database;
+  QString error;
+  QVERIFY2(database.open(QStringLiteral(":memory:"), &error), qPrintable(error));
+  Account broken;
+  broken.id = QStringLiteral("broken-cache");
+  broken.displayName = QStringLiteral("A broken cache");
+  broken.provider = ProviderKind::CalDav;
+  broken.enabled = enabled;
+  broken.endpoint = server.url().toString();
+  broken.principal = QStringLiteral("fixture-user");
+  QVERIFY2(database.upsertAccount(broken, &error), qPrintable(error));
+  Account healthy = broken;
+  healthy.id = QStringLiteral("healthy-cache");
+  healthy.displayName = QStringLiteral("Z healthy cache");
+  healthy.enabled = true;
+  QVERIFY2(database.upsertAccount(healthy, &error), qPrintable(error));
+  QCOMPARE(database.accounts().first().id, broken.id);
+  Calendar calendar;
+  calendar.id = QStringLiteral("broken-calendar");
+  calendar.accountId = broken.id;
+  calendar.remoteId = server.url(QStringLiteral("/dav/calendar/")).toString();
+  calendar.href = calendar.remoteId;
+  calendar.name = QStringLiteral("Synthetic cache");
+  QVERIFY2(database.upsertCalendar(calendar, &error), qPrintable(error));
+  const auto parsed = caldav::ICalendarCodec::parse(retainedResource());
+  QVERIFY(parsed.ok());
+  QVERIFY(!parsed.events.isEmpty());
+  Event legacy = parsed.events.first();
+  legacy.id = QStringLiteral("legacy-event");
+  legacy.calendarId = calendar.id;
+  legacy.remoteId = calendar.remoteId + QStringLiteral("legacy.ics");
+  legacy.timeKind = TimeKind::Zoned;
+  legacy.startTimeZone.clear();
+  legacy.endTimeZone.clear();
+  legacy.rawPayload.clear();
+  if (!malformed) legacy.uid = QStringLiteral("unmatched@example.test");
+  const ProviderResource resource{
+      calendar.id, legacy.remoteId, QStringLiteral("legacy-etag"),
+      QStringLiteral("text/calendar"),
+      malformed ? QStringLiteral("not an iCalendar resource")
+                : QString::fromUtf8(retainedResource())};
+  QVERIFY2(
+      database.applyRemoteSyncBatch(calendar, {legacy}, {}, {}, &error, {resource}),
+      qPrintable(error));
+  caldav::CalDavSync restored(&database);
+  QSignalSpy statusChanged(&restored, &caldav::CalDavSync::syncStatusChanged);
+  QVERIFY(!restored.restoreAccounts(&error));
+  QVERIFY(!error.isEmpty());
+  QTRY_VERIFY_WITH_TIMEOUT(server.connections() > 0, 2000);
+  bool brokenReported = false;
+  bool healthyStarted = false;
+  for (const QList<QVariant>& change : statusChanged) {
+    const QString accountId = change.at(0).toString();
+    brokenReported |= accountId == broken.id;
+    healthyStarted |= accountId == healthy.id;
+  }
+  QVERIFY(brokenReported);
+  QVERIFY(healthyStarted);
+  QCOMPARE(
+      database
+          .providerState(broken.id, {}, QStringLiteral("caldav_time_kind_version"), 0)
+          .toInt(),
+      0);
+  QCOMPARE(
+      database
+          .providerState(healthy.id, {}, QStringLiteral("caldav_time_kind_version"), 0)
+          .toInt(),
+      1);
+}
+
 void CalDavHardeningTest::credentialStorageAndRestoreAreAsynchronous() {
   QTemporaryDir helperDirectory;
   QVERIFY(helperDirectory.isValid());
@@ -1559,6 +2031,57 @@ void CalDavHardeningTest::futureRangeProbeCleansUpLostCreateAcknowledgment() {
   QCOMPARE(server.probeDeleteCount(), 2);
   QVERIFY(!server.probeResourceExists());
   qputenv("PATH", originalPath);
+}
+
+void CalDavHardeningTest::calendarEventWritePrivileges_data() {
+  QTest::addColumn<QByteArray>("privileges");
+  QTest::addColumn<bool>("readOnly");
+  QTest::addColumn<bool>("canBind");
+  QTest::addColumn<bool>("canUnbind");
+  QTest::newRow("read-only") << QByteArray("<d:read/>") << true << false << false;
+  QTest::newRow("nextcloud-read-only-share")
+      << QByteArray("<d:read/><d:write-properties/><d:read-acl/>") << true << false
+      << false;
+  QTest::newRow("event-content")
+      << QByteArray("<d:write-content/>") << false << false << false;
+  QTest::newRow("create-only") << QByteArray("<d:bind/>") << false << true << false;
+  QTest::newRow("delete-only") << QByteArray("<d:unbind/>") << false << false << true;
+  QTest::newRow("aggregate-write")
+      << QByteArray("<d:write/>") << false << false << false;
+  QTest::newRow("all-rights") << QByteArray("<d:all/>") << false << true << true;
+  QTest::newRow("wrong-namespace")
+      << QByteArray("<c:write-content/><d:write-properties/>") << true << false
+      << false;
+}
+
+void CalDavHardeningTest::calendarEventWritePrivileges() {
+  QFETCH(QByteArray, privileges);
+  QFETCH(bool, readOnly);
+  QFETCH(bool, canBind);
+  QFETCH(bool, canUnbind);
+  privileges.replace("/><", "/></d:privilege><d:privilege><");
+  const QByteArray xml =
+      QByteArrayLiteral(
+          "<d:multistatus xmlns:d=\"DAV:\" "
+          "xmlns:c=\"urn:ietf:params:xml:ns:caldav\">"
+          "<d:response><d:href>/calendars/attendee/shared/</d:href><d:propstat>"
+          "<d:prop><d:resourcetype><d:collection/><c:calendar/></d:resourcetype>"
+          "<d:current-user-privilege-set><d:privilege>") +
+      privileges +
+      QByteArrayLiteral(
+          "</d:privilege></d:current-user-privilege-set></d:prop>"
+          "<d:status>HTTP/1.1 200 OK</d:status></d:propstat>"
+          "</d:response></d:multistatus>");
+  const auto parsed = caldav::CalDavXml::parseMultiStatus(xml);
+  QVERIFY2(parsed.ok(), qPrintable(parsed.error.message));
+  QCOMPARE(parsed.responses.size(), 1);
+  QVERIFY(parsed.responses.first().privilegesReported);
+  QCOMPARE(parsed.responses.first().readOnly(), readOnly);
+  const auto calendars = caldav::CalDavXml::collections(parsed);
+  QCOMPARE(calendars.size(), 1);
+  QCOMPARE(calendars.first().readOnly, readOnly);
+  QCOMPARE(calendars.first().canBind, canBind);
+  QCOMPARE(calendars.first().canUnbind, canUnbind);
 }
 
 QTEST_GUILESS_MAIN(CalDavHardeningTest)
