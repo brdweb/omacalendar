@@ -223,6 +223,7 @@ jobs:
           name: omacalendar-${{ steps.version.outputs.value }}-arch-candidate
           path: artifacts/
           if-no-files-found: error
+          overwrite: true
 
   debian:
     name: Build, install, and attest Debian package
@@ -284,6 +285,7 @@ jobs:
           name: omacalendar-${{ env.RELEASE_VERSION }}-debian-candidate
           path: artifacts/
           if-no-files-found: error
+          overwrite: true
 
   flatpak:
     name: Build, install, and attest Flatpak bundle
@@ -352,6 +354,7 @@ jobs:
             artifacts/*flatpak*.txt
             artifacts/*flatpak.spdx.json
           if-no-files-found: error
+          overwrite: true
 
   assemble:
     name: Assemble complete candidate draft
@@ -364,12 +367,21 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
-      - name: Gather independently validated packages
+      - name: Download Arch candidate
         uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
         with:
-          pattern: omacalendar-${{ env.RELEASE_VERSION }}-*-candidate
+          name: omacalendar-${{ env.RELEASE_VERSION }}-arch-candidate
           path: artifacts
-          merge-multiple: true
+      - name: Download Debian-format candidate
+        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
+        with:
+          name: omacalendar-${{ env.RELEASE_VERSION }}-debian-candidate
+          path: artifacts
+      - name: Download Flatpak candidate
+        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
+        with:
+          name: omacalendar-${{ env.RELEASE_VERSION }}-flatpak-candidate
+          path: artifacts
       - name: Include exact documentation and write complete checksums
         run: |
           git archive --format=tar.gz --prefix="omacalendar-${RELEASE_VERSION}-documentation/" \
@@ -394,6 +406,7 @@ jobs:
           name: omacalendar-${{ env.RELEASE_VERSION }}-release-candidate
           path: artifacts/
           if-no-files-found: error
+          overwrite: true
       - name: Create complete draft GitHub release
         if: github.event_name == 'push'
         env:
