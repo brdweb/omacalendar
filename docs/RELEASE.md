@@ -8,8 +8,8 @@ tree, metadata, draft-only disposition and scoped tag authorization. This mode
 rejects stable/beta versions and never qualifies public acceptance. Ordinary
 `verify-release.sh TAG` retains every strict public gate.
 
-RC4 replaces runtime failures found during expanded RC3 acceptance. Preserve
-earlier tags, drafts, and records; qualify the freshly built RC4 assets
+RC5 includes RC4's runtime fixes and corrects its build-environment failure. Preserve
+earlier tags, drafts, and records; qualify the freshly built RC5 app assets
 independently. The Debian transport filename is
 `omacalendar_1.0.0-rc.5-1_amd64.deb`; internal version `1.0.0~rc.5-1` is unchanged
 in meaning. Flatpak SPDX must match the exact exported bundle, not merely the

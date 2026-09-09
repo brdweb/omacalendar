@@ -227,7 +227,8 @@ Versioning once public releases begin.
   and emits verifiable build provenance for tagged release candidates. The
   separately documented historical OAuth incident remains a pre-tag gate.
 
-[Unreleased]: https://github.com/brdweb/omacalendar/compare/v1.0.0-rc.4...HEAD
+[Unreleased]: https://github.com/brdweb/omacalendar/compare/v1.0.0-rc.5...HEAD
+[1.0.0-rc.5]: https://github.com/brdweb/omacalendar/compare/v1.0.0-rc.4...v1.0.0-rc.5
 [1.0.0-rc.4]: https://github.com/brdweb/omacalendar/compare/v1.0.0-rc.3...v1.0.0-rc.4
 [1.0.0-rc.3]: https://github.com/brdweb/omacalendar/compare/v1.0.0-rc.2...v1.0.0-rc.3
 [1.0.0-rc.2]: https://github.com/brdweb/omacalendar/compare/v1.0.0-rc.1...v1.0.0-rc.2

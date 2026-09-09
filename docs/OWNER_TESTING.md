@@ -12,7 +12,7 @@ Record the app/widget commit, package filename and hash, OS/desktop version,
 provider/server version, and pass/fail/unavailable for each row. Do not include
 credentials, private calendar names, personal events, or provider URLs in reports.
 
-Use fresh RC4 downloads when its replacement draft is available. RC3 failed
+Use fresh RC5 app and RC4 widget downloads when their drafts are available. RC3 failed
 expanded runtime acceptance; older receipts do not qualify the new artifacts.
 
 The [RC4 runtime report](testing/release-runtime-rc4.md) records completed

@@ -5,9 +5,9 @@ The commands below apply once its assets are available to authenticated
 repository collaborators with write access. The public beta remains available
 separately. [Owner testing](OWNER_TESTING.md) records the remaining stable gates.
 
-RC4 fixes calendar correctness and upgrade failures found during RC3 acceptance.
+RC5 retains RC4's calendar correctness and upgrade fixes and corrects its build setup.
 Earlier tags and original artifacts remain unchanged. Download and verify the
-exact RC4 assets below; renamed older packages cannot qualify this candidate.
+exact RC5 assets below; renamed older packages cannot qualify this candidate.
 
 ## Download and verify
 
