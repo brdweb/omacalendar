@@ -16,6 +16,8 @@ Versioning once public releases begin.
   acknowledgments, and client references across repeated edits and restart.
 - Continue restoring healthy CalDAV accounts when another account's legacy
   cache cannot be refreshed; report the failure on the affected account.
+- Wait for asynchronous Omarchy plugin discovery during widget installation
+  and restoration, retaining rollback if the shell does not become ready.
 - Resolve competing edits using real modification times; retain ambiguous
   conflicts and prevent sync bookkeeping from changing edit chronology.
 - Preserve the selected local date west of UTC and expose accessible event

@@ -3,7 +3,7 @@
 The target is OmaCalendar `1.0.0` and an independently qualified widget
 `0.1.0`. The owner authorized committing the tested changes and continuing
 through qualification and release on 2026-09-09. The app replacement candidate
-is `1.0.0-rc.4`; the independent widget candidate remains `0.1.0-rc.3`.
+is `1.0.0-rc.4`; the independent widget candidate remains `0.1.0-rc.4`.
 Neither version is a declaration that stable gates pass.
 
 RC4 follows the [expanded acceptance failures](ACCEPTANCE_2026-09-09.md) in

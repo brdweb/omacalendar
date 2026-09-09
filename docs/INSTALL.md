@@ -85,7 +85,7 @@ omacalendar
 resolved by pacman; no AUR registration is needed. The native app includes the
 daemon, CLI, desktop integration and widget activation helper. Install the
 widget independently using the
-[widget RC installation and test guide](https://github.com/brdweb/omacalendar-widget/blob/v0.1.0-rc.3/docs/STABLE_ACCEPTANCE.md).
+[widget RC installation and test guide](https://github.com/brdweb/omacalendar-widget/blob/v0.1.0-rc.4/docs/STABLE_ACCEPTANCE.md).
 
 The user socket keeps the backend available while the desktop is closed. The
 first CLI/widget connection starts the daemon. After package upgrades, restart

@@ -21,6 +21,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+import time
 import uuid
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -619,27 +620,35 @@ def refresh_and_validate_live(
         "shell_validation_failed",
         "Omarchy shell could not reload its configuration",
     )
-    listing = runner.run(
-        ["omarchy", "plugin", "list", "--json"],
-        "shell_validation_failed",
-        "Could not inspect the running Omarchy plugin registry",
-    )
-    try:
-        plugins = json.loads(listing.stdout)
-    except json.JSONDecodeError as error:
-        raise WidgetCtlError(
-            "shell_validation_failed", "Omarchy returned an invalid plugin registry"
-        ) from error
-    matching = [item for item in plugins if isinstance(item, dict) and item.get("id") == PLUGIN_ID]
-    enabled = len(matching) == 1 and bool(matching[0].get("enabled"))
-    if expect_installed and not enabled:
-        raise WidgetCtlError(
-            "shell_validation_failed", "OmaCalendar was not enabled by the running shell"
+    # Shell reload requests return before asynchronous plugin discovery settles.
+    # Poll only the observed registry state; genuine command/JSON errors still
+    # fail immediately, and a nonconverging shell retains transactional rollback.
+    deadline = time.monotonic() + 5.0
+    while True:
+        listing = runner.run(
+            ["omarchy", "plugin", "list", "--json"],
+            "shell_validation_failed",
+            "Could not inspect the running Omarchy plugin registry",
         )
-    if not expect_installed and matching:
-        raise WidgetCtlError(
-            "shell_validation_failed", "OmaCalendar remained loaded after restoration"
-        )
+        try:
+            plugins = json.loads(listing.stdout)
+            if not isinstance(plugins, list):
+                raise ValueError("expected a plugin list")
+        except ValueError as error:
+            raise WidgetCtlError(
+                "shell_validation_failed", "Omarchy returned an invalid plugin registry"
+            ) from error
+        matching = [item for item in plugins if isinstance(item, dict) and item.get("id") == PLUGIN_ID]
+        enabled = len(matching) == 1 and bool(matching[0].get("enabled"))
+        if (expect_installed and enabled) or (not expect_installed and not matching):
+            break
+        if time.monotonic() >= deadline:
+            message = (
+                "OmaCalendar was not enabled by the running shell"
+                if expect_installed else "OmaCalendar remained loaded after restoration"
+            )
+            raise WidgetCtlError("shell_validation_failed", message)
+        time.sleep(0.1)
 
     runner.run(
         ["hyprctl", "reload"],

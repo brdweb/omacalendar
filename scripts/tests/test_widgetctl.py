@@ -69,7 +69,14 @@ if name == "omarchy":
                 and str(plugin_path).endswith("/.config/omarchy/plugins/org.omacalendar.widget")):
             fail("fixture installed plugin validation failure")
     elif sys.argv[1:] == ["plugin", "list", "--json"]:
-        print(json.dumps(plugin_listing()))
+        listing = plugin_listing()
+        lag = int(os.environ.get("FAKE_REGISTRY_LAG", "0"))
+        counter = home / ("registry-install-count" if listing else "registry-restore-count")
+        calls = int(counter.read_text()) if counter.exists() else 0
+        counter.write_text(str(calls + 1))
+        if calls < lag:
+            listing = [] if listing else [{"id": "org.omacalendar.widget", "enabled": True}]
+        print(json.dumps(listing))
     else:
         fail("unexpected omarchy arguments: " + repr(sys.argv[1:]))
 elif name == "omarchy-shell":
@@ -285,6 +292,28 @@ class Fixture:
 
 
 class WidgetCtlTest(unittest.TestCase):
+    def test_shell_registry_can_converge_after_reload(self) -> None:
+        fixture = Fixture()
+        self.addCleanup(fixture.close)
+        shell, bindings = fixture.shell.read_bytes(), fixture.bindings.read_bytes()
+        delayed = {"FAKE_REGISTRY_LAG": "2"}
+        self.assertTrue(fixture.install(environment=delayed)["ok"])
+        self.assertTrue(fixture.restore(environment=delayed)["ok"])
+        self.assertEqual(fixture.shell.read_bytes(), shell)
+        self.assertEqual(fixture.bindings.read_bytes(), bindings)
+
+    def test_shell_registry_timeout_still_rolls_back(self) -> None:
+        fixture = Fixture()
+        self.addCleanup(fixture.close)
+        shell, bindings = fixture.shell.read_bytes(), fixture.bindings.read_bytes()
+        result = fixture.install(environment={"FAKE_REGISTRY_LAG": "999"}, expected=4)
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["error"]["code"], "shell_validation_failed")
+        self.assertTrue(result["rollbackComplete"])
+        self.assertEqual(fixture.shell.read_bytes(), shell)
+        self.assertEqual(fixture.bindings.read_bytes(), bindings)
+        self.assertFalse(fixture.plugin.exists())
+
     def test_install_and_restore_preserve_unrelated_changes_on_every_bar_edge(self) -> None:
         for edge, section in (
             ("top", "center"),
