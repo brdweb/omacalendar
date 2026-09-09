@@ -25,7 +25,9 @@ credentials, private calendar names, personal events, or provider URLs in report
 
 | Check | Expected result | Result |
 |---|---|---|
+| Clean current-Omarchy VM | Fresh native install, socket activation, desktop/widget launch, upgrade and removal work in a complete desktop session | PENDING |
 | Upgrade beta to candidate | Existing events, accounts, colors, visibility/order, default calendar, reminders and settings survive | PENDING |
+| Schema 1 reconnect/reset | A disposable copy of a legacy profile is archived with private permissions, requests reconnection and completes provider sync as described in Backup and recovery | PENDING |
 | Socket activation | With the desktop closed and daemon stopped, `omacalendarctl system.info` starts the backend through the enabled socket | PENDING |
 | Desktop activation | Launcher, `.ics` opening and `omacalendar://` links focus one app window; repeated activation does not duplicate it | PENDING |
 | Restart | App and daemon restarts preserve data and provider login; no repeated consent or duplicate remote writes | PENDING |
@@ -71,7 +73,8 @@ server capability evidence, not PASS. An unavailable account remains pending.
 
 ## Widget on Omarchy
 
-Install the exact RC archive by the widget repository's candidate instructions;
+Install the exact RC archive using
+[the widget candidate guide](https://github.com/brdweb/omacalendar-widget/blob/v0.1.0-rc.1/docs/STABLE_ACCEPTANCE.md);
 the marketplace/default-branch installation may still select the public beta.
 
 | Check | Expected result | Result |

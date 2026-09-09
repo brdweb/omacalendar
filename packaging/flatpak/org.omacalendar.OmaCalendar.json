@@ -6,6 +6,8 @@
   "command": "omacalendar",
   "branch": "stable",
   "build-options": {
+    "libdir": "/app/lib",
+    "prepend-pkg-config-path": "/app/lib/pkgconfig",
     "strip": true,
     "no-debuginfo": true
   },
@@ -41,6 +43,7 @@
       "buildsystem": "cmake-ninja",
       "config-opts": [
         "-DCMAKE_BUILD_TYPE=Release",
+        "-DCMAKE_INSTALL_LIBDIR=lib",
         "-DBUILD_SHARED_LIBS=ON",
         "-DLIBICAL_BUILD_DOCS=OFF",
         "-DLIBICAL_BUILD_TESTING=OFF",
@@ -64,6 +67,7 @@
       "name": "libsecret",
       "buildsystem": "meson",
       "config-opts": [
+        "--libdir=lib",
         "-Dgtk_doc=false",
         "-Dintrospection=false",
         "-Dvapi=false",

@@ -52,14 +52,23 @@ contains tokens, and account reconnection may be needed after migration.
 
 ## Restore
 
-1. Stop the daemon and close the app/widget.
+1. Close the app/widget and run
+   `systemctl --user stop omacalendard.socket omacalendard.service` so socket
+   activation cannot reopen the database during restoration.
 2. Move the current data directory aside rather than deleting it.
 3. Copy the backup's `data` directory back to the active XDG data path and its
    optional `config` directory to the active XDG config path.
 4. Ensure every restored directory/file is owned by the current user and not
    accessible to group/other users.
-5. Start the daemon and run `omacalendarctl system.health` (or `system.info` on
-   older development builds) before opening the clients.
+5. Start `omacalendard.socket`, then run `omacalendarctl system.health` (or
+   `system.info` on older development builds) before opening the clients.
+
+For Flatpak restoration, stop the app with
+`flatpak kill org.omacalendar.OmaCalendar` (an already-stopped message is harmless),
+move its existing profile directories aside, and restore only that profile's
+backup to the Flatpak paths listed above. Verify it with
+`flatpak run org.omacalendar.OmaCalendar --cli system.health` before reopening
+the desktop. Never restore into the running native or sandbox database.
 
 Never restore a newer database into an older binary. Forward-only migrations do
 not promise downgrade compatibility.

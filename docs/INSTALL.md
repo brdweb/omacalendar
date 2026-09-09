@@ -56,7 +56,8 @@ omacalendar
 `yay -U` can replace `sudo pacman -U`. Current Arch/Omarchy dependencies are
 resolved by pacman; no AUR registration is needed. The native app includes the
 daemon, CLI, desktop integration and widget activation helper. Install the
-widget independently using its exact candidate instructions.
+widget independently using the
+[widget RC installation and test guide](https://github.com/brdweb/omacalendar-widget/blob/v0.1.0-rc.1/docs/STABLE_ACCEPTANCE.md).
 
 The user socket keeps the backend available while the desktop is closed. The
 first CLI/widget connection starts the daemon. After package upgrades, restart
@@ -120,6 +121,12 @@ Release packages include the public Google Desktop OAuth client configuration;
 select **Accounts & settings → Continue with Google in browser**. CalDAV uses
 the provider's HTTPS URL and password/app password. Device-only calendars need
 no account. Read-only ICS subscriptions do not permit event editing.
+
+For a Flatpak status check, run:
+
+```bash
+flatpak run org.omacalendar.OmaCalendar --cli system.info
+```
 
 Select a default calendar, create a synthetic event, and verify it appears in
 Agenda, Day, Week, Month and Year. Use search, calendar visibility and keyboard
