@@ -5,10 +5,12 @@ provides fast, interaction-dense desktop calendar workflows without tasks,
 booking services, natural-language entry, or an OmaCalendar cloud service. An
 optional Quickshell companion is developed and released independently.
 
-The next candidate is **`1.0.0-rc.5`**, being prepared after expanded acceptance
+The qualified candidate is **`1.0.0-rc.5`**, prepared after expanded acceptance
 testing found correctness defects in RC3. RC5 also removes an unrelated vendor
-package index from build setup after it blocked RC4 assembly. It provides Arch, Ubuntu 26.04 `.deb`,
-and Flatpak installation paths. See
+package index from build setup after it blocked RC4 assembly. OmaCalendar now
+produces and supports only the native x86-64 Arch package for current
+Arch/Omarchy. Earlier experimental `.deb` and Flatpak artifacts remain attached
+to their original draft as immutable historical evidence. See
 [Install and update](docs/INSTALL.md), [the owner checklist](docs/OWNER_TESTING.md),
 and [the stable preparation plan](docs/STABLE_PLAN.md). The public beta below
 remains the last published release; pending stable checks have not been waived.
@@ -194,9 +196,9 @@ The `gh attestation verify` steps use the optional GitHub CLI to verify build
 provenance and the SPDX SBOM attestation; the exact `SHA256SUMS` entry must pass
 regardless. GitHub release
 packages do not add a pacman repository or automatic update channel. Install a
-newer release package explicitly when one is published. The source and binary
-AUR recipes remain prepared for publication when new AUR account registration
-is available again.
+newer release package explicitly when one is published. OmaCalendar does not
+publish a second AUR package path; the verified GitHub Arch package is the one
+supported installable artifact.
 
 ## Testing providers
 

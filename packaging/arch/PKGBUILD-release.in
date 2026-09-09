@@ -1,5 +1,4 @@
-# Generated from the validated release staging tree. Do not publish this
-# recipe to the AUR; packaging/aur contains the source and binary AUR recipes.
+# Generated from the validated release staging tree.
 # Maintainer: OmaCalendar contributors
 pkgname=omacalendar
 pkgver=@ARCH_PKGVER@

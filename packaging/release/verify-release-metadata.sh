@@ -98,7 +98,7 @@ if requires_public_release_gates "${release_version}"; then
     "Current-Omarchy owner acceptance on the exact runtime"
     "Prior-release upgrade, backup/restore, and uninstall"
     "Privacy-safe screenshots and public release documentation"
-    "Arch package and future AUR recipes pass clean validation"
+    "Arch package passes clean validation"
   )
   EXTERNAL_APPROVAL_LABELS+=(
     "Google OAuth branding and sensitive-scope verification approved"

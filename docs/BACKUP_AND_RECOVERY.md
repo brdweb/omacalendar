@@ -42,14 +42,6 @@ systemctl --user start omacalendard.socket
 Protect the backup like calendar data. Secret Service credentials are not
 included; reconnecting accounts may be required on a new installation.
 
-For Flatpak, close/stop `org.omacalendar.OmaCalendar` first. Back up its
-`~/.var/app/org.omacalendar.OmaCalendar/data/omacalendar/` and corresponding
-`config/omacalendar/` directory to a private location. Restart it with
-`flatpak run org.omacalendar.OmaCalendar` afterward. Do not run native systemd
-commands for this profile, and do not copy a native database into a running
-sandbox. Flatpak and native keyring identities are separate; the backup never
-contains tokens, and account reconnection may be needed after migration.
-
 ## Restore
 
 1. Close the app/widget and run
@@ -62,13 +54,6 @@ contains tokens, and account reconnection may be needed after migration.
    accessible to group/other users.
 5. Start `omacalendard.socket`, then run `omacalendarctl system.health` (or
    `system.info` on older development builds) before opening the clients.
-
-For Flatpak restoration, stop the app with
-`flatpak kill org.omacalendar.OmaCalendar` (an already-stopped message is harmless),
-move its existing profile directories aside, and restore only that profile's
-backup to the Flatpak paths listed above. Verify it with
-`flatpak run org.omacalendar.OmaCalendar --cli system.health` before reopening
-the desktop. Never restore into the running native or sandbox database.
 
 Never restore a newer database into an older binary. Forward-only migrations do
 not promise downgrade compatibility.

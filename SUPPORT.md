@@ -1,8 +1,9 @@
 # Support and current limitations
 
-`1.0.0-beta.1` is the last public prerelease. The `1.0.0-rc.3` draft is prepared
-for owner testing, with no production support commitment. Its Arch, Ubuntu
-26.04 `.deb`, and Flatpak package instructions are in [Install](docs/INSTALL.md).
+`1.0.0-beta.1` is the last public prerelease. The qualified `1.0.0-rc.5` draft
+is prepared for owner testing, with no production support commitment. Future
+releases produce and support only a native x86-64 Arch package for current
+Arch/Omarchy; instructions are in [Install](docs/INSTALL.md).
 Calendar reading has been owner-tested. An isolated Radicale 3.7.8 development
 slice has also exercised writes, offline recovery, remote pull/delete,
 keep-remote conflict resolution, recurrence instances, and multiple alarms; a
@@ -33,7 +34,7 @@ described in [SECURITY.md](SECURITY.md).
 ## Target support for 1.0
 
 - Current stable Omarchy on x86-64.
-- Qt 6.9 or newer; the candidate also exercises Qt 6.10 on Ubuntu/Flatpak.
+- The Qt, libical, libsecret, and systemd versions shipped by current Arch.
 - Google Calendar, Radicale, Nextcloud, and Fastmail CalDAV after their complete
   live acceptance matrices pass.
 - Device-only calendars and standards-compliant HTTPS/webcal subscriptions.

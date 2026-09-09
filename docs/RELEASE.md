@@ -1,228 +1,108 @@
 # Release procedure
 
-For `1.0.0-rc.5`, follow [STABLE_PLAN.md](STABLE_PLAN.md). On 2026-09-09 the owner
-authorized committing the fixes and continuing through qualification and
-release; remaining technical acceptance is still required.
-`verify-release.sh --draft-candidate v1.0.0-rc.5` verifies the signed, clean RC
-tree, metadata, draft-only disposition and scoped tag authorization. This mode
-rejects stable/beta versions and never qualifies public acceptance. Ordinary
-`verify-release.sh TAG` retains every strict public gate.
+OmaCalendar produces and supports one installable binary: the native x86-64
+Arch package for current Arch/Omarchy. Source and documentation archives,
+checksums, an SPDX SBOM, and attestations accompany it. The release workflow
+does not produce a generic binary archive, Debian package, Flatpak bundle, or
+AUR recipe.
 
-RC5 includes RC4's runtime fixes and corrects its build-environment failure. Preserve
-earlier tags, drafts, and records; qualify the freshly built RC5 app assets
-independently. The Debian transport filename is
-`omacalendar_1.0.0-rc.5-1_amd64.deb`; internal version `1.0.0~rc.5-1` is unchanged
-in meaning. Flatpak SPDX must match the exact exported bundle, not merely the
-pre-export staging tree.
+RC5 predates this scope decision. Preserve its signed tag, draft, assets, and
+qualification records unchanged. Future candidates and stable releases follow
+this procedure.
 
-The release workflow builds Arch first, then Ubuntu 26.04 `.deb` and Flatpak
-from the same commit, tests their actual installations and emits separate
-SBOM/provenance attestations. Only after every package job succeeds does the
-assembler create a draft with one complete `SHA256SUMS`, source, documentation
-archive, install guide and owner checklist. Manual dispatch rehearses the same
-build without tags, attestations or releases. Signed RC tags produce drafts
-for owner testing, not published releases. The oldest build API requirement
-is Qt 6.9: [Qt's OAuth2 API](https://doc.qt.io/qt-6/qabstractoauth2.html)
-documents the token, refresh and scope functions used here as introduced in 6.9.
+The optional `org.omacalendar.widget` Quickshell plugin has its own repository,
+version, qualification gates, tag, and publication schedule. It consumes the
+native daemon installed by the Arch package.
 
-For future prereleases, preflight GitHub-safe asset filenames and test a fresh
-download of every actual draft asset against its checksum/install instructions
-before handing off the release. Keep transport filenames separate from Debian
-version ordering; never repair a filename mismatch by changing signed bytes or
-rewriting an existing tag.
+## 1. Close the qualification gates
 
-The historical beta procedure below remains useful background. For current
-package filenames, download verification, upgrade and removal commands use
-[INSTALL.md](INSTALL.md). Native `.deb` is Ubuntu 26.04 amd64; Flatpak x86-64
-uses KDE 6.10. Their exact build environments and private dependencies are
-described in `packaging/debian/README.md` and `packaging/flatpak/README.md`.
+Stable `1.0.0` requires every applicable app criterion in [PLAN.md](PLAN.md),
+the complete [owner checklist](OWNER_TESTING.md), and no unresolved critical or
+high defect. Provider, desktop, widget, security, and exact-package evidence
+remain separate; one kind of pass does not imply another.
 
-This procedure releases the OmaCalendar desktop application, daemon, and CLI.
-The optional `org.omacalendar.widget` Quickshell plugin has an independent
-version, qualification gate, tag, artifact set, and publication schedule in its
-own repository. Automation creates draft app releases only; publication remains
-an explicit maintainer action. Semantic prereleases such as `1.0.0-beta.1` are
-supported; build metadata is not used in tags or artifact names. Native Arch
-packaging accepts stable releases and the `alpha`, `beta`, or `rc` channels,
-optionally followed by one numeric identifier such as `.1`; this keeps the
-SemVer-to-Arch package version mapping unambiguous.
+Every public version also requires the historical Google installed-app OAuth
+credential recorded in commit `2414615` to remain revoked and the repository
+history decision to remain documented. Release notes, support scope, privacy
+claims, screenshots, and package metadata must agree with shipped behavior.
 
-## 1. Select and record the qualification gate
+## 2. Prepare metadata
 
-- Stable `1.0.0` requires every unchecked app exit criterion in
-  [PLAN.md](PLAN.md), excluding the independent widget criteria, plus the full
-  owner acceptance pass and no unresolved critical/high defect.
-- `1.0.0-beta.1` requires every gate in [BETA_PLAN.md](BETA_PLAN.md) and its
-  [acceptance record](releases/1.0.0-beta.1.md). `PENDING` in a pre-tag or
-  external-approval row blocks tagging; `PENDING` in a post-tag row blocks
-  publication.
-- The historical `1.0.0-alpha` evidence remains in
-  [its immutable acceptance record](releases/1.0.0-alpha.md).
-- Every public version requires the historical Google installed-app OAuth
-  credential recorded in commit `2414615` to remain revoked, with the
-  repository-history decision recorded. A scan allowlist alone does not close
-  that incident.
-- Security, privacy, support, website, screenshots, package metadata, and
-  release-note claims must agree with the shipped behavior.
+1. Set the CMake numeric version and optional prerelease suffix.
+2. Add a dated changelog and AppStream entry.
+3. Update the compatibility table and create the exact acceptance record under
+   `docs/releases/`.
+4. Run `packaging/release/test-versioning.sh` and the full clean CI matrix.
 
-Prereleases carry no production support promise and must not be the sole copy
-of important device-only calendar data.
+A dirty-tree build is development evidence and cannot qualify a release.
 
-## 2. Prepare app metadata
+## 3. Rehearse the Arch release
 
-1. Set CMake's numeric project version and default suffix so their concatenation
-   exactly matches the release version (`1.0.0` plus `-beta.1` for the first
-   beta).
-2. Move changelog entries under a dated version heading; update AppStream and
-   the compatibility table; and fill the acceptance record with exact
-   platforms, toolchains, providers, results, candidate commit, and approvals.
-3. Run `packaging/release/test-versioning.sh`. It validates semantic versioning,
-   release metadata, prerelease-aware AUR rendering, and the fact that pending
-   acceptance evidence cannot pass strict tag verification.
-4. Qualify a clean committed checkout. A dirty-tree build is development
-   evidence, never release evidence.
+Run the **Release candidate** workflow manually with the intended semantic
+version. It executes the protected Google Desktop client injection, build,
+tests, staged install/uninstall checks, Arch package assembly, SPDX completion,
+and artifact upload without creating a tag or GitHub release.
 
-## 3. Create the app candidate
+Download the rehearsal artifact and perform the applicable owner checks on the
+release-reference Omarchy system. Rehearsal artifacts have no release
+attestations and cannot be published as the final package.
 
-Create a signed annotated tag only from the accepted clean app commit:
+## 4. Create the signed candidate
+
+Create a signed annotated tag from the accepted clean commit:
 
 ```bash
-git tag -s v1.0.0-beta.1 -m 'OmaCalendar 1.0.0-beta.1'
-packaging/release/verify-release.sh v1.0.0-beta.1
-git push origin v1.0.0-beta.1
+git tag -s v1.0.0 -m 'OmaCalendar 1.0.0'
+packaging/release/verify-release.sh v1.0.0
+git push origin v1.0.0
 ```
 
-The local verifier cryptographically verifies the tag using configured Git
-trust. The hosted workflow separately requires GitHub to report the annotated
-tag signature as verified.
+For an RC draft, use its exact version and
+`verify-release.sh --draft-candidate v1.0.0-rc.N`. This validates draft-only
+authorization without granting stable acceptance.
 
-Do not push a tag if verification fails. Correct the candidate, delete only an
-unpublished local tag, requalify, and create a new candidate version if needed.
-Never move or replace a published tag.
+Never move a pushed tag or replace assets on a published release. Correct an
+unpublished local tag in place only before it leaves the workstation; correct
+a pushed candidate with a new semantic version.
 
-The tag workflow rebuilds/tests, stages and validates a `/usr` tree, creates
-binary/source archives and a native Arch package, records exact build packages,
-generates an SPDX JSON SBOM, writes `SHA256SUMS`, renders future source and
-binary AUR recipes, and creates GitHub provenance/SBOM attestations. It opens a
-**draft** release and marks hyphenated versions as prereleases. Widget
-automation is separate.
+The signed-tag workflow verifies GitHub's tag signature result, repeats the
+build and tests, builds the Arch package, completes the exact payload SBOM,
+attests the source archive/package/documentation, writes one `SHA256SUMS`, and
+creates a draft release. Automation never publishes the draft.
 
-Before tagging, run **Release candidate** manually with the intended semantic
-version. This exercises the same protected Google Desktop client injection,
-build, test, package, SBOM, and artifact-upload path without creating a tag,
-attestation, or GitHub release. Download and install that rehearsal artifact
-for owner acceptance; only the signed-tag run produces attestations and counts
-as release evidence.
+## 5. Verify downloaded artifacts
 
-## 4. Verify draft artifacts independently
-
-Download the draft assets in a clean environment:
+Download every draft asset into an empty directory. Require the actual hosted
+filenames and bytes to match the manifest, then verify both provenance and SPDX
+attestations for the Arch package:
 
 ```bash
-sha256sum --check SHA256SUMS
-gh attestation verify omacalendar-1.0.0-beta.1-linux-x86_64.tar.zst \
-  --repo brdweb/omacalendar
-gh attestation verify omacalendar-1.0.0-beta.1-linux-x86_64.tar.zst \
+sha256sum --check --strict SHA256SUMS
+gh attestation verify ./omacalendar-VERSION-1-x86_64.pkg.tar.zst \
   --repo brdweb/omacalendar \
+  --source-ref refs/tags/vVERSION \
+  --signer-workflow brdweb/omacalendar/.github/workflows/release.yml
+gh attestation verify ./omacalendar-VERSION-1-x86_64.pkg.tar.zst \
+  --repo brdweb/omacalendar \
+  --source-ref refs/tags/vVERSION \
+  --signer-workflow brdweb/omacalendar/.github/workflows/release.yml \
   --predicate-type https://spdx.dev/Document/v2.3
 ```
 
-Inspect the SBOM and install the exact archive on the release-reference Omarchy
-profile. Repeat daemon restart, desktop launch, offline cached display, one
-provider write round trip, backup/upgrade continuity, and uninstall. Record
-immutable hashes and workflow URLs in the acceptance record.
+Inspect the package and SBOM, install the exact download on clean current
+Omarchy, verify package integrity, socket activation, desktop launch, provider
+continuity, backup/upgrade behavior, and normal removal. Record the package
+hash, signed tag object, source commit, and workflow URLs in the acceptance
+record.
 
-## 5. Publish the GitHub beta
+## 6. Publish and monitor
 
-- Confirm the acceptance record identifies the tag target and contains no
-  credentials, private endpoints, or real calendar content.
-- Review every known limitation and the generated release notes.
-- Publish the draft with the prerelease flag intact.
-- Verify the homepage, privacy, support, screenshot, download, and issue links.
+Publish only after strict metadata verification passes and every applicable
+owner/provider gate is complete. Verify the release page, checksum, package,
+documentation, privacy, support, screenshot, and issue links from an anonymous
+session.
 
-## 6. Publish the native Arch package on GitHub
-
-The first beta ships an installable Arch package directly in the GitHub release:
-
-```text
-omacalendar-1.0.0beta1-1-x86_64.pkg.tar.zst
-```
-
-It is built from the same staged `/usr` tree already exercised by the release
-workflow, included in `SHA256SUMS`, and covered by GitHub provenance. Download
-and verify the package before installing it:
-
-```bash
-sha256sum --check SHA256SUMS
-gh attestation verify ./omacalendar-1.0.0beta1-1-x86_64.pkg.tar.zst \
-  --repo brdweb/omacalendar
-gh attestation verify ./omacalendar-1.0.0beta1-1-x86_64.pkg.tar.zst \
-  --repo brdweb/omacalendar \
-  --predicate-type https://spdx.dev/Document/v2.3
-yay -U ./omacalendar-1.0.0beta1-1-x86_64.pkg.tar.zst
-systemctl --user daemon-reload
-systemctl --user enable --now omacalendard.socket
-systemctl --user try-restart omacalendard.service
-```
-
-`yay -U` installs this local package through pacman; it does not require or add
-an AUR package base. `sudo pacman -U` is equivalent. Verify socket activation,
-launch, reported version, desktop entry, provider
-reconnect, upgrade continuity, and `pacman -Rns omacalendar` on a clean current-
-Omarchy profile. GitHub release packages do not provide automatic pacman/yay
-updates; users must install a newer release package explicitly.
-
-## 7. Keep source and binary AUR recipes ready
-
-AUR publication follows the GitHub beta so every recipe points to immutable,
-public assets. Use separate AUR package bases:
-
-- `omacalendar`: builds the source archive generated from the signed release
-  tag;
-- `omacalendar-bin`: installs the published x86-64 binary archive.
-
-The source recipe does not receive the protected CI environment's bundled
-Google desktop client. It builds with Google available but unconfigured; the
-user must configure their own Desktop OAuth client through Accounts & settings.
-The binary recipe retains the verified archive's bundled configuration.
-The exact RC5 recipes passed [clean-chroot qualification](testing/release-runtime-rc5.md);
-repeat those builds for newly named stable artifacts.
-
-Render the recipes using the release version and verified asset hashes. For
-`1.0.0-beta.1`, the renderer emits Arch `pkgver=1.0.0beta1` while retaining
-`_upstream_version=1.0.0-beta.1`; this keeps pacman's version ordering correct.
-
-For each recipe:
-
-```bash
-makepkg --verifysource
-makepkg --syncdeps --cleanbuild --clean --force
-namcap PKGBUILD ./*.pkg.tar.zst
-makepkg --printsrcinfo > .SRCINFO
-git diff --check
-```
-
-Repeat the build in a current clean Arch chroot before publishing. Review the
-package contents and `.SRCINFO`, commit only packaging sources, then push to the
-matching `ssh://aur@aur.archlinux.org/<pkgbase>.git` repository. Never commit a
-built package, downloaded archive, credential, or private key.
-
-When AUR account creation is available and both listings are public, install the
-binary recipe through Omarchy:
-
-```bash
-omarchy pkg aur add omacalendar-bin
-```
-
-At beta preparation time, the AUR had suspended new account registration and the
-maintainer did not have an existing account. Do not block or misrepresent the
-beta on that external condition. Preserve the validated recipes and publish
-them later, or coordinate with an existing trusted AUR maintainer. A custom
-pacman repository is not required for beta.
-
-## 8. Monitor and correct
-
-Monitor GitHub issues, AUR comments/flags, release workflow results, Google OAuth
-status, and provider regressions. Never retag or replace a published asset. Fix
-a released mistake with a new semantic version such as `1.0.0-beta.2`, update
-the AUR recipes to the new immutable assets, and preserve the old release.
+GitHub packages do not configure automatic pacman updates. Users download and
+verify each newer package explicitly. Monitor GitHub issues, OAuth status, and
+provider regressions. Release corrections under a new semantic version and
+preserve the old release and evidence.

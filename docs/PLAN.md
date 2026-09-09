@@ -1,7 +1,7 @@
 # OmaCalendar 1.0 implementation plan
 
 The [stable preparation plan](STABLE_PLAN.md) tracks the `1.0.0-rc.5` replacement,
-Arch/Ubuntu `.deb`/Flatpak packaging, and the owner pass scheduled for
+Arch-only packaging, and the owner pass scheduled for
 2026-09-09. This document remains the stable gate authority; pending checks
 below are not waived by creating candidate artifacts.
 
@@ -357,9 +357,9 @@ These are widget-project criteria and do not gate an app release:
   lint, unit/integration/UI tests, dependency review, and secret scanning.
 - Prefix-correct systemd user unit, icon, AppStream metadata, `text/calendar`
   and `omacalendar://` registration.
-- Source and binary AUR recipes; checksummed archive; SPDX SBOM; signed GitHub
-  provenance/SBOM attestations; changelog, security/support/privacy/recovery and
-  uninstall documentation.
+- One native x86-64 Arch package; checksummed source/documentation archives;
+  exact-package SPDX SBOM; signed GitHub provenance/SBOM attestations; changelog,
+  security/support/privacy/recovery and uninstall documentation.
 - Clean-current-Omarchy VM install, update, and removal.
 - Independently released widgets declare their supported IPC range; the app
   compatibility table records the IPC/schema contract without version-locking a
@@ -369,8 +369,9 @@ Exit criteria:
 
 - [x] All CI and release jobs are green from a clean checkout.
 - [x] Installed artifacts and systemd paths validate for `/usr` packages.
-- [x] Source/binary AUR packages build in clean chroots (exact RC5 recipes,
-  Arch devtools in the isolated Omarchy guest, 2026-09-09).
+- [x] RC5's historical source/binary AUR recipes built in clean chroots before
+  the decision to retire AUR production (Arch devtools in the isolated Omarchy
+  guest, 2026-09-09).
 - [x] Close the historical Google installed-app OAuth credential incident at
   commit `2414615`: confirm revocation or rotation and document the repository
   history hygiene decision before any public push. This historical gate does

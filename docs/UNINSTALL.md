@@ -4,21 +4,7 @@ Uninstalling binaries and deleting calendar data are separate, deliberate
 operations. Make a backup first if device-only events or pending offline changes
 may be needed later.
 
-For exact Arch, Ubuntu `.deb`, and Flatpak commands, see [Install](INSTALL.md).
-The native service instructions below do not apply to Flatpak.
-
-## Flatpak profile and credentials
-
-Disconnect providers inside the Flatpak before uninstalling when you want its
-saved login removed. Close it, then run
-`flatpak uninstall --user org.omacalendar.OmaCalendar`. This retains its
-`~/.var/app/org.omacalendar.OmaCalendar/` profile. To deliberately delete that
-profile too, first back it up and use Flatpak's `--delete-data` uninstall option.
-Flatpak user-data deletion does not clear external keyring items. After provider
-access is revoked, the sandbox's remaining items can be removed with
-`secret-tool clear application org.omacalendar.OmaCalendar`.
-The native keyring identity is `omacalendar`; do not clear it when removing
-only the sandbox profile.
+For the supported Arch package commands, see [Install](INSTALL.md).
 
 ## Remove the package
 
@@ -29,7 +15,7 @@ systemctl --user disable --now omacalendard.socket
 systemctl --user stop omacalendard.service
 ```
 
-For an Arch package, remove the installed package through pacman/AUR tooling.
+Remove the Arch package through pacman.
 For a manual CMake installation, remove only the paths recorded by that build's
 `install_manifest.txt`; do not recursively delete `/usr` or `/usr/local`.
 
