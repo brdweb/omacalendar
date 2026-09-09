@@ -1,8 +1,8 @@
 # Release procedure
 
-For `1.0.0-rc.1`, follow [STABLE_PLAN.md](STABLE_PLAN.md). The owner requested
+For `1.0.0-rc.2`, follow [STABLE_PLAN.md](STABLE_PLAN.md). The owner requested
 draft packages for testing on 2026-09-09; stable acceptance remains pending.
-`verify-release.sh --draft-candidate v1.0.0-rc.1` verifies the signed, clean RC
+`verify-release.sh --draft-candidate v1.0.0-rc.2` verifies the signed, clean RC
 tree, metadata, draft-only disposition and scoped tag authorization. This mode
 rejects stable/beta versions and never qualifies public acceptance. Ordinary
 `verify-release.sh TAG` retains every strict public gate.
