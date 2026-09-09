@@ -181,6 +181,13 @@ public assets. Use separate AUR package bases:
   tag;
 - `omacalendar-bin`: installs the published x86-64 binary archive.
 
+The source recipe does not receive the protected CI environment's bundled
+Google desktop client. It builds with Google available but unconfigured; the
+user must configure their own Desktop OAuth client through Accounts & settings.
+The binary recipe retains the verified archive's bundled configuration.
+The exact RC5 recipes passed [clean-chroot qualification](testing/release-runtime-rc5.md);
+repeat those builds for newly named stable artifacts.
+
 Render the recipes using the release version and verified asset hashes. For
 `1.0.0-beta.1`, the renderer emits Arch `pkgver=1.0.0beta1` while retaining
 `_upstream_version=1.0.0-beta.1`; this keeps pacman's version ordering correct.

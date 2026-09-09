@@ -15,9 +15,10 @@ credentials, private calendar names, personal events, or provider URLs in report
 Use fresh RC5 app and RC4 widget downloads when their drafts are available. RC3 failed
 expanded runtime acceptance; older receipts do not qualify the new artifacts.
 
-The [RC4 runtime report](testing/release-runtime-rc4.md) records completed
-scripted and real-guest checks of the unchanged implementation. Candidate-specific
-rows below still require RC5 artifact identity and the stated owner acceptance.
+The [RC5 qualification report](testing/release-runtime-rc5.md) records exact-artifact
+automated and real-guest results, with remaining work alongside each area.
+The result columns below are the owner's full acceptance record; a PENDING entry
+does not erase the scoped checks already recorded in that report.
 
 ## Before starting
 
@@ -35,7 +36,7 @@ rows below still require RC5 artifact identity and the stated owner acceptance.
 
 ## Native installation and upgrade
 
-| Check | Expected result | Result |
+| Check | Expected result | Owner result |
 |---|---|---|
 | Clean current-Omarchy VM | Fresh native install, socket activation, desktop/widget launch, upgrade and removal work in a complete desktop session | PENDING |
 | Upgrade beta to candidate | Existing events, accounts, colors, visibility/order, default calendar, reminders and settings survive | PENDING |
@@ -51,7 +52,7 @@ rows below still require RC5 artifact identity and the stated owner acceptance.
 Repeat applicable event actions in Agenda, Day, Week, Month and Year. For Year,
 verify selecting a day and opening/editing its event workflow.
 
-| Check | Expected result | Result |
+| Check | Expected result | Owner result |
 |---|---|---|
 | Navigation/search | Today/date changes, keyboard navigation, search and selecting a result land on the correct event | PENDING |
 | Calendar settings | Visibility, ordering, color and default calendar persist; deletion is offered only when permitted | PENDING |
@@ -73,7 +74,7 @@ Use [Google testing](GOOGLE_TESTING.md) and [CalDAV testing](CALDAV_TESTING.md)
 for the complete matrices. Mark an unsupported provider capability N/A with
 server capability evidence, not PASS. An unavailable account remains pending.
 
-| Target | Required evidence | Result |
+| Target | Required evidence | Owner result |
 |---|---|---|
 | Google external account | No unverified-app bypass; discover primary/secondary calendars; writes/readback, all-day, recurrence/exception, guest policy/RSVP, offline/restart, token reuse and disconnect | PENDING |
 | Google secondary deletion | Delete only a disposable owned secondary test calendar after confirmation; primary/non-owned calendars cannot be deleted | PENDING |
@@ -89,7 +90,7 @@ Install the exact RC archive using
 [the widget candidate guide](https://github.com/brdweb/omacalendar-widget/blob/v0.1.0-rc.4/docs/STABLE_ACCEPTANCE.md);
 the marketplace/default-branch installation may still select the public beta.
 
-| Check | Expected result | Result |
+| Check | Expected result | Owner result |
 |---|---|---|
 | Install/update/reload | Settings survive beta upgrade and shell reload; plugin reports candidate version | PENDING |
 | Four bar edges | Popup placement and every visible action work on top/bottom/left/right | PENDING |
@@ -102,7 +103,7 @@ the marketplace/default-branch installation may still select the public beta.
 
 ## Flatpak desktop
 
-| Check | Expected result | Result |
+| Check | Expected result | Owner result |
 |---|---|---|
 | Install and launch | Runtime installation completes, launcher opens, version is correct, no missing Qt/QML module | PENDING |
 | Isolation | Native and Flatpak can run together with separate data, sockets, windows and keyring identities | PENDING |
