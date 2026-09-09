@@ -6,6 +6,21 @@ Versioning once public releases begin.
 
 ## [Unreleased]
 
+## [1.0.0-rc.5] - 2026-09-09
+
+### Fixed
+
+- Install Flatpak build tools using Ubuntu's signed distribution sources so an
+  inconsistent unrelated Chrome repository on hosted runners cannot block the
+  release. Package signature and checksum verification remain enabled.
+
+### Changed
+
+- Create a fresh candidate after RC4's signed package build stopped at an
+  upstream APT index checksum mismatch. Preserve its signed tag and evidence.
+  Application behavior, IPC and schema are unchanged; candidate versions and
+  final artifacts receive fresh qualification. Widget RC4 remains independent.
+
 ## [1.0.0-rc.4] - 2026-09-09
 
 ### Fixed
@@ -212,7 +227,8 @@ Versioning once public releases begin.
   and emits verifiable build provenance for tagged release candidates. The
   separately documented historical OAuth incident remains a pre-tag gate.
 
-[Unreleased]: https://github.com/brdweb/omacalendar/compare/v1.0.0-rc.4...HEAD
+[Unreleased]: https://github.com/brdweb/omacalendar/compare/v1.0.0-rc.5...HEAD
+[1.0.0-rc.5]: https://github.com/brdweb/omacalendar/compare/v1.0.0-rc.4...v1.0.0-rc.5
 [1.0.0-rc.4]: https://github.com/brdweb/omacalendar/compare/v1.0.0-rc.3...v1.0.0-rc.4
 [1.0.0-rc.3]: https://github.com/brdweb/omacalendar/compare/v1.0.0-rc.2...v1.0.0-rc.3
 [1.0.0-rc.2]: https://github.com/brdweb/omacalendar/compare/v1.0.0-rc.1...v1.0.0-rc.2

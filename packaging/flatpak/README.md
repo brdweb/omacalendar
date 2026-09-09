@@ -11,7 +11,7 @@ than requiring a separately published OmaCalendar Locale extension.
 After verifying the release checksums and attestations:
 
 ```bash
-flatpak install --user ./omacalendar-1.0.0-rc.4-linux-x86_64.flatpak
+flatpak install --user ./omacalendar-1.0.0-rc.5-linux-x86_64.flatpak
 flatpak run org.omacalendar.OmaCalendar
 ```
 
@@ -91,9 +91,9 @@ the runtime and SDK commits used are recorded alongside the bundle.
 ```bash
 export FLATPAK_USER_DIR="$(mktemp -d /tmp/omacalendar-flatpak-install.XXXXXX)"
 packaging/release/build-flatpak.sh \
-  /path/to/omacalendar-1.0.0-rc.4-source.tar.gz 1.0.0-rc.4 /path/to/artifacts
+  /path/to/omacalendar-1.0.0-rc.5-source.tar.gz 1.0.0-rc.5 /path/to/artifacts
 packaging/release/verify-flatpak.sh \
-  /path/to/artifacts/omacalendar-1.0.0-rc.4-linux-x86_64.flatpak 1.0.0-rc.4
+  /path/to/artifacts/omacalendar-1.0.0-rc.5-linux-x86_64.flatpak 1.0.0-rc.5
 ```
 
 Release builds require `OMACALENDAR_BUILD_GOOGLE_CLIENT_ID` and
@@ -119,9 +119,9 @@ After finalizing the SPDX document, verify it independently against the bundle:
 
 ```bash
 python3 packaging/release/verify-flatpak-sbom.py \
-  --bundle /path/to/artifacts/omacalendar-1.0.0-rc.4-linux-x86_64.flatpak \
-  --sbom /path/to/artifacts/omacalendar-1.0.0-rc.4-flatpak.spdx.json \
-  --version 1.0.0-rc.4
+  --bundle /path/to/artifacts/omacalendar-1.0.0-rc.5-linux-x86_64.flatpak \
+  --sbom /path/to/artifacts/omacalendar-1.0.0-rc.5-flatpak.spdx.json \
+  --version 1.0.0-rc.5
 ```
 
 This imports only into a temporary OSTree repository, never an app installation,

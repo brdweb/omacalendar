@@ -9,7 +9,7 @@ on:
       version:
         description: Semantic version to build without creating a release
         required: true
-        default: 1.0.0-rc.4
+        default: 1.0.0-rc.5
         type: string
 
 permissions:
@@ -340,8 +340,16 @@ jobs:
           persist-credentials: false
       - name: Install Flatpak build tools and runtime
         run: |
-          sudo apt-get update
-          sudo apt-get install -y flatpak flatpak-builder ostree dbus-x11 jq
+          # Use Ubuntu's signed distribution sources for these Ubuntu tools.
+          # Unrelated vendor indexes on the hosted runner can be inconsistent
+          # during publication and must not become release dependencies.
+          test -s /etc/apt/sources.list.d/ubuntu.sources
+          ubuntu_apt_options=(
+            -o Dir::Etc::sourcelist=sources.list.d/ubuntu.sources
+            -o Dir::Etc::sourceparts=-
+          )
+          sudo apt-get "${ubuntu_apt_options[@]}" update
+          sudo apt-get "${ubuntu_apt_options[@]}" install -y flatpak flatpak-builder ostree dbus-x11 jq
           # Ubuntu hosted runners restrict the user namespaces bubblewrap
           # needs. This changes only this disposable CI runner, never a user's
           # workstation or any installed package's permissions.

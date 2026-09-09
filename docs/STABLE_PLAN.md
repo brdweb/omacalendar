@@ -3,15 +3,18 @@
 The target is OmaCalendar `1.0.0` and an independently qualified widget
 `0.1.0`. The owner authorized committing the tested changes and continuing
 through qualification and release on 2026-09-09. The app replacement candidate
-is `1.0.0-rc.4`; the independent widget candidate remains `0.1.0-rc.4`.
+is `1.0.0-rc.5`; the independent widget candidate remains `0.1.0-rc.4`.
 Neither version is a declaration that stable gates pass.
 
 RC4 follows the [expanded acceptance failures](ACCEPTANCE_2026-09-09.md) in
 RC3: recurrence dates/identity, CalDAV acknowledgement, conflict chronology,
 local date conversion and accessible event naming. It also closes the
 first-use recurrence capability and cached-floating upgrade paths before
-qualification. Prior signed tags and draft artifacts remain unchanged.
-Use the [RC4 record](releases/1.0.0-rc.4.md); earlier preparation or development
+qualification. RC5 retains that implementation and fixes a build-environment
+dependency after the unrelated Chrome APT repository blocked RC4 assembly.
+[RC4 runtime results](testing/release-runtime-rc4.md) remain separately recorded.
+Prior signed tags and draft artifacts remain unchanged.
+Use the [RC5 record](releases/1.0.0-rc.5.md); earlier preparation or development
 evidence does not automatically qualify the new downloaded artifacts.
 
 ## Delivery plan
