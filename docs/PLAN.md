@@ -101,8 +101,10 @@ VM, or the final owner pass.
   occurrence update/move/RSVP, and rejection of unsupported or spoofed scopes
   before durable state changes.
 - A staged `/usr` install, installed-metadata validation, and manifest-based
-  staged uninstall pass. AUR templates render, but have not passed the required
-  clean-chroot gate.
+  staged uninstall pass. On 2026-09-09, the exact RC5 source and binary AUR
+  recipes passed separate Arch devtools clean-chroot builds and installed-package
+  checks; see [RC5 qualification](testing/release-runtime-rc5.md). Publication
+  and newly built stable artifacts remain separate gates.
 - The enforced 100,000-event performance harness passes in this workspace:
   bounded agenda p95 38.904 ms, indexed search p95 4.426 ms, full widget
   snapshot p95 87.223 ms, and unchanged widget snapshot p95 0.403 ms. It must
@@ -367,7 +369,8 @@ Exit criteria:
 
 - [x] All CI and release jobs are green from a clean checkout.
 - [x] Installed artifacts and systemd paths validate for `/usr` packages.
-- [ ] Source/binary AUR packages build in clean chroots.
+- [x] Source/binary AUR packages build in clean chroots (exact RC5 recipes,
+  Arch devtools in the isolated Omarchy guest, 2026-09-09).
 - [x] Close the historical Google installed-app OAuth credential incident at
   commit `2414615`: confirm revocation or rotation and document the repository
   history hygiene decision before any public push. This historical gate does

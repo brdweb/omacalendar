@@ -74,6 +74,28 @@ text selection and GTK action naming; one post-reinstall export left a portal
 temporary file. Those attempts remain recorded and are not counted as passes.
 The owner should repeat the file workflow after an ordinary update/reinstall.
 
+## AUR clean-chroot qualification
+
+The unchanged `PKGBUILD` and `PKGBUILD-bin` downloaded with RC5 pass separate
+Arch devtools 1.5.1 `makechrootpkg -c` builds. `mkarchroot` created a pristine
+base-devel root from the official core/extra configuration; source and binary
+builds used separate clean copies inside the disposable Omarchy VM. Exact
+signed-release archives were preloaded under the recipes' source-cache names
+because draft URLs require authentication. `makepkg --verifysource` passed for
+both before the build. No recipe was edited and no credentials entered a chroot.
+
+The source build passes 21/21 configured CTest cases, daemon restart smoke and
+QML lint. Both resulting packages pass chroot installation, file integrity,
+ordinary-user IPC/version/private-permission/restart checks and removal. The
+hardware timing gate remains the separately recorded final release-daemon run.
+The generated `.SRCINFO` records match the recipe versions and checksums.
+
+The source build has Google available but unconfigured: it does not receive
+CI's bundled desktop-client configuration. Source users must configure their
+own Google Desktop OAuth client. The published-binary recipe retains the
+configuration of its verified binary archive. These successful chroot builds
+do not publish either AUR package or make draft download URLs public.
+
 ## Work still required for stable publication
 
 1. **Controlled Google and Fastmail accounts.** Complete the applicable consent,
