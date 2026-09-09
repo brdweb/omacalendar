@@ -1,6 +1,6 @@
 # OmaCalendar 1.0 implementation plan
 
-The [stable preparation plan](STABLE_PLAN.md) tracks the `1.0.0-rc.4` replacement,
+The [stable preparation plan](STABLE_PLAN.md) tracks the `1.0.0-rc.5` replacement,
 Arch/Ubuntu `.deb`/Flatpak packaging, and the owner pass scheduled for
 2026-09-09. This document remains the stable gate authority; pending checks
 below are not waived by creating candidate artifacts.
@@ -52,7 +52,7 @@ It is not bundled with, version-locked to, or a release gate for the app.
 ## Earlier implementation baseline
 
 This baseline predates the September 9 expanded acceptance. The
-[RC4 record](releases/1.0.0-rc.4.md) contains current qualification status and
+[RC5 record](releases/1.0.0-rc.5.md) contains current qualification status and
 links to the new evidence. The phase requirements and stable gates below
 remain authoritative.
 

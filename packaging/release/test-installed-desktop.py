@@ -348,7 +348,7 @@ def main():
     parser.add_argument("--xvfb", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--scale", default="1", choices=("1", "1.25", "2"))
-    parser.add_argument("--version", default="1.0.0-rc.4")
+    parser.add_argument("--version", default="1.0.0-rc.5")
     parser.add_argument("--child-root", type=Path, help=argparse.SUPPRESS)
     args = parser.parse_args()
     args.bin, args.xvfb, args.output = args.bin.resolve(), args.xvfb.resolve(), args.output.resolve()

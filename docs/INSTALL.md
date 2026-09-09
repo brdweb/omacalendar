@@ -1,6 +1,6 @@
 # Install, update, and remove OmaCalendar
 
-The replacement candidate is `1.0.0-rc.4`. Its GitHub **draft** is being prepared.
+The replacement candidate is `1.0.0-rc.5`. Its GitHub **draft** is being prepared.
 The commands below apply once its assets are available to authenticated
 repository collaborators with write access. The public beta remains available
 separately. [Owner testing](OWNER_TESTING.md) records the remaining stable gates.
@@ -17,10 +17,10 @@ same draft (omit the unused package patterns):
 
 ```bash
 set -euo pipefail
-gh release download v1.0.0-rc.4 --repo brdweb/omacalendar \
-  --pattern 'omacalendar-1.0.0rc4-1-x86_64.pkg.tar.zst' \
-  --pattern 'omacalendar_1.0.0-rc.4-1_amd64.deb' \
-  --pattern 'omacalendar-1.0.0-rc.4-linux-x86_64.flatpak' \
+gh release download v1.0.0-rc.5 --repo brdweb/omacalendar \
+  --pattern 'omacalendar-1.0.0rc5-1-x86_64.pkg.tar.zst' \
+  --pattern 'omacalendar_1.0.0-rc.5-1_amd64.deb' \
+  --pattern 'omacalendar-1.0.0-rc.5-linux-x86_64.flatpak' \
   --pattern SHA256SUMS --pattern '*documentation.tar.gz'
 ```
 
@@ -32,14 +32,14 @@ For each selected install package, set `package` to its exact filename and verif
 
 ```bash
 set -euo pipefail
-package=omacalendar-1.0.0rc4-1-x86_64.pkg.tar.zst
+package=omacalendar-1.0.0rc5-1-x86_64.pkg.tar.zst
 awk -v file="$package" '$2 == file { print; count++ } END { if (count != 1) exit 1 }' \
   SHA256SUMS | sha256sum --check --strict
 gh attestation verify "./$package" --repo brdweb/omacalendar \
-  --source-ref refs/tags/v1.0.0-rc.4 \
+  --source-ref refs/tags/v1.0.0-rc.5 \
   --signer-workflow brdweb/omacalendar/.github/workflows/release.yml
 gh attestation verify "./$package" --repo brdweb/omacalendar \
-  --source-ref refs/tags/v1.0.0-rc.4 \
+  --source-ref refs/tags/v1.0.0-rc.5 \
   --signer-workflow brdweb/omacalendar/.github/workflows/release.yml \
   --predicate-type https://spdx.dev/Document/v2.3
 ```
@@ -55,11 +55,11 @@ The documentation archive has provenance, not a package SBOM; verify it with:
 
 ```bash
 set -euo pipefail
-documentation=omacalendar-1.0.0-rc.4-documentation.tar.gz
+documentation=omacalendar-1.0.0-rc.5-documentation.tar.gz
 awk -v file="$documentation" '$2 == file { print; count++ } END { if (count != 1) exit 1 }' \
   SHA256SUMS | sha256sum --check --strict
 gh attestation verify "./$documentation" --repo brdweb/omacalendar \
-  --source-ref refs/tags/v1.0.0-rc.4 \
+  --source-ref refs/tags/v1.0.0-rc.5 \
   --signer-workflow brdweb/omacalendar/.github/workflows/release.yml
 tar -xzf "$documentation"
 ```
@@ -73,7 +73,7 @@ Use a fully updated current Arch/Omarchy installation. Back up your existing
 profile, then install the verified native package:
 
 ```bash
-sudo pacman -U ./omacalendar-1.0.0rc4-1-x86_64.pkg.tar.zst
+sudo pacman -U ./omacalendar-1.0.0rc5-1-x86_64.pkg.tar.zst
 systemctl --user daemon-reload
 systemctl --user enable --now omacalendard.socket
 systemctl --user try-restart omacalendard.service
@@ -99,7 +99,7 @@ It does not support Debian 12/13 or Ubuntu 24.04: their Qt versions lack APIs
 used by the app. Use Flatpak on a system with older Qt libraries.
 
 ```bash
-sudo apt install ./omacalendar_1.0.0-rc.4-1_amd64.deb
+sudo apt install ./omacalendar_1.0.0-rc.5-1_amd64.deb
 systemctl --user daemon-reload
 systemctl --user enable --now omacalendard.socket
 systemctl --user try-restart omacalendard.service
@@ -120,7 +120,7 @@ the KDE runtime, then install the verified GitHub bundle:
 ```bash
 flatpak remote-add --user --if-not-exists flathub \
   https://flathub.org/repo/flathub.flatpakrepo
-flatpak install --user ./omacalendar-1.0.0-rc.4-linux-x86_64.flatpak
+flatpak install --user ./omacalendar-1.0.0-rc.5-linux-x86_64.flatpak
 flatpak run org.omacalendar.OmaCalendar
 ```
 
@@ -166,7 +166,7 @@ sync runs in the background; errors and blocked operations remain visible.
 These downloads do not configure an app update repository. Download and verify
 the newer release, then repeat its package install command. `flatpak update`
 updates the runtime but a GitHub bundle requires installing the newer bundle.
-Arch prerelease `1.0.0rc4` and Debian `1.0.0~rc.4-1` sort below stable `1.0.0`.
+Arch prerelease `1.0.0rc5` and Debian `1.0.0~rc.5-1` sort below stable `1.0.0`.
 Use [backup and recovery](BACKUP_AND_RECOVERY.md) before upgrades. Database
 downgrades require restoration of a backup made by the older version.
 
