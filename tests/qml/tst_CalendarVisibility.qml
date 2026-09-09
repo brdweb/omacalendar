@@ -12,7 +12,8 @@ TestCase {
     ]
     readonly property var sets: [
         {"id": "all-calendars", "calendarIds": ["work", "family", "hidden"]},
-        {"id": "focus", "calendarIds": ["work"]}
+        {"id": "focus", "calendarIds": ["work"]},
+        {"id": "empty", "calendarIds": []}
     ]
 
     function ids(values) {
@@ -28,6 +29,13 @@ TestCase {
     function test_active_set_only_shows_its_visible_members() {
         compare(ids(CalendarVisibility.calendarsForSidebar(
                         calendars, sets, "focus", {})), ["work"])
+    }
+
+    function test_empty_set_shows_no_calendars_or_events() {
+        compare(CalendarVisibility.calendarsForSidebar(
+                    calendars, sets, "empty", {}), [])
+        compare(CalendarVisibility.filterEvents(
+                    [{"calendarId": "work"}], calendars, sets, "empty", {}), [])
     }
 
     function test_optimistic_visibility_override_updates_sidebar_and_events() {

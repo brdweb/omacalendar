@@ -1,4 +1,4 @@
-name: Beta bug report
+name: Bug bug report
 description: Report a reproducible OmaCalendar application, daemon, or CLI defect.
 title: "[Bug]: "
 labels:
@@ -13,7 +13,7 @@ body:
     attributes:
       label: OmaCalendar version
       description: Paste the version from `omacalendarctl system.info` or the exact commit.
-      placeholder: 1.0.0-beta.1
+      placeholder: 1.0.0
     validations:
       required: true
   - type: input

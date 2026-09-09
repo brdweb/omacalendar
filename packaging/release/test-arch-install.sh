@@ -68,7 +68,7 @@ required_paths=(
   /usr/share/doc/OmaCalendar/docs/OWNER_TESTING.md
   /usr/share/doc/OmaCalendar/docs/BACKUP_AND_RECOVERY.md
   /usr/share/doc/OmaCalendar/docs/UNINSTALL.md
-  /usr/share/doc/OmaCalendar/docs/STABLE_PLAN.md
+  /usr/share/doc/OmaCalendar/docs/OWNER_TESTING.md
 )
 for installed_path in "${required_paths[@]}"; do
   [[ -f ${installed_path} ]]

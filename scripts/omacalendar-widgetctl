@@ -40,7 +40,7 @@ OFFICIAL_NETWORK_SOURCES = {
     "https://github.com/brdweb/omacalendar-widget",
     "https://github.com/brdweb/omacalendar-widget.git",
 }
-OFFICIAL_NETWORK_REF = "v0.1.0-beta.1"
+OFFICIAL_NETWORK_REF = "v0.1.0"
 GIT_COMMIT_PATTERN = re.compile(r"^[0-9a-f]{40}$")
 EXIT_USAGE = 2
 EXIT_VALIDATION = 3

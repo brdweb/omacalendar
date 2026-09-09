@@ -26,7 +26,8 @@ function calendarIsVisible(calendars, visibilityOverrides, calendarId) {
 
 function calendarIsInActiveSet(calendarSets, activeSetId, calendarId) {
     const allowed = activeSetCalendarIds(calendarSets, activeSetId)
-    return allowed.length === 0 || allowed.indexOf(String(calendarId)) >= 0
+    return !activeSetId || activeSetId === "all-calendars"
+            || allowed.indexOf(String(calendarId)) >= 0
 }
 
 function calendarsForSidebar(calendars, calendarSets, activeSetId,
