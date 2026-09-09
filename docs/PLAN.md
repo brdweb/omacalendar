@@ -49,7 +49,12 @@ It is not bundled with, version-locked to, or a release gate for the app.
 - Dedicated video-meeting authorization. Existing meeting links are preserved,
   detected, and joinable.
 
-## Current status
+## Earlier implementation baseline
+
+This baseline predates the September 9 expanded acceptance. The
+[RC4 record](releases/1.0.0-rc.4.md) contains current qualification status and
+links to the new evidence. The phase requirements and stable gates below
+remain authoritative.
 
 Owner testing has so far covered calendar discovery/reading. Development
 qualification now also includes an isolated Radicale 3.7.8 core-workflow pass
@@ -65,7 +70,7 @@ checks do not satisfy a phase until its complete exit criteria pass end to end.
 | 5 | Independent Quickshell companion | Tracked and released by its own repository; does not gate this app release |
 | 6 | Hardening, packaging, and publication | Fresh compiler/sanitizer/performance and local package evidence pass; clean CI/chroot/VM gates remain |
 
-The published app alpha is `1.0.0-alpha` with IPC 2 and schema 2. The path to
+The earlier app alpha is `1.0.0-alpha` with IPC 2 and schema 2. The path to
 `1.0.0-beta.1`, including public OAuth and Arch package distribution, is tracked
 in [BETA_PLAN.md](BETA_PLAN.md). Stable
 `1.0.0` is reserved for the first app build that passes this document's app

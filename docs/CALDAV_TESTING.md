@@ -57,26 +57,34 @@ retain RFC 5545 `RANGE=THISANDFUTURE` writes. OmaCalendar therefore keeps the
 calendar's `thisAndFuture` capability disabled until it has evidence from that
 specific collection.
 
-On the first durable this-and-future mutation for an unqualified writable
-calendar, the daemon runs a disposable probe before touching the user's event:
+For an unqualified writable calendar, open a recurring event and select
+**Check this-and-future support**. The client calls
+`calendars.probeThisAndFuture`; mutation guards remain closed until the
+asynchronous check succeeds. The daemon checks a disposable resource:
 
-1. Derive a stable probe UID and hidden resource name from the account,
-   calendar, and durable client-mutation identity.
+1. Derive a stable probe UID and portable resource name for the account and
+   calendar so retries use the same URL.
 2. Delete that exact URL first, accepting not-found, so a retry after a crash or
    lost acknowledgment cannot accumulate probe resources.
 3. Create a cancelled, transparent, far-past two-occurrence series; read it
    back; update its exception with `RANGE=THISANDFUTURE`; and read it back again.
 4. Require the parsed readback to retain the range parameter, then delete the
    exact probe resource.
-5. Persist proof only after successful verification and cleanup, and then replay
-   the original durable mutation. The real mutation also receives a readback
-   check before local acknowledgment.
+5. Persist proof only after successful verification and cleanup, then notify the
+   client so it can offer this-and-future editing. The subsequent real mutation
+   also receives a readback check before local acknowledgment.
 
 Any create/read/update/readback/cleanup failure leaves the capability disabled
-and the user's mutation visibly blocked. Deterministic fake-server tests cover
+and displays the failure without changing an existing user event. A retry
+cleans up any resource left by an interrupted check. Deterministic tests cover
 successful proof, stripped range data, failed cleanup, stale-resource recovery,
 and a lost create acknowledgment. These tests do not replace live qualification
 against Radicale, Nextcloud, or Fastmail.
+
+This proof applies to event storage, not attendee scheduling. CalDAV
+this-and-future RSVP remains disabled because Nextcloud can retain the range
+in the attendee's copy while delivering only one occurrence to the organizer.
+Qualified servers still support whole-series and single-occurrence RSVP.
 
 ## Provider matrix
 
@@ -92,13 +100,10 @@ visible blocked/conflict state, invalid credentials result in
 `reauthorization_required`, and a server without sync tokens removes stale
 cached resources after a successful full rebuild.
 
-Current development evidence is intentionally partial. An isolated Radicale
-3.7.8 instance has passed timed, all-day, multi-day, and recurring creation;
-local and remote update/delete; delayed deletion after the undo window; offline
-drain across server and daemon restart; remote pull/deletion; a stale-revision
-conflict with keep-remote resolution; detached-occurrence update; multiple
-alarms; and on-demand coverage hydration. Live guest/RSVP behavior where the
-server advertises scheduling, keep-local/merge conflict resolution, disconnect,
-and the rest of the complete matrix remain open. The live Radicale slice did
-not exercise or qualify this-and-future support. Nextcloud and Fastmail live
-acceptance have not yet run.
+The September 9 RC4 development evidence includes
+[15 real Radicale/HTTPS ICS scenario groups](testing/provider-rc4.md) and
+[8 baseline plus 10 expanded Nextcloud groups](testing/nextcloud-rc4.md).
+Those records identify exact binary hashes, tested capabilities and remaining
+limits. Fastmail still needs a controlled hosted account. Repeat applicable
+checks against the final downloaded candidate; development results do not
+qualify different release bytes.
