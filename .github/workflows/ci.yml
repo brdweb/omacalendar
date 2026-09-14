@@ -15,7 +15,8 @@ on:
     - cron: '31 4 * * 3'
 
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
+  # Extended validation must not be cancelled by a routine main push.
+  group: ci-${{ github.workflow }}-${{ github.ref }}-${{ github.event_name }}-${{ inputs.run_extended }}
   cancel-in-progress: true
 
 permissions:
