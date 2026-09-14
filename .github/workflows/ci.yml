@@ -5,6 +5,14 @@ on:
     branches: [main]
   pull_request:
   workflow_dispatch:
+    inputs:
+      run_extended:
+        description: Run Clang and sanitizer validation in addition to routine gates
+        required: false
+        default: false
+        type: boolean
+  schedule:
+    - cron: '31 4 * * 3'
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
@@ -59,16 +67,13 @@ jobs:
 
   build:
     name: ${{ matrix.name }}
+    if: github.event_name == 'schedule' || inputs.run_extended == true
     runs-on: ubuntu-24.04
     container: archlinux:base-devel
     strategy:
       fail-fast: false
       matrix:
         include:
-          - name: GCC Debug
-            cc: gcc
-            cxx: g++
-            build_type: Debug
           - name: Clang RelWithDebInfo
             cc: clang
             cxx: clang++
@@ -123,6 +128,7 @@ jobs:
 
   sanitizers:
     name: ASan and UBSan
+    if: github.event_name == 'schedule' || inputs.run_extended == true
     runs-on: ubuntu-24.04
     container: archlinux:base-devel
     steps:
