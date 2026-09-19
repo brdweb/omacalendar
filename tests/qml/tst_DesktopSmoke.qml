@@ -1162,7 +1162,7 @@ Item {
                         scene.Window.window.contentItem,
                         "muteInvitationAlerts-calendar-google")
             verify(muteInvitationAlerts !== null)
-            compare(muteInvitationAlerts.text, "Mute invitation alerts")
+            compare(muteInvitationAlerts.text, "Mute alerts")
             calendarPreferenceSpy.target = settings
             calendarPreferenceSpy.clear()
             settings.reorderCalendar("calendar-google",

@@ -24,7 +24,7 @@ Item {
 
         ColumnLayout {
             width: root.width
-            spacing: 4
+            spacing: Theme.spacingXS
 
             Repeater {
                 model: root.dayCount
@@ -36,21 +36,36 @@ Item {
                                                                 root.currentDate.getDate() + index)
                     readonly property var dayEvents: root.eventsForDate(dateValue)
                     Layout.fillWidth: true
-                    spacing: 7
+                    spacing: Theme.spacingSM
 
                     RowLayout {
                         Layout.fillWidth: true
                         Layout.topMargin: daySection.index === 0 ? 0 : 13
-                        spacing: 10
+                        spacing: Theme.spacingSM
 
                         Rectangle {
                             Layout.preferredWidth: 42
                             Layout.preferredHeight: 42
-                            radius: 12
+                            radius: Theme.radiusMD
+                            activeFocusOnTab: true
+                            Accessible.name: Qt.formatDate(daySection.dateValue,
+                                                           "dddd, MMMM d")
+                            Accessible.role: Accessible.Button
                             color: root.sameDate(daySection.dateValue, new Date())
                                    ? Theme.accent : Theme.surface
-                            border.color: root.sameDate(daySection.dateValue, root.currentDate)
+                            border.color: activeFocus
+                                          || root.sameDate(daySection.dateValue,
+                                                           root.currentDate)
                                           ? Theme.focus : Theme.border
+                            border.width: activeFocus ? 2 : 1
+                            Keys.onReturnPressed: event => {
+                                root.dateSelected(daySection.dateValue)
+                                event.accepted = true
+                            }
+                            Keys.onEnterPressed: event => {
+                                root.dateSelected(daySection.dateValue)
+                                event.accepted = true
+                            }
                             Column {
                                 anchors.centerIn: parent
                                 spacing: -2
@@ -127,7 +142,7 @@ Item {
                         visible: daySection.dayEvents.length === 0
                         Layout.fillWidth: true
                         implicitHeight: 44
-                        radius: Theme.smallRadius
+                        radius: Theme.radiusMD
                         color: dayEmptyMouse.containsMouse
                                ? Theme.alpha(Theme.text, 0.045) : "transparent"
                         Text {

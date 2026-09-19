@@ -69,15 +69,26 @@ Item {
                                                     === root.monthStart.getMonth()
                     Layout.fillWidth: true
                     Layout.fillHeight: true
-                    Layout.minimumWidth: 74
-                    Layout.minimumHeight: 82
-                    color: dayCellMouse.containsMouse
+                    Layout.minimumWidth: 64
+                    Layout.minimumHeight: 72
+                    color: dayCellMouse.containsMouse || dayCell.activeFocus
                            ? Theme.alpha(Theme.text, 0.035)
                            : root.sameDate(dateValue, root.currentDate)
                              ? Theme.alpha(Theme.accent, 0.028)
                              : "transparent"
-                    border.width: 1
-                    border.color: Theme.divider
+                    border.width: dayCell.activeFocus ? 2 : 1
+                    border.color: dayCell.activeFocus ? Theme.focus : Theme.divider
+                    activeFocusOnTab: true
+                    Accessible.name: Qt.formatDate(dayCell.dateValue, "dddd, MMMM d")
+                    Accessible.role: Accessible.Button
+                    Keys.onReturnPressed: event => {
+                        root.createRequested(dayCell.dateValue)
+                        event.accepted = true
+                    }
+                    Keys.onEnterPressed: event => {
+                        root.createRequested(dayCell.dateValue)
+                        event.accepted = true
+                    }
 
                     MouseArea {
                         id: dayCellMouse
@@ -105,7 +116,7 @@ Item {
 
                     ColumnLayout {
                         anchors.fill: parent
-                        anchors.margins: 5
+                        anchors.margins: Theme.spacingXS
                         spacing: 3
 
                         RowLayout {
@@ -114,7 +125,7 @@ Item {
                             Rectangle {
                                 Layout.preferredWidth: 28
                                 Layout.preferredHeight: 28
-                                radius: 14
+                                radius: Theme.radiusLG
                                 color: root.sameDate(dayCell.dateValue, new Date())
                                        ? Theme.accent : "transparent"
                                 Text {
@@ -183,6 +194,7 @@ Item {
                             onClicked: {
                                 root.activeOverflowPopup = overflowPopup
                                 overflowPopup.open()
+                                overflowColumn.focusFirstEvent()
                             }
                             contentItem: Text {
                                 textFormat: Text.PlainText
@@ -194,7 +206,7 @@ Item {
                                 font: overflowButton.font
                             }
                             background: Rectangle {
-                                radius: 4
+                                radius: Theme.radiusSM
                                 color: overflowButton.hovered
                                        || overflowButton.activeFocus
                                        ? Theme.alpha(Theme.text, 0.07)
@@ -209,6 +221,7 @@ Item {
                     Popup {
                         id: overflowPopup
                         objectName: "monthOverflow-" + dayCell.index
+                        property bool closedByActivation: false
                         parent: Overlay.overlay
                         readonly property point cellOrigin: dayCell.mapToItem(
                                                                 Overlay.overlay,
@@ -220,17 +233,21 @@ Item {
                                                Overlay.overlay.height - height - 8))
                         width: Math.min(300, Overlay.overlay.width - 16)
                         height: Math.min(320, overflowColumn.implicitHeight + 16)
-                        padding: 8
+                        padding: Theme.spacingSM
                         modal: false
                         dim: false
                         closePolicy: Popup.CloseOnEscape
                                      | Popup.CloseOnPressOutside
                         onClosed: {
-                            if (root.activeOverflowPopup === overflowPopup)
+                            if (root.activeOverflowPopup === overflowPopup) {
                                 root.activeOverflowPopup = null
+                                if (!closedByActivation)
+                                    overflowButton.forceActiveFocus()
+                            }
+                            closedByActivation = false
                         }
                         background: Rectangle {
-                            radius: Theme.radius
+                            radius: Theme.radiusLG
                             color: Theme.surfaceAlt
                             border.color: Theme.divider
                         }
@@ -245,7 +262,22 @@ Item {
                             Column {
                                 id: overflowColumn
                                 width: parent.width
-                                spacing: 4
+                                spacing: Theme.spacingXS
+
+                                function focusFirstEvent() {
+                                    for (let i = 0; i < children.length; ++i) {
+                                        const row = children[i]
+                                        if (!row || !row.children)
+                                            continue
+                                        for (let j = 0; j < row.children.length; ++j) {
+                                            if (String(row.children[j].objectName)
+                                                .startsWith("monthOverflowEvent-")) {
+                                                row.children[j].forceActiveFocus()
+                                                return
+                                            }
+                                        }
+                                    }
+                                }
 
                                 Repeater {
                                     model: dayCell.dayEvents
@@ -253,7 +285,7 @@ Item {
                                         id: overflowEventRow
                                         required property var modelData
                                         width: overflowColumn.width
-                                        spacing: 4
+                                        spacing: Theme.spacingXS
 
                                         AppButton {
                                             objectName: "monthOverflowPrevious-"
@@ -299,6 +331,7 @@ Item {
                                                           overflowEventRow.modelData,
                                                           dayCell.dateValue)
                                             onActivated: value => {
+                                                overflowPopup.closedByActivation = true
                                                 overflowPopup.close()
                                                 root.eventActivated(value)
                                             }
@@ -388,11 +421,7 @@ Item {
     }
 
     function timePattern() {
-        if (timeFormat === "24h")
-            return "HH:mm"
-        if (timeFormat === "12h")
-            return "h:mm AP"
-        return Qt.locale().timeFormat(Locale.ShortFormat)
+        return Theme.timePattern(timeFormat)
     }
 
     function sameDate(first, second) {
@@ -420,5 +449,17 @@ Item {
             return false
         eventDateChanged(value, dateValue)
         return true
+    }
+
+    Text {
+        textFormat: Text.PlainText
+        anchors.centerIn: parent
+        visible: root.events.length === 0
+        horizontalAlignment: Text.AlignHCenter
+        text: qsTr("No events this month")
+              + "\n" + qsTr("Select a day and press Ctrl+N to create one")
+        color: Theme.mutedText
+        font.pixelSize: Theme.smallFontSize
+        z: 10
     }
 }

@@ -19,6 +19,8 @@ Drawer {
                                                        || calendarSets
     property bool connected: false
     property bool busy: false
+    property string statusText: ""
+    property string lastError: ""
     property var preferences: ({})
     property string systemTimeZoneId: "UTC"
     property var availableTimeZoneIds: ["UTC"]
@@ -27,12 +29,22 @@ Drawer {
     readonly property var timeZoneOptions: buildTimeZoneOptions()
     readonly property var defaultCalendarOptions: buildDefaultCalendarOptions()
 
+    // Inline add-account feedback. The global banner is easy to miss while the
+    // drawer covers it, so each form reports its own outcome.
+    property string submissionForm: ""
+    property string submissionMessage: ""
+    property string submissionTone: "info"
+    property bool submissionPending: false
+    property int submissionAccountCount: 0
+    // Set between confirming a calendar deletion and the model catching up.
+    property string deletingCalendarId: ""
+
     signal connectGoogleRequested(string displayName)
     signal connectGoogleClientRequested(string clientId, string displayName)
     signal connectGoogleCredentialsRequested(string displayName)
     signal addCalDavRequested(string endpoint, string username,
                               string password, string displayName)
-    signal addLocalCalendarRequested(string name, string color)
+    signal addLocalCalendarRequested(string name, string color, bool muteAlerts)
     signal removeCalendarRequested(string calendarId)
     signal addIcsSubscriptionRequested(string url, string username,
                                        string password, string displayName)
@@ -48,6 +60,80 @@ Drawer {
     signal exportIcsRequested()
     signal upsertCalendarSetRequested(var calendarSet)
     signal removeCalendarSetRequested(string calendarSetId)
+
+    function openAccounts() {
+        settingsTabs.currentIndex = 0
+        open()
+    }
+
+    function beginSubmission(formId) {
+        submissionForm = String(formId)
+        submissionMessage = ""
+        submissionTone = "info"
+        submissionPending = true
+        submissionAccountCount = accounts.length
+        submissionTimer.restart()
+    }
+
+    function finishSubmission(succeeded, message) {
+        if (submissionForm.length === 0)
+            return
+        submissionPending = false
+        submissionTone = succeeded ? "success" : "danger"
+        submissionMessage = String(message || "")
+        submissionTimer.restart()
+    }
+
+    function clearSubmission() {
+        submissionForm = ""
+        submissionMessage = ""
+        submissionPending = false
+        submissionTone = "info"
+    }
+
+    function submissionStatusText() {
+        if (!submissionPending)
+            return submissionMessage
+        return busy && statusText.length > 0 ? statusText : qsTr("Connecting…")
+    }
+
+    function submissionToneColor() {
+        if (submissionTone === "danger")
+            return Theme.danger
+        if (submissionTone === "success")
+            return Theme.success
+        return Theme.mutedText
+    }
+
+    onAccountsChanged: {
+        if (submissionPending && accounts.length > submissionAccountCount) {
+            finishSubmission(true,
+                             qsTr("Connected. Calendars are syncing in the background."))
+        }
+    }
+
+    onLastErrorChanged: {
+        if (submissionPending && lastError.length > 0)
+            finishSubmission(false, lastError)
+    }
+
+    onCalendarsChanged: deletingCalendarId = ""
+
+    Timer {
+        id: submissionTimer
+        // Long window while the provider round-trip is in flight, short window
+        // once the form has reported its outcome.
+        interval: root.submissionPending ? 45000 : 6000
+        running: root.submissionForm.length > 0
+        onTriggered: root.clearSubmission()
+    }
+
+    Timer {
+        id: deletingGuard
+        interval: 8000
+        running: root.deletingCalendarId.length > 0
+        onTriggered: root.deletingCalendarId = ""
+    }
 
     function buildTimeZoneOptions() {
         const result = [{"text": qsTr("System default — ") + systemTimeZoneId,
@@ -121,7 +207,16 @@ Drawer {
         if (targetIndex < 0)
             return
         ordered.splice(targetIndex + (placeAfter ? 1 : 0), 0, moved)
+        commitCalendarOrder(ordered)
+    }
 
+    function orderedCalendarList() {
+        return calendars.slice().sort(function(left, right) {
+            return Number(left.position || 0) - Number(right.position || 0)
+        })
+    }
+
+    function commitCalendarOrder(ordered) {
         for (let index = 0; index < ordered.length; ++index) {
             if (Number(ordered[index].position || 0) !== index)
                 calendarPreferenceChanged(String(ordered[index].id),
@@ -129,10 +224,66 @@ Drawer {
         }
     }
 
+    // Keyboard equivalent of the drag handle; commits through the same
+    // position-update path the drop handler uses.
+    function moveCalendarByOffset(calendarId, direction) {
+        const id = String(calendarId || "")
+        if (id.length === 0)
+            return
+        const ordered = orderedCalendarList()
+        let sourceIndex = -1
+        for (let index = 0; index < ordered.length; ++index) {
+            if (String(ordered[index].id) === id) {
+                sourceIndex = index
+                break
+            }
+        }
+        const targetIndex = sourceIndex + direction
+        if (sourceIndex < 0 || targetIndex < 0 || targetIndex >= ordered.length)
+            return
+        const moved = ordered[sourceIndex]
+        ordered[sourceIndex] = ordered[targetIndex]
+        ordered[targetIndex] = moved
+        commitCalendarOrder(ordered)
+    }
+
+    function calendarOrderIndex(calendarId) {
+        const ordered = orderedCalendarList()
+        for (let index = 0; index < ordered.length; ++index) {
+            if (String(ordered[index].id) === String(calendarId))
+                return index
+        }
+        return -1
+    }
+
     edge: Qt.RightEdge
-    width: Math.min(560, Overlay.overlay ? Overlay.overlay.width * 0.52 : 560)
+    // Keep the 560px cap on wide windows, but on a narrow window take the room
+    // the forms need while leaving a strip of the calendar visible behind.
+    width: Overlay.overlay
+           ? Math.min(560, Math.max(Overlay.overlay.width * 0.52,
+                                    Overlay.overlay.width - 220))
+           : 560
     height: Overlay.overlay ? Overlay.overlay.height : 760
     modal: true
+
+    enter: Transition {
+        NumberAnimation {
+            property: "position"
+            to: 1.0
+            duration: 180
+            easing.type: Easing.OutCubic
+        }
+        NumberAnimation { property: "opacity"; from: 0.0; to: 1.0; duration: 180 }
+    }
+    exit: Transition {
+        NumberAnimation {
+            property: "position"
+            to: 0.0
+            duration: 150
+            easing.type: Easing.InCubic
+        }
+        NumberAnimation { property: "opacity"; from: 1.0; to: 0.0; duration: 150 }
+    }
 
     background: Rectangle {
         color: Theme.surface
@@ -145,7 +296,7 @@ Drawer {
         RowLayout {
             Layout.fillWidth: true
             Layout.margins: 20
-            spacing: 10
+            spacing: Theme.spacingSM
             AppCloseButton {
                 toolTipText: qsTr("Close settings")
                 onClicked: root.close()
@@ -190,7 +341,7 @@ Drawer {
                 ColumnLayout {
                     width: root.width - 40
                     x: 20
-                    spacing: 13
+                    spacing: Theme.spacingMD
 
                     Item { Layout.preferredHeight: 5 }
                     AppAccordionSection {
@@ -205,15 +356,15 @@ Drawer {
                             required property var modelData
                             Layout.fillWidth: true
                             implicitHeight: accountRow.implicitHeight + 24
-                            radius: Theme.radius
+                            radius: Theme.radiusLG
                             color: Theme.background
                             border.color: Theme.border
 
                             RowLayout {
                                 id: accountRow
                                 anchors.fill: parent
-                                anchors.margins: 12
-                                spacing: 10
+                                anchors.margins: Theme.spacingMD
+                                spacing: Theme.spacingSM
                                 StatusBadge {
                                     dotOnly: true
                                     text: accountCard.modelData.authStatus || qsTr("unknown")
@@ -315,7 +466,7 @@ Drawer {
                         Rectangle {
                             Layout.fillWidth: true
                             implicitHeight: googleContent.implicitHeight + 28
-                            radius: Theme.radius
+                            radius: Theme.radiusLG
                             color: Theme.background
                             border.color: Theme.border
                             ColumnLayout {
@@ -323,8 +474,8 @@ Drawer {
                             anchors.left: parent.left
                             anchors.right: parent.right
                             anchors.top: parent.top
-                            anchors.margins: 14
-                            spacing: 9
+                            anchors.margins: Theme.spacingMD
+                            spacing: Theme.spacingSM
                             Text {
                                 textFormat: Text.PlainText
                                 Layout.fillWidth: true
@@ -356,6 +507,7 @@ Drawer {
                                              || root.googleOAuthConfigured
                                              || googleClientId.text.trim().length > 0)
                                 onClicked: {
+                                    root.beginSubmission("google")
                                     if (root.bundledGoogleOAuthAvailable)
                                         root.connectGoogleRequested(
                                                     googleName.text.trim())
@@ -366,6 +518,28 @@ Drawer {
                                         root.connectGoogleClientRequested(
                                                     googleClientId.text.trim(),
                                                     googleName.text.trim())
+                                }
+                            }
+                            RowLayout {
+                                objectName: "googleSubmissionStatus"
+                                visible: root.submissionForm === "google"
+                                Layout.fillWidth: true
+                                spacing: Theme.spacingSM
+                                BusyIndicator {
+                                    visible: root.submissionPending
+                                    running: visible
+                                    implicitWidth: 18
+                                    implicitHeight: 18
+                                }
+                                Text {
+                                    textFormat: Text.PlainText
+                                    Layout.fillWidth: true
+                                    text: root.submissionStatusText()
+                                    color: root.submissionToneColor()
+                                    font.pixelSize: Theme.smallFontSize
+                                    wrapMode: Text.Wrap
+                                    Accessible.role: Accessible.StaticText
+                                    Accessible.name: text
                                 }
                             }
                             }
@@ -379,7 +553,7 @@ Drawer {
                         Rectangle {
                             Layout.fillWidth: true
                             implicitHeight: caldavContent.implicitHeight + 28
-                            radius: Theme.radius
+                            radius: Theme.radiusLG
                             color: Theme.background
                             border.color: Theme.border
                             ColumnLayout {
@@ -387,8 +561,8 @@ Drawer {
                             anchors.left: parent.left
                             anchors.right: parent.right
                             anchors.top: parent.top
-                            anchors.margins: 14
-                            spacing: 9
+                            anchors.margins: Theme.spacingMD
+                            spacing: Theme.spacingSM
                             AppTextField {
                                 id: caldavName
                                 Layout.fillWidth: true
@@ -421,11 +595,34 @@ Drawer {
                                          && caldavUser.text.trim().length > 0
                                          && caldavPassword.text.length > 0
                                 onClicked: {
+                                    root.beginSubmission("caldav")
                                     root.addCalDavRequested(caldavEndpoint.text.trim(),
                                                            caldavUser.text.trim(),
                                                            caldavPassword.text,
                                                            caldavName.text.trim())
                                     caldavPassword.text = ""
+                                }
+                            }
+                            RowLayout {
+                                objectName: "caldavSubmissionStatus"
+                                visible: root.submissionForm === "caldav"
+                                Layout.fillWidth: true
+                                spacing: Theme.spacingSM
+                                BusyIndicator {
+                                    visible: root.submissionPending
+                                    running: visible
+                                    implicitWidth: 18
+                                    implicitHeight: 18
+                                }
+                                Text {
+                                    textFormat: Text.PlainText
+                                    Layout.fillWidth: true
+                                    text: root.submissionStatusText()
+                                    color: root.submissionToneColor()
+                                    font.pixelSize: Theme.smallFontSize
+                                    wrapMode: Text.Wrap
+                                    Accessible.role: Accessible.StaticText
+                                    Accessible.name: text
                                 }
                             }
                             }
@@ -438,14 +635,17 @@ Drawer {
 
                         Rectangle {
                             Layout.fillWidth: true
-                            implicitHeight: 196
-                            radius: Theme.radius
+                            implicitHeight: icsContent.implicitHeight + 28
+                            radius: Theme.radiusLG
                             color: Theme.background
                             border.color: Theme.border
                             ColumnLayout {
-                            anchors.fill: parent
-                            anchors.margins: 14
-                            spacing: 8
+                            id: icsContent
+                            anchors.left: parent.left
+                            anchors.right: parent.right
+                            anchors.top: parent.top
+                            anchors.margins: Theme.spacingMD
+                            spacing: Theme.spacingSM
                             AppTextField {
                                 id: icsName
                                 Layout.fillWidth: true
@@ -476,11 +676,34 @@ Drawer {
                                 text: qsTr("Add read-only subscription")
                                 enabled: root.connected && icsUrl.text.trim().length > 0
                                 onClicked: {
+                                    root.beginSubmission("ics")
                                     root.addIcsSubscriptionRequested(icsUrl.text.trim(),
                                                                      icsUser.text.trim(),
                                                                      icsPassword.text,
                                                                      icsName.text.trim())
                                     icsPassword.text = ""
+                                }
+                            }
+                            RowLayout {
+                                objectName: "icsSubmissionStatus"
+                                visible: root.submissionForm === "ics"
+                                Layout.fillWidth: true
+                                spacing: Theme.spacingSM
+                                BusyIndicator {
+                                    visible: root.submissionPending
+                                    running: visible
+                                    implicitWidth: 18
+                                    implicitHeight: 18
+                                }
+                                Text {
+                                    textFormat: Text.PlainText
+                                    Layout.fillWidth: true
+                                    text: root.submissionStatusText()
+                                    color: root.submissionToneColor()
+                                    font.pixelSize: Theme.smallFontSize
+                                    wrapMode: Text.Wrap
+                                    Accessible.role: Accessible.StaticText
+                                    Accessible.name: text
                                 }
                             }
                             }
@@ -496,7 +719,7 @@ Drawer {
                 ColumnLayout {
                     width: root.width - 40
                     x: 20
-                    spacing: 11
+                    spacing: Theme.spacingMD
                     Item { Layout.preferredHeight: 5 }
 
                     RowLayout {
@@ -517,13 +740,13 @@ Drawer {
                             required property var modelData
                             Layout.fillWidth: true
                             implicitHeight: setRow.implicitHeight + 20
-                            radius: Theme.radius
+                            radius: Theme.radiusLG
                             color: Theme.background
                             border.color: Theme.border
                             RowLayout {
                                 id: setRow
                                 anchors.fill: parent
-                                anchors.margins: 10
+                                anchors.margins: Theme.spacingSM
                                 ColumnLayout {
                                     Layout.fillWidth: true
                                     spacing: 2
@@ -584,15 +807,15 @@ Drawer {
                     Rectangle {
                         Layout.fillWidth: true
                         implicitHeight: defaultCalendarRow.implicitHeight + 28
-                        radius: Theme.radius
+                        radius: Theme.radiusLG
                         color: Theme.surfaceAlt
                         border.color: Theme.border
 
                         RowLayout {
                             id: defaultCalendarRow
                             anchors.fill: parent
-                            anchors.margins: 14
-                            spacing: 18
+                            anchors.margins: Theme.spacingMD
+                            spacing: Theme.spacingLG
 
                             ColumnLayout {
                                 Layout.fillWidth: true
@@ -644,9 +867,14 @@ Drawer {
                             readonly property string calendarId: String(
                                                                       modelData.id
                                                                       || "")
+                            readonly property bool deleting:
+                                root.deletingCalendarId.length > 0
+                                && root.deletingCalendarId === calendarId
+                            readonly property int orderIndex:
+                                root.calendarOrderIndex(calendarId)
                             Layout.fillWidth: true
                             implicitHeight: calendarSettings.implicitHeight + 24
-                            radius: Theme.radius
+                            radius: Theme.radiusLG
                             z: reorderMouse.drag.active ? 100
                                : calendarDropArea.validDrop ? 50 : 0
                             color: calendarDropArea.validDrop
@@ -655,7 +883,12 @@ Drawer {
                             border.width: calendarDropArea.validDrop ? 2 : 1
                             border.color: calendarDropArea.validDrop
                                           ? Theme.accent : Theme.border
-                            opacity: reorderMouse.drag.active ? 0.68 : 1
+                            enabled: !deleting
+                            opacity: reorderMouse.drag.active ? 0.68
+                                                              : deleting ? 0.5 : 1
+                            Behavior on opacity {
+                                NumberAnimation { duration: 120 }
+                            }
 
                             DropArea {
                                 id: calendarDropArea
@@ -699,7 +932,7 @@ Drawer {
                                    ? calendarCard.height - height / 2 : -height / 2
                                 width: calendarCard.width - 12
                                 height: 28
-                                radius: 8
+                                radius: Theme.radiusMD
                                 color: Theme.accent
 
                                 Text {
@@ -722,8 +955,8 @@ Drawer {
                             ColumnLayout {
                                 id: calendarSettings
                                 anchors.fill: parent
-                                anchors.margins: 12
-                                spacing: 6
+                                anchors.margins: Theme.spacingMD
+                                spacing: Theme.spacingXS
                                 RowLayout {
                                     Layout.fillWidth: true
 
@@ -742,12 +975,12 @@ Drawer {
                                             textFormat: Text.PlainText
                                             z: 1
                                             anchors.centerIn: parent
-                                            text: "≡"
+                                            text: Theme.glyphDragHandle
                                             color: reorderMouse.drag.active
                                                    ? Theme.accent
                                                    : reorderMouse.containsMouse
                                                    ? Theme.text : Theme.mutedText
-                                            font.pixelSize: Theme.fontSize + 5
+                                            font.pixelSize: Theme.iconFontSize
                                             font.weight: Font.DemiBold
                                         }
                                         MouseArea {
@@ -780,20 +1013,20 @@ Drawer {
 
                                             Rectangle {
                                                 anchors.fill: parent
-                                                radius: 9
+                                                radius: Theme.radiusMD
                                                 color: Theme.surface
                                                 border.width: 2
                                                 border.color: Theme.accent
 
                                                 RowLayout {
                                                     anchors.fill: parent
-                                                    anchors.leftMargin: 10
-                                                    anchors.rightMargin: 12
-                                                    spacing: 8
+                                                    anchors.leftMargin: Theme.spacingSM
+                                                    anchors.rightMargin: Theme.spacingMD
+                                                    spacing: Theme.spacingSM
                                                     Rectangle {
                                                         Layout.preferredWidth: 10
                                                         Layout.preferredHeight: 10
-                                                        radius: 5
+                                                        radius: width / 2
                                                         color: calendarCard.modelData.colorOverride
                                                                || calendarCard.modelData.color
                                                                || Theme.accent
@@ -820,10 +1053,49 @@ Drawer {
                                         }
                                     }
 
+                                    // Keyboard-reachable equivalent of the drag
+                                    // handle, committing the same positions.
+                                    AppButton {
+                                        objectName: "calendarMoveUp-"
+                                                    + calendarCard.calendarId
+                                        Layout.preferredWidth: 26
+                                        Layout.preferredHeight: 26
+                                        iconText: Theme.glyphUp
+                                        compact: true
+                                        quiet: true
+                                        enabled: calendarCard.orderIndex > 0
+                                        toolTipText: qsTr("Move calendar up")
+                                        Accessible.name: qsTr("Move ")
+                                            + String(calendarCard.modelData.name
+                                                     || qsTr("calendar"))
+                                            + qsTr(" up")
+                                        onClicked: root.moveCalendarByOffset(
+                                                       calendarCard.calendarId, -1)
+                                    }
+                                    AppButton {
+                                        objectName: "calendarMoveDown-"
+                                                    + calendarCard.calendarId
+                                        Layout.preferredWidth: 26
+                                        Layout.preferredHeight: 26
+                                        iconText: Theme.glyphDown
+                                        compact: true
+                                        quiet: true
+                                        enabled: calendarCard.orderIndex >= 0
+                                                 && calendarCard.orderIndex
+                                                    < root.calendars.length - 1
+                                        toolTipText: qsTr("Move calendar down")
+                                        Accessible.name: qsTr("Move ")
+                                            + String(calendarCard.modelData.name
+                                                     || qsTr("calendar"))
+                                            + qsTr(" down")
+                                        onClicked: root.moveCalendarByOffset(
+                                                       calendarCard.calendarId, 1)
+                                    }
+
                                     Rectangle {
                                         Layout.preferredWidth: 10
                                         Layout.preferredHeight: 10
-                                        radius: 5
+                                        radius: width / 2
                                         color: calendarCard.modelData.colorOverride
                                                || calendarCard.modelData.color
                                                || Theme.accent
@@ -836,6 +1108,15 @@ Drawer {
                                         font.pixelSize: Theme.fontSize
                                         font.weight: Font.DemiBold
                                         elide: Text.ElideRight
+                                    }
+                                    Text {
+                                        objectName: "calendarDeleting-"
+                                                    + calendarCard.calendarId
+                                        textFormat: Text.PlainText
+                                        visible: calendarCard.deleting
+                                        text: qsTr("Deleting…")
+                                        color: Theme.mutedText
+                                        font.pixelSize: Theme.smallFontSize
                                     }
                                     StatusBadge {
                                         visible: calendarCard.modelData.readOnly === true
@@ -865,7 +1146,7 @@ Drawer {
                                 }
                                 RowLayout {
                                     Layout.fillWidth: true
-                                    spacing: 14
+                                    spacing: Theme.spacingMD
                                     AppCheckBox {
                                         text: qsTr("Visible")
                                         checked: calendarCard.modelData.visible !== false
@@ -878,12 +1159,12 @@ Drawer {
                                         id: muteInvitationAlerts
                                         objectName: "muteInvitationAlerts-"
                                                     + calendarCard.calendarId
-                                        text: qsTr("Mute invitation alerts")
+                                        text: qsTr("Mute alerts")
                                         checked: calendarCard.modelData.ignoreAlerts === true
                                         ToolTip.visible: hovered
                                                              && !reorderMouse.drag.active
                                         ToolTip.delay: 450
-                                        ToolTip.text: qsTr("Suppresses desktop notifications for new, changed, or cancelled invitations on this calendar. Event reminders still fire.")
+                                        ToolTip.text: qsTr("Suppresses desktop notifications for reminders and for new, changed, or cancelled invitations on this calendar.")
                                         Accessible.description: ToolTip.text
                                         onToggled: root.calendarPreferenceChanged(
                                                        calendarCard.modelData.id,
@@ -918,21 +1199,21 @@ Drawer {
                 ColumnLayout {
                     width: root.width - 40
                     x: 20
-                    spacing: 13
+                    spacing: Theme.spacingMD
                     Item { Layout.preferredHeight: 5 }
 
                     SectionLabel { text: qsTr("DISPLAY") }
                     Rectangle {
                         Layout.fillWidth: true
                         implicitHeight: displayPreferences.implicitHeight + 24
-                        radius: Theme.radius
+                        radius: Theme.radiusLG
                         color: Theme.background
                         border.color: Theme.border
                         ColumnLayout {
                             id: displayPreferences
                             anchors.fill: parent
-                            anchors.margins: 12
-                            spacing: 10
+                            anchors.margins: Theme.spacingMD
+                            spacing: Theme.spacingSM
                             AppComboBox {
                                 Layout.fillWidth: true
                                 model: [qsTr("System time format"), qsTr("12-hour"), qsTr("24-hour")]
@@ -1189,7 +1470,7 @@ Drawer {
         }
 
         contentItem: ColumnLayout {
-            spacing: 10
+            spacing: Theme.spacingSM
             AppTextField {
                 id: setName
                 Layout.fillWidth: true
@@ -1303,7 +1584,7 @@ Drawer {
         }
 
         contentItem: ColumnLayout {
-            spacing: 10
+            spacing: Theme.spacingSM
             Text {
                 textFormat: Text.PlainText
                 Layout.fillWidth: true
@@ -1370,7 +1651,7 @@ Drawer {
         }
         onAccepted: root.removeAccountRequested(accountData.id, !keepCache.checked)
         contentItem: ColumnLayout {
-            spacing: 10
+            spacing: Theme.spacingSM
             Text {
                 textFormat: Text.PlainText
                 Layout.fillWidth: true
@@ -1397,9 +1678,10 @@ Drawer {
         standardButtons: Dialog.Cancel | Dialog.Save
         onAccepted: root.addLocalCalendarRequested(
                         localCalendarName.text.trim(),
-                        String(localCalendarColor.selectedColor))
+                        String(localCalendarColor.selectedColor),
+                        localCalendarMuteAlerts.checked)
         contentItem: ColumnLayout {
-            spacing: 9
+            spacing: Theme.spacingSM
             AppTextField {
                 id: localCalendarName
                 Layout.fillWidth: true
@@ -1409,6 +1691,11 @@ Drawer {
                 id: localCalendarColor
                 Layout.fillWidth: true
                 selectedColor: "#7aa2f7"
+            }
+            AppCheckBox {
+                id: localCalendarMuteAlerts
+                text: qsTr("Mute alerts (reminders & invitations)")
+                checked: false
             }
         }
     }

@@ -20,8 +20,8 @@ ScrollView {
     GridLayout {
         width: root.availableWidth
         columns: root.width >= 1040 ? 4 : root.width >= 760 ? 3 : 2
-        columnSpacing: 14
-        rowSpacing: 14
+        columnSpacing: Theme.spacingMD
+        rowSpacing: Theme.spacingMD
 
         Repeater {
             model: 12
@@ -33,15 +33,15 @@ ScrollView {
                                                             index, 1)
                 Layout.fillWidth: true
                 Layout.preferredHeight: 282
-                radius: Theme.radius
+                radius: Theme.radiusLG
                 color: Theme.surface
                 border.color: Theme.border
                 clip: true
 
                 ColumnLayout {
                     anchors.fill: parent
-                    anchors.margins: 12
-                    spacing: 5
+                    anchors.margins: Theme.spacingMD
+                    spacing: Theme.spacingXS
 
                     ItemDelegate {
                         id: monthHeader
@@ -50,7 +50,7 @@ ScrollView {
                         padding: 0
                         onClicked: root.monthSelected(monthCard.monthDate)
                         background: Rectangle {
-                            radius: 6
+                            radius: Theme.radiusSM
                             color: monthHeader.hovered
                                    ? Theme.alpha(Theme.text, 0.055) : "transparent"
                         }

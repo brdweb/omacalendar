@@ -56,7 +56,7 @@ ItemDelegate {
     ToolTip.delay: 450
 
     background: Rectangle {
-        radius: Theme.radius
+        radius: Theme.radiusLG
         color: root.selected ? Theme.alpha(Theme.accent, 0.12)
                              : root.hovered ? Theme.surfaceAlt : Theme.surface
         border.width: root.selected || root.activeFocus ? 2 : 1

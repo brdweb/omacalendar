@@ -66,7 +66,7 @@ Item {
            * root.pixelsPerHour
         height: Math.max(4, root.selectionDurationMinutes / 60
                          * root.pixelsPerHour)
-        radius: 6
+        radius: Theme.radiusSM
         color: Theme.alpha(Theme.accent, 0.17)
         border.width: 1
         border.color: Theme.alpha(Theme.accent, 0.72)

@@ -46,11 +46,11 @@ Item {
 
             RowLayout {
                 anchors.fill: parent
-                anchors.leftMargin: 8
-                anchors.rightMargin: 8
-                anchors.topMargin: 7
-                anchors.bottomMargin: 7
-                spacing: 10
+                anchors.leftMargin: Theme.spacingSM
+                anchors.rightMargin: Theme.spacingSM
+                anchors.topMargin: Theme.spacingSM
+                anchors.bottomMargin: Theme.spacingSM
+                spacing: Theme.spacingSM
 
                 Text {
                     textFormat: Text.PlainText
@@ -63,7 +63,7 @@ Item {
                 ColumnLayout {
                     id: allDayColumn
                     Layout.fillWidth: true
-                    spacing: 4
+                    spacing: Theme.spacingXS
                     Repeater {
                         model: root.headerEvents
                         delegate: EventChip {
@@ -187,7 +187,7 @@ Item {
                             textFormat: Text.PlainText
                             width: 55
                             anchors.right: hourLine.left
-                            anchors.rightMargin: 10
+                            anchors.rightMargin: Theme.spacingSM
                             anchors.verticalCenter: hourLine.verticalCenter
                             text: hourMarker.index === 0 ? ""
                                               : Qt.formatTime(new Date(2000, 0, 1,
@@ -276,7 +276,7 @@ Item {
                         x: 3
                         width: 8
                         height: 8
-                        radius: 4
+                        radius: width / 2
                         color: Theme.danger
                     }
                 }
@@ -377,11 +377,7 @@ Item {
     }
 
     function hourPattern() {
-        if (timeFormat === "24h")
-            return "HH:mm"
-        if (timeFormat === "12h")
-            return "h AP"
-        return Qt.locale().timeFormat(Locale.ShortFormat)
+        return Theme.hourPattern(timeFormat)
     }
 
     function sameDate(first, second) {
@@ -437,5 +433,17 @@ Item {
 
     function eventReference(value) {
         return String(value.id || "") + "\n" + String(value.recurrenceId || "")
+    }
+
+    Text {
+        textFormat: Text.PlainText
+        anchors.centerIn: parent
+        visible: root.events.length === 0
+        horizontalAlignment: Text.AlignHCenter
+        text: qsTr("No events on this day")
+              + "\n" + qsTr("Double-click a time slot or press Ctrl+N to create one")
+        color: Theme.mutedText
+        font.pixelSize: Theme.smallFontSize
+        z: 10
     }
 }

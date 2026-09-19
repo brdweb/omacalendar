@@ -20,7 +20,7 @@ TextField {
     Accessible.role: Accessible.EditableText
 
     background: Rectangle {
-        radius: Theme.smallRadius
+        radius: Theme.radiusMD
         color: Theme.background
         border.width: control.activeFocus ? 2 : 1
         border.color: control.activeFocus

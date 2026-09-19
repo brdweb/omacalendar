@@ -36,15 +36,15 @@ Rectangle {
 
     ColumnLayout {
         anchors.fill: parent
-        anchors.leftMargin: 16
-        anchors.rightMargin: 16
-        anchors.topMargin: 17
-        anchors.bottomMargin: 14
-        spacing: 12
+        anchors.leftMargin: Theme.spacingLG
+        anchors.rightMargin: Theme.spacingLG
+        anchors.topMargin: Theme.spacingLG
+        anchors.bottomMargin: Theme.spacingMD
+        spacing: Theme.spacingMD
 
         RowLayout {
             Layout.fillWidth: true
-            spacing: 6
+            spacing: Theme.spacingXS
 
             AppButton {
                 iconText: "‹"
@@ -135,7 +135,7 @@ Rectangle {
 
         Flow {
             Layout.fillWidth: true
-            spacing: 5
+            spacing: Theme.spacingXS
 
             Repeater {
                 model: root.modelCount(root.effectiveCalendarSetsModel) > 0
@@ -190,18 +190,18 @@ Rectangle {
                                !root.calendarIsVisible(modelData.id))
 
                 background: Rectangle {
-                    radius: Theme.smallRadius
+                    radius: Theme.radiusMD
                     color: calendarDelegate.hovered || calendarDelegate.activeFocus
                            ? Theme.alpha(Theme.text, 0.065) : "transparent"
                     border.width: calendarDelegate.activeFocus ? 1 : 0
                     border.color: Theme.focus
                 }
                 contentItem: RowLayout {
-                    spacing: 9
+                    spacing: Theme.spacingSM
                     Rectangle {
                         Layout.preferredWidth: 13
                         Layout.preferredHeight: 13
-                        radius: 4
+                        radius: Theme.radiusSM
                         color: root.calendarIsVisible(calendarDelegate.modelData.id)
                                ? (calendarDelegate.modelData.color || Theme.accent)
                                : "transparent"

@@ -32,7 +32,7 @@ SpinBox {
         height: Math.floor((control.height - 2) / 2)
         color: control.up.pressed ? Theme.accentSoft
                                   : control.up.hovered ? Theme.surfaceAlt : "transparent"
-        radius: Theme.smallRadius
+        radius: Theme.radiusMD
         Text {
             textFormat: Text.PlainText
             anchors.centerIn: parent
@@ -49,7 +49,7 @@ SpinBox {
         height: Math.floor((control.height - 2) / 2)
         color: control.down.pressed ? Theme.accentSoft
                                     : control.down.hovered ? Theme.surfaceAlt : "transparent"
-        radius: Theme.smallRadius
+        radius: Theme.radiusMD
         Text {
             textFormat: Text.PlainText
             anchors.centerIn: parent
@@ -60,7 +60,7 @@ SpinBox {
     }
 
     background: Rectangle {
-        radius: Theme.smallRadius
+        radius: Theme.radiusMD
         color: Theme.surface
         border.width: control.activeFocus ? 2 : 1
         border.color: control.activeFocus ? Theme.focus : Theme.border

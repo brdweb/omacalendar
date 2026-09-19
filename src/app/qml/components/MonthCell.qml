@@ -12,7 +12,7 @@ ItemDelegate {
     property int eventCount: 0
 
     background: Rectangle {
-        radius: 7
+        radius: Theme.radiusSM
         color: root.hovered ? Theme.alpha(Theme.text, 0.055) : "transparent"
     }
     contentItem: Item {
@@ -23,7 +23,7 @@ ItemDelegate {
                 anchors.horizontalCenter: parent.horizontalCenter
                 width: 25
                 height: 25
-                radius: 13
+                radius: width / 2
                 color: root.isToday ? Theme.accent
                                     : root.selected ? Theme.accentSoft : "transparent"
                 border.width: root.selected && !root.isToday ? 1 : 0

@@ -16,7 +16,7 @@ CheckBox {
         y: Math.round((control.height - height) / 2)
         width: 19
         height: 19
-        radius: 5
+        radius: Theme.radiusSM
         color: control.checked ? Theme.accent
                                : control.hovered ? Theme.surfaceAlt : Theme.surface
         border.width: control.activeFocus ? 2 : 1
