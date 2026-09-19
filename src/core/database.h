@@ -264,6 +264,12 @@ class Database final {
   bool snoozeReminderAt(qint64 id, int minutes, const QDateTime& now,
                         QString* errorMessage = nullptr);
   bool dismissReminder(qint64 id, QString* errorMessage = nullptr);
+  // Dismisses pending reminder jobs that are long overdue and attached to
+  // occurrences that have already started or passed. Returns how many jobs
+  // were dismissed. Jobs for still-upcoming occurrences survive so a daemon
+  // that was offline can catch up on pre-event warnings it missed.
+  [[nodiscard]] qint64 dismissStaleReminders(const QDateTime& now, int graceSeconds,
+                                             QString* errorMessage = nullptr);
   bool markReminderDelivered(qint64 id, QString* errorMessage = nullptr);
   [[nodiscard]] QList<Event> notificationEventsForCalendars(
       const QStringList& calendarIds, QString* errorMessage = nullptr) const;
@@ -278,6 +284,12 @@ class Database final {
                                    QString* errorMessage = nullptr);
   [[nodiscard]] bool hasNotificationDeliveryForEvent(
       const QString& eventId, QString* errorMessage = nullptr) const;
+  [[nodiscard]] bool notificationDeliveryExists(const QString& fingerprint,
+                                                QString* errorMessage = nullptr) const;
+  // Persists durable baseline markers for the given invitation events so a
+  // daemon restart does not re-notify or silently re-suppress them.
+  bool persistInvitationBaselines(const QList<Event>& invitations,
+                                  QString* errorMessage = nullptr);
 
   [[nodiscard]] QJsonValue providerState(const QString& accountId,
                                          const QString& calendarId, const QString& key,

@@ -2787,6 +2787,15 @@ QJsonValue Daemon::onInvitationsList(const QJsonObject& params, ipc::Error* erro
   const int limit = qBound(1, requestedLimit, kMaxInvitationPageLimit);
   const int requestedOffset = qMax(0, params.value(QStringLiteral("offset")).toInt());
   const int total = static_cast<int>(events.size());
+  int upcomingTotal = 0;
+  int pastTotal = 0;
+  for (const Event& event : events) {
+    if (invitationEnd(event) > now) {
+      ++upcomingTotal;
+    } else {
+      ++pastTotal;
+    }
+  }
   const int offset = qMin(requestedOffset, total);
   const int count = qMin(limit, total - offset);
 
@@ -2814,6 +2823,8 @@ QJsonValue Daemon::onInvitationsList(const QJsonObject& params, ipc::Error* erro
                      {QStringLiteral("offset"), offset},
                      {QStringLiteral("limit"), limit},
                      {QStringLiteral("total"), total},
+                     {QStringLiteral("upcomingTotal"), upcomingTotal},
+                     {QStringLiteral("pastTotal"), pastTotal},
                      {QStringLiteral("hasMore"), offset + count < total},
                      {QStringLiteral("nextOffset"), offset + count},
                      {QStringLiteral("revision"), m_database.changeRevision()}};

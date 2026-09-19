@@ -4392,15 +4392,44 @@ QList<ReminderJob> Database::reminders(const int limit, QString* errorMessage) c
 QList<ReminderJob> Database::dueReminders(const QDateTime& now, const int limit,
                                           QString* errorMessage) const {
   QList<ReminderJob> result;
+  // Pending jobs deliver only when they fired within the grace window or their
+  // occurrence is still upcoming. The occurrence identity is matched against
+  // event_instances, whose start_utc/start_date columns are canonical UTC
+  // values — provider recurrence ids on the job may use non-ISO spellings, so
+  // they are never compared lexically. Date-only all-day instances have an
+  // empty start_utc and compare via start_date. Snoozed jobs keep the previous
+  // behavior — the snooze is explicit user intent.
   QSqlQuery query(m_database);
   query.prepare(QStringLiteral(R"SQL(
-    SELECT * FROM reminder_jobs
-    WHERE (state='pending' AND fire_at<=?)
-       OR (state='snoozed' AND snoozed_until<=?)
-    ORDER BY COALESCE(NULLIF(snoozed_until,''),fire_at),id LIMIT ?
+    SELECT j.* FROM reminder_jobs j
+    JOIN events e ON e.id=j.event_id
+    JOIN calendars c ON c.id=e.calendar_id
+    WHERE c.ignore_alerts=0 AND (
+      (
+        j.state='pending' AND j.fire_at<=? AND (
+          j.fire_at>=?
+          OR EXISTS (
+            SELECT 1 FROM event_instances ei
+            WHERE ei.event_id=j.event_id AND ei.recurrence_id=j.occurrence_id
+              AND (ei.start_utc>?
+                   OR (ei.start_utc='' AND ei.start_date<>'' AND ei.start_date>?))
+          )
+        )
+      ) OR (j.state='snoozed' AND j.snoozed_until<=?)
+    )
+    ORDER BY
+      CASE WHEN j.state='snoozed' THEN 0 ELSE 1 END,
+      CASE WHEN j.state='pending' AND j.fire_at>=? THEN 0 ELSE 1 END,
+      COALESCE(NULLIF(j.snoozed_until,''),j.fire_at),j.id LIMIT ?
   )SQL"));
-  query.addBindValue(isoUtc(now));
-  query.addBindValue(isoUtc(now));
+  const QString nowIso = isoUtc(now);
+  const QString todayIso = nowIso.left(10);
+  query.addBindValue(nowIso);
+  query.addBindValue(isoUtc(now.addSecs(-kStaleReminderGraceSeconds)));
+  query.addBindValue(nowIso);
+  query.addBindValue(todayIso);
+  query.addBindValue(nowIso);
+  query.addBindValue(isoUtc(now.addSecs(-kStaleReminderGraceSeconds)));
   query.addBindValue(qBound(1, limit, 500));
   if (!query.exec()) {
     if (errorMessage != nullptr) {
@@ -4687,6 +4716,41 @@ bool Database::dismissReminder(const qint64 id, QString* errorMessage) {
   return bumpChangeRevision(errorMessage);
 }
 
+qint64 Database::dismissStaleReminders(const QDateTime& now, const int graceSeconds,
+                                       QString* errorMessage) {
+  // A pending job older than the grace window is stale unless its occurrence
+  // is still upcoming — resolved from event_instances, the same guard as
+  // dueReminders (see its comment for the canonical-column rationale).
+  QSqlQuery query(m_database);
+  query.prepare(QStringLiteral(R"SQL(
+    UPDATE reminder_jobs
+    SET state='dismissed',claimed_at='',claim_token='',lease_expires_at=''
+    WHERE state='pending'
+      AND fire_at<?
+      AND NOT EXISTS (
+        SELECT 1 FROM event_instances ei
+        WHERE ei.event_id=reminder_jobs.event_id
+          AND ei.recurrence_id=reminder_jobs.occurrence_id
+          AND (ei.start_utc>?
+               OR (ei.start_utc='' AND ei.start_date<>'' AND ei.start_date>?))
+      )
+  )SQL"));
+  query.addBindValue(isoUtc(now.addSecs(-graceSeconds)));
+  query.addBindValue(isoUtc(now));
+  query.addBindValue(isoUtc(now).left(10));
+  if (!query.exec()) {
+    if (errorMessage != nullptr) {
+      *errorMessage = sqlError(query, QStringLiteral("dismiss stale reminders"));
+    }
+    return -1;
+  }
+  const qint64 dismissed = query.numRowsAffected();
+  if (dismissed > 0 && !bumpChangeRevision(errorMessage)) {
+    return -1;
+  }
+  return dismissed;
+}
+
 bool Database::markReminderDelivered(const qint64 id, QString* errorMessage) {
   QSqlQuery query(m_database);
   query.prepare(QStringLiteral(R"SQL(
@@ -4825,6 +4889,67 @@ bool Database::hasNotificationDeliveryForEvent(const QString& eventId,
     return false;
   }
   return query.next();
+}
+
+bool Database::notificationDeliveryExists(const QString& fingerprint,
+                                          QString* errorMessage) const {
+  QSqlQuery query(m_database);
+  query.prepare(QStringLiteral(
+      "SELECT 1 FROM notification_deliveries WHERE fingerprint=? LIMIT 1"));
+  query.addBindValue(fingerprint);
+  if (!query.exec()) {
+    if (errorMessage != nullptr) {
+      *errorMessage = sqlError(query, QStringLiteral("check notification delivery"));
+    }
+    return false;
+  }
+  return query.next();
+}
+
+bool Database::persistInvitationBaselines(const QList<Event>& invitations,
+                                          QString* errorMessage) {
+  if (invitations.isEmpty()) {
+    return true;
+  }
+  if (!m_database.transaction()) {
+    if (errorMessage != nullptr) {
+      *errorMessage = m_database.lastError().text();
+    }
+    return false;
+  }
+  const QDateTime now = nowUtc();
+  bool changed = false;
+  for (const Event& event : invitations) {
+    QSqlQuery claim(m_database);
+    claim.prepare(QStringLiteral(R"SQL(
+      INSERT OR IGNORE INTO notification_deliveries
+        (fingerprint,kind,event_id,event_revision,state,claimed_at)
+      VALUES (?,'invitation_baseline',?,?,'delivered',?)
+    )SQL"));
+    claim.addBindValue(invitationFingerprint(event));
+    claim.addBindValue(event.id);
+    claim.addBindValue(event.localRevision);
+    claim.addBindValue(isoUtc(now));
+    if (!claim.exec()) {
+      if (errorMessage != nullptr) {
+        *errorMessage = sqlError(claim, QStringLiteral("persist invitation baseline"));
+      }
+      m_database.rollback();
+      return false;
+    }
+    changed = changed || claim.numRowsAffected() > 0;
+  }
+  if (!m_database.commit()) {
+    // A failed commit can leave the transaction open on SQLite; rolling back
+    // unconditionally keeps the connection usable for the next batch.
+    const QString commitError = m_database.lastError().text();
+    m_database.rollback();
+    if (errorMessage != nullptr) {
+      *errorMessage = commitError;
+    }
+    return false;
+  }
+  return !changed || bumpChangeRevision(errorMessage);
 }
 
 QList<Event> Database::searchEvents(const QString& text, const QStringList& calendarIds,

@@ -203,6 +203,17 @@ QString newUuid();
 QString isoUtc(const QDateTime& value);
 QDateTime dateTimeFromIso(const QString& value);
 
+// Pending reminders older than this grace window are dismissed instead of
+// delivered unless their occurrence is still upcoming. Shared by the due
+// query and the stale sweep; changing it changes both consistently.
+inline constexpr int kStaleReminderGraceSeconds = 2 * 3600;
+
+// Canonical change-detection fingerprint for invitation notifications: a SHA-256
+// over the invitation content (attendee local RSVP state excluded, attendees
+// sorted). Both the daemon's reminder scheduler and the database baseline
+// persistence must derive identical fingerprints for the same event.
+QString invitationFingerprint(const Event& event);
+
 // RFC 5545 recurrence IDs are commonly represented in either iCalendar basic
 // form (20260904T090000), ISO form, or with TZID/RANGE parameters.  Providers
 // are allowed to choose any of those equivalent spellings.  These helpers
