@@ -518,7 +518,7 @@ Dialog {
     }
 
     background: Rectangle {
-        radius: 18
+        radius: Theme.radiusLG
         color: Theme.surface
         border.color: Theme.border
     }
@@ -530,9 +530,9 @@ Dialog {
 
         RowLayout {
             anchors.fill: parent
-            anchors.leftMargin: 22
-            anchors.rightMargin: 16
-            spacing: 10
+            anchors.leftMargin: Theme.spacingXL
+            anchors.rightMargin: Theme.spacingLG
+            spacing: Theme.spacingSM
 
             AppCloseButton {
                 toolTipText: qsTr("Close event editor")
@@ -581,7 +581,7 @@ Dialog {
             ColumnLayout {
                 width: editor.availableWidth - 36
                 x: 18
-                spacing: 13
+                spacing: Theme.spacingMD
 
                 Item { Layout.preferredHeight: 4 }
 
@@ -589,7 +589,7 @@ Dialog {
                     visible: editor.readOnly || editor.eventData.conflict === true
                     Layout.fillWidth: true
                     implicitHeight: stateMessage.implicitHeight + 20
-                    radius: Theme.smallRadius
+                    radius: Theme.radiusMD
                     color: Theme.alpha(editor.eventData.conflict === true
                                        ? Theme.danger : Theme.info, 0.1)
                     border.color: Theme.alpha(editor.eventData.conflict === true
@@ -598,7 +598,7 @@ Dialog {
                         textFormat: Text.PlainText
                         id: stateMessage
                         anchors.fill: parent
-                        anchors.margins: 10
+                        anchors.margins: Theme.spacingSM
                         text: editor.eventData.conflict === true
                               ? qsTr("A newer local or remote update is being selected in the background.")
                               : qsTr("This calendar is read-only. You can inspect details or duplicate the event into a writable calendar.")
@@ -619,7 +619,7 @@ Dialog {
                 }
                 RowLayout {
                     Layout.fillWidth: true
-                    spacing: 10
+                    spacing: Theme.spacingSM
                     AppComboBox {
                         id: calendarBox
                         objectName: "eventCalendar"
@@ -642,8 +642,8 @@ Dialog {
                 GridLayout {
                     Layout.fillWidth: true
                     columns: 4
-                    columnSpacing: 9
-                    rowSpacing: 8
+                    columnSpacing: Theme.spacingSM
+                    rowSpacing: Theme.spacingSM
 
                     Text {
                         textFormat: Text.PlainText
@@ -760,7 +760,7 @@ Dialog {
                     selectByMouse: true
                     Accessible.name: qsTr("Event notes")
                     background: Rectangle {
-                        radius: Theme.smallRadius
+                        radius: Theme.radiusMD
                         color: Theme.background
                         border.color: notesField.activeFocus ? Theme.focus : Theme.border
                     }
@@ -882,7 +882,7 @@ Dialog {
                     selectByMouse: true
                     Accessible.name: qsTr("Event guests")
                     background: Rectangle {
-                        radius: Theme.smallRadius
+                        radius: Theme.radiusMD
                         color: Theme.background
                         border.color: attendeeField.activeFocus ? Theme.focus : Theme.border
                     }
@@ -1049,8 +1049,8 @@ Dialog {
         }
         RowLayout {
             Layout.fillWidth: true
-            Layout.margins: 14
-            spacing: 8
+            Layout.margins: Theme.spacingMD
+            spacing: Theme.spacingSM
 
             AppButton {
                 visible: editor.editing && !editor.readOnly

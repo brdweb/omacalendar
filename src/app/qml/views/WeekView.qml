@@ -87,7 +87,7 @@ Item {
                                 anchors.centerIn: parent
                                 width: 28
                                 height: 28
-                                radius: 14
+                                radius: Theme.radiusLG
                                 color: Theme.accent
                                 z: -1
                             }
@@ -145,7 +145,7 @@ Item {
                         }
                         Column {
                             anchors.fill: parent
-                            anchors.margins: 4
+                            anchors.margins: Theme.spacingXS
                             spacing: 3
                             Repeater {
                                 model: allDayColumn.dayEvents.slice(0, 2)
@@ -294,7 +294,7 @@ Item {
                             textFormat: Text.PlainText
                             width: 50
                             anchors.right: hourRule.left
-                            anchors.rightMargin: 8
+                            anchors.rightMargin: Theme.spacingSM
                             anchors.verticalCenter: hourRule.verticalCenter
                             text: hourMarker.index === 0 ? ""
                                               : Qt.formatTime(new Date(2000, 0, 1,
@@ -576,11 +576,7 @@ Item {
     }
 
     function hourPattern() {
-        if (timeFormat === "24h")
-            return "HH:mm"
-        if (timeFormat === "12h")
-            return "h AP"
-        return Qt.locale().timeFormat(Locale.ShortFormat)
+        return Theme.hourPattern(timeFormat)
     }
 
     function sameDate(first, second) {
@@ -592,5 +588,17 @@ Item {
 
     function eventReference(value) {
         return String(value.id || "") + "\n" + String(value.recurrenceId || "")
+    }
+
+    Text {
+        textFormat: Text.PlainText
+        anchors.centerIn: parent
+        visible: root.events.length === 0
+        horizontalAlignment: Text.AlignHCenter
+        text: qsTr("No events this week")
+              + "\n" + qsTr("Double-click a time slot or press Ctrl+N to create one")
+        color: Theme.mutedText
+        font.pixelSize: Theme.smallFontSize
+        z: 10
     }
 }

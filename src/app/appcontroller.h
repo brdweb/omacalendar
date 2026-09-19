@@ -111,7 +111,8 @@ class AppController final : public QObject {
                                    const QVariantMap& mergedDraft = {});
   Q_INVOKABLE void retryOperation(const QString& operationId);
   Q_INVOKABLE void discardOperation(const QString& operationId);
-  Q_INVOKABLE void addLocalCalendar(const QString& name, const QString& color);
+  Q_INVOKABLE void addLocalCalendar(const QString& name, const QString& color,
+                                    bool muteAlerts = false);
   Q_INVOKABLE void removeCalendar(const QString& calendarId);
   Q_INVOKABLE void removeLocalCalendar(const QString& calendarId);
   Q_INVOKABLE void addIcsSubscription(const QVariantMap& config);

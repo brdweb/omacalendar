@@ -725,15 +725,19 @@ void AppController::discardOperation(const QString& operationId) {
        [this](const QJsonValue&) { refresh(); });
 }
 
-void AppController::addLocalCalendar(const QString& name, const QString& color) {
+void AppController::addLocalCalendar(const QString& name, const QString& color,
+                                     const bool muteAlerts) {
   if (name.trimmed().isEmpty()) {
     setError(tr("Local calendar name is required"));
     return;
   }
+  // ignoreAlerts rides in the creation payload: calendars.upsert persists it
+  // atomically, so no follow-up preference call can race the first sync.
   const QJsonObject calendar{
       {QStringLiteral("accountId"), QStringLiteral("local-account")},
       {QStringLiteral("name"), name.trimmed()},
-      {QStringLiteral("color"), color}};
+      {QStringLiteral("color"), color},
+      {QStringLiteral("ignoreAlerts"), muteAlerts}};
   send(QStringLiteral("calendars.upsert"), {{QStringLiteral("calendar"), calendar}},
        [this](const QJsonValue&) { refresh(); });
 }

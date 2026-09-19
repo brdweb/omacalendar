@@ -74,8 +74,8 @@ Drawer {
 
         RowLayout {
             Layout.fillWidth: true
-            Layout.margins: 16
-            Layout.bottomMargin: 10
+            Layout.margins: Theme.spacingLG
+            Layout.bottomMargin: Theme.spacingSM
 
             AppCloseButton {
                 toolTipText: qsTr("Close activity center")
@@ -129,8 +129,8 @@ Drawer {
             Item {
                 ColumnLayout {
                     anchors.fill: parent
-                    anchors.margins: 16
-                    spacing: 12
+                    anchors.margins: Theme.spacingLG
+                    spacing: Theme.spacingMD
 
                     AppTextField {
                         id: searchField
@@ -208,7 +208,7 @@ Drawer {
                         Layout.fillWidth: true
                         Layout.fillHeight: true
                         model: root.effectiveSearchResultsModel
-                        spacing: 7
+                        spacing: Theme.spacingSM
                         clip: true
                         boundsBehavior: Flickable.StopAtBounds
                         ScrollBar.vertical: ScrollBar {}
@@ -240,9 +240,9 @@ Drawer {
                 ListView {
                     id: invitationList
                     anchors.fill: parent
-                    anchors.margins: 16
+                    anchors.margins: Theme.spacingLG
                     model: root.effectiveInvitationsModel
-                    spacing: 9
+                    spacing: Theme.spacingSM
                     clip: true
                     boundsBehavior: Flickable.StopAtBounds
                     ScrollBar.vertical: ScrollBar {}
@@ -252,7 +252,7 @@ Drawer {
                         required property var modelData
                         width: ListView.view.width
                         implicitHeight: invitationContent.implicitHeight + 24
-                        radius: Theme.radius
+                        radius: Theme.radiusLG
                         color: Theme.background
                         border.color: Theme.border
 
@@ -261,8 +261,8 @@ Drawer {
                             anchors.left: parent.left
                             anchors.right: parent.right
                             anchors.top: parent.top
-                            anchors.margins: 12
-                            spacing: 8
+                            anchors.margins: Theme.spacingMD
+                            spacing: Theme.spacingSM
 
                             RowLayout {
                                 Layout.fillWidth: true
@@ -363,9 +363,9 @@ Drawer {
                 ListView {
                     id: conflictList
                     anchors.fill: parent
-                    anchors.margins: 16
+                    anchors.margins: Theme.spacingLG
                     model: root.effectiveConflictsModel
-                    spacing: 9
+                    spacing: Theme.spacingSM
                     clip: true
                     boundsBehavior: Flickable.StopAtBounds
                     ScrollBar.vertical: ScrollBar {}
@@ -375,7 +375,7 @@ Drawer {
                         required property var modelData
                         width: ListView.view.width
                         implicitHeight: conflictContent.implicitHeight + 24
-                        radius: Theme.radius
+                        radius: Theme.radiusLG
                         color: Theme.alpha(Theme.danger, 0.075)
                         border.color: Theme.alpha(Theme.danger, 0.28)
 
@@ -384,8 +384,8 @@ Drawer {
                             anchors.left: parent.left
                             anchors.right: parent.right
                             anchors.top: parent.top
-                            anchors.margins: 12
-                            spacing: 8
+                            anchors.margins: Theme.spacingMD
+                            spacing: Theme.spacingSM
 
                             RowLayout {
                                 Layout.fillWidth: true
@@ -452,19 +452,19 @@ Drawer {
             Item {
                 ColumnLayout {
                     anchors.fill: parent
-                    anchors.margins: 16
-                    spacing: 12
+                    anchors.margins: Theme.spacingLG
+                    spacing: Theme.spacingMD
 
                     Rectangle {
                         Layout.fillWidth: true
                         implicitHeight: syncSummary.implicitHeight + 24
-                        radius: Theme.radius
+                        radius: Theme.radiusLG
                         color: Theme.background
                         border.color: Theme.border
                         RowLayout {
                             id: syncSummary
                             anchors.fill: parent
-                            anchors.margins: 12
+                            anchors.margins: Theme.spacingMD
                             StatusBadge {
                                 dotOnly: true
                                 text: root.connected ? qsTr("Connected") : qsTr("Offline")
@@ -507,7 +507,7 @@ Drawer {
                         Layout.fillWidth: true
                         Layout.fillHeight: true
                         model: root.effectiveOperationsModel
-                        spacing: 7
+                        spacing: Theme.spacingSM
                         clip: true
                         boundsBehavior: Flickable.StopAtBounds
                         ScrollBar.vertical: ScrollBar {}
@@ -517,15 +517,15 @@ Drawer {
                             required property var modelData
                             width: ListView.view.width
                             implicitHeight: operationRow.implicitHeight + 20
-                            radius: Theme.smallRadius
+                            radius: Theme.radiusMD
                             color: Theme.background
                             border.color: Theme.border
 
                             RowLayout {
                                 id: operationRow
                                 anchors.fill: parent
-                                anchors.margins: 10
-                                spacing: 9
+                                anchors.margins: Theme.spacingSM
+                                spacing: Theme.spacingSM
                                 StatusBadge {
                                     dotOnly: true
                                     text: operationCard.modelData.state || qsTr("pending")
@@ -600,7 +600,7 @@ Drawer {
         onOpened: invitationScopeBox.currentIndex = 0
 
         contentItem: ColumnLayout {
-            spacing: 12
+            spacing: Theme.spacingMD
             Text {
                 textFormat: Text.PlainText
                 Layout.fillWidth: true
@@ -644,14 +644,10 @@ Drawer {
     }
 
     function invitationDescription(value) {
+        const start = new Date(value.displayStartLocal || value.startUtc)
         const when = value.allDay ? value.startDate
-                                  : Qt.formatDate(new Date(value.displayStartLocal
-                                                           || value.startUtc),
-                                                  "ddd, MMM d")
-                                    + " · "
-                                    + Qt.formatTime(new Date(value.displayStartLocal
-                                                             || value.startUtc),
-                                                    timePattern())
+                                  : Theme.shortDate(start) + " · "
+                                    + Theme.formatTime(start, timeFormat)
         const organizer = value.organizer && (value.organizer.displayName
                                               || value.organizer.email)
         return when + (organizer ? qsTr("\nFrom ") + organizer : "")
@@ -794,13 +790,5 @@ Drawer {
         const operation = String(value.operation || "change")
         return operation.charAt(0).toUpperCase() + operation.slice(1)
                 + (value.eventSummary ? " · " + value.eventSummary : "")
-    }
-
-    function timePattern() {
-        if (timeFormat === "24h")
-            return "HH:mm"
-        if (timeFormat === "12h")
-            return "h:mm AP"
-        return Qt.locale().timeFormat(Locale.ShortFormat)
     }
 }

@@ -54,7 +54,7 @@ ColumnLayout {
         }
 
         background: Rectangle {
-            radius: Theme.smallRadius
+            radius: Theme.radiusMD
             color: headerButton.hovered ? Theme.alpha(Theme.text, 0.055)
                                         : Theme.darkBackground
             border.color: Theme.border

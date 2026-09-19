@@ -38,7 +38,7 @@ ComboBox {
             elide: Text.ElideRight
         }
         background: Rectangle {
-            radius: Theme.smallRadius
+            radius: Theme.radiusMD
             color: optionDelegate.highlighted || optionDelegate.hovered
                    ? Theme.accentSoft : "transparent"
         }
@@ -65,7 +65,7 @@ ComboBox {
     }
 
     background: Rectangle {
-        radius: Theme.smallRadius
+        radius: Theme.radiusMD
         color: control.down || control.popup.visible ? Theme.surfaceAlt : Theme.surface
         border.width: control.activeFocus ? 2 : 1
         border.color: control.activeFocus ? Theme.focus : Theme.border
@@ -91,7 +91,7 @@ ComboBox {
         }
 
         background: Rectangle {
-            radius: Theme.smallRadius
+            radius: Theme.radiusMD
             color: Theme.surface
             border.color: Theme.border
         }

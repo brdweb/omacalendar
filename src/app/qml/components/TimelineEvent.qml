@@ -106,7 +106,7 @@ Control {
             y: root.visualY
             width: parent.width
             height: root.visualHeight
-            radius: 7
+            radius: Theme.radiusSM
             color: Theme.alpha(root.eventColor,
                                root.selected ? 0.34 : root.hovered ? 0.28 : 0.21)
             border.width: root.activeFocus || root.selected ? 2 : 1
@@ -127,7 +127,7 @@ Control {
                 anchors.margins: 5
                 width: 7
                 height: 7
-                radius: 4
+                radius: width / 2
                 color: root.stateText === "Conflict" || root.stateText === "Failed"
                       ? Theme.danger
                       : root.stateText === "Retrying" ? Theme.warning

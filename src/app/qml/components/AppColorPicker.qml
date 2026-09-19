@@ -42,7 +42,7 @@ Item {
             Rectangle {
                 Layout.preferredWidth: 20
                 Layout.preferredHeight: 20
-                radius: 6
+                radius: Theme.radiusSM
                 color: root.selectedColor
                 border.color: Theme.alpha(Theme.text, 0.32)
             }
@@ -64,7 +64,7 @@ Item {
         }
 
         background: Rectangle {
-            radius: Theme.smallRadius
+            radius: Theme.radiusMD
             color: colorButton.down || palettePopup.opened
                    ? Theme.surfaceAlt : Theme.surface
             border.width: colorButton.activeFocus ? 2 : 1
@@ -106,7 +106,7 @@ Item {
                         }
                         contentItem: Item {}
                         background: Rectangle {
-                            radius: 8
+                            radius: Theme.radiusMD
                             color: swatch.modelData
                             border.width: String(root.selectedColor).toLowerCase()
                                           === swatch.modelData.toLowerCase() ? 3 : 1
@@ -151,7 +151,7 @@ Item {
         }
 
         background: Rectangle {
-            radius: Theme.radius
+            radius: Theme.radiusLG
             color: Theme.surface
             border.color: Theme.border
         }

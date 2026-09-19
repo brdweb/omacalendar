@@ -39,14 +39,18 @@ Button {
         Row {
             id: contentRow
             anchors.centerIn: parent
-            spacing: control.iconText.length > 0 && control.text.length > 0 ? 7 : 0
+            spacing: control.iconText.length > 0 && control.text.length > 0
+                     ? Theme.spacingSM : 0
             Text {
                 textFormat: Text.PlainText
                 visible: control.iconText.length > 0
                 text: control.iconText
                 color: control.primary ? Theme.accentText
                                        : control.destructive ? Theme.danger : Theme.text
-                font.pixelSize: control.font.pixelSize + 1
+                // Icon-only buttons share one glyph size so the header and
+                // sidebar controls read as a single icon set.
+                font.pixelSize: control.text.length > 0
+                                ? control.font.pixelSize + 1 : Theme.iconFontSize
                 verticalAlignment: Text.AlignVCenter
             }
             Text {
@@ -63,7 +67,7 @@ Button {
         }
     }
     background: Rectangle {
-        radius: Theme.smallRadius
+        radius: Theme.radiusMD
         color: {
             if (!control.enabled)
                 return control.quiet ? "transparent" : Theme.alpha(Theme.surfaceAlt, 0.55)

@@ -37,7 +37,7 @@ Rectangle {
         Rectangle {
             Layout.preferredWidth: 6
             Layout.preferredHeight: 6
-            radius: 3
+            radius: width / 2
             color: root.toneColor
         }
         Text {

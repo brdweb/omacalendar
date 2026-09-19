@@ -16,8 +16,8 @@ ApplicationWindow {
 
     width: 1440
     height: 900
-    minimumWidth: 980
-    minimumHeight: 660
+    minimumWidth: 760
+    minimumHeight: 560
     visible: true
     title: "OmaCalendar"
     color: Theme.background
@@ -52,7 +52,12 @@ ApplicationWindow {
     property var selectedEvent: ({})
     readonly property string selectedEventReference: eventReference(selectedEvent)
     property bool sidebarVisible: true
+    // Set when the sidebar was hidden because the window became narrow, so the
+    // manual toggle keeps working and the sidebar returns when there is room.
+    property bool sidebarAutoHidden: false
     property bool firstLoadComplete: false
+    // Bumped every minute so relative sync labels stay current.
+    property int clockTick: 0
     property var pendingMoveEvent: ({})
     property var pendingMoveOptions: ({})
     property var pendingExportScope: ({})
@@ -90,6 +95,16 @@ ApplicationWindow {
         configuredFirstDayOfWeek === 0
         ? Number(Qt.locale().firstDayOfWeek) : configuredFirstDayOfWeek
     readonly property int currentViewIndex: viewIndex(currentView)
+    readonly property var latestSyncDate: latestCalendarSync()
+
+    onWidthChanged: updateSidebarForWidth()
+
+    Timer {
+        interval: 60000
+        running: true
+        repeat: true
+        onTriggered: window.clockTick = window.clockTick + 1
+    }
 
     header: Rectangle {
         implicitHeight: 68
@@ -98,20 +113,21 @@ ApplicationWindow {
 
         RowLayout {
             anchors.fill: parent
-            anchors.leftMargin: 16
-            anchors.rightMargin: 16
-            spacing: 10
+            anchors.leftMargin: Theme.spacingLG
+            anchors.rightMargin: Theme.spacingLG
+            spacing: Theme.spacingSM
 
             AppButton {
-                iconText: window.sidebarVisible ? "◧" : "▣"
+                iconText: window.sidebarVisible ? Theme.glyphSidebarShown
+                                                : Theme.glyphSidebarHidden
                 quiet: true
                 compact: true
                 toolTipText: window.sidebarVisible ? qsTr("Hide sidebar") : qsTr("Show sidebar")
-                onClicked: window.sidebarVisible = !window.sidebarVisible
+                onClicked: window.toggleSidebar()
             }
 
             Row {
-                spacing: 4
+                spacing: Theme.spacingXS
                 Text {
                     textFormat: Text.PlainText
                     text: "oma"
@@ -129,14 +145,14 @@ ApplicationWindow {
             }
 
             Rectangle {
-                Layout.leftMargin: 6
+                Layout.leftMargin: Theme.spacingXS
                 Layout.preferredWidth: 1
                 Layout.preferredHeight: 28
                 color: Theme.divider
             }
 
             AppButton {
-                iconText: "‹"
+                iconText: Theme.glyphPrevious
                 quiet: true
                 compact: true
                 toolTipText: qsTr("Previous period  [")
@@ -149,7 +165,7 @@ ApplicationWindow {
                 onClicked: window.goToday()
             }
             AppButton {
-                iconText: "›"
+                iconText: Theme.glyphNext
                 quiet: true
                 compact: true
                 toolTipText: qsTr("Next period  ]")
@@ -181,9 +197,9 @@ ApplicationWindow {
             Item { Layout.fillWidth: true }
 
             Rectangle {
-                Layout.preferredWidth: viewSwitch.implicitWidth + 8
+                Layout.preferredWidth: viewSwitch.implicitWidth + Theme.spacingSM
                 Layout.preferredHeight: 40
-                radius: 10
+                radius: Theme.radiusMD
                 color: Theme.background
                 border.color: Theme.border
                 RowLayout {
@@ -212,11 +228,39 @@ ApplicationWindow {
             }
 
             AppButton {
-                iconText: "⌕"
+                iconText: Theme.glyphSearch
                 quiet: true
                 compact: true
                 toolTipText: qsTr("Search  Ctrl+F")
                 onClicked: window.openActivity("search")
+            }
+
+            Rectangle {
+                id: cacheChip
+                objectName: "cacheFreshnessChip"
+                // The offline banner already explains a disconnected daemon, so
+                // the freshness chip only speaks for a live but stale cache.
+                visible: App.connected && window.width >= 1080
+                Layout.preferredWidth: visible ? cacheChipText.implicitWidth
+                                                 + Theme.spacingMD * 2 : 0
+                Layout.preferredHeight: 26
+                radius: Theme.radiusSM
+                color: Theme.alpha(Theme.text, 0.05)
+                border.color: Theme.divider
+                Accessible.role: Accessible.StaticText
+                Accessible.name: cacheChipText.text
+                Text {
+                    id: cacheChipText
+                    textFormat: Text.PlainText
+                    anchors.centerIn: parent
+                    text: window.cacheFreshnessText()
+                    color: Theme.mutedText
+                    font.pixelSize: Theme.microFontSize
+                }
+                ToolTip.visible: chipHover.hovered
+                ToolTip.delay: 500
+                ToolTip.text: qsTr("Events are served from the local cache. Provider sync runs in the background.")
+                HoverHandler { id: chipHover }
             }
 
             StatusBadge {
@@ -238,9 +282,16 @@ ApplicationWindow {
         spacing: 0
 
         CalendarSidebar {
-            visible: window.sidebarVisible
-            Layout.preferredWidth: visible ? Theme.sidebarWidth : 0
+            id: calendarSidebar
+            // Driven by the animated width so the collapse reads as motion
+            // instead of a jump; the item leaves the layout once it is closed.
+            visible: Layout.preferredWidth > 1
+            clip: true
+            Layout.preferredWidth: window.sidebarVisible ? Theme.sidebarWidth : 0
             Layout.fillHeight: true
+            Behavior on Layout.preferredWidth {
+                NumberAnimation { duration: 150; easing.type: Easing.OutCubic }
+            }
             currentDate: App.selectedDate
             monthDate: window.visibleMonth
             calendars: window.sidebarCalendars
@@ -292,11 +343,11 @@ ApplicationWindow {
                     RowLayout {
                         id: errorRow
                         anchors.fill: parent
-                        anchors.leftMargin: 14
-                        anchors.rightMargin: 10
-                        anchors.topMargin: 9
-                        anchors.bottomMargin: 9
-                        spacing: 10
+                        anchors.leftMargin: Theme.spacingMD
+                        anchors.rightMargin: Theme.spacingSM
+                        anchors.topMargin: Theme.spacingSM
+                        anchors.bottomMargin: Theme.spacingSM
+                        spacing: Theme.spacingSM
                         StatusBadge { dotOnly: true; text: qsTr("Error"); tone: "danger" }
                         Text {
                             textFormat: Text.PlainText
@@ -325,16 +376,32 @@ ApplicationWindow {
                     Layout.fillWidth: true
                     Layout.fillHeight: true
 
+                    // Settle fade on view change. A true crossfade would need
+                    // two views alive at once, which the StackLayout does not
+                    // support without risking model lifetime.
+                    NumberAnimation {
+                        id: viewSwitchFade
+                        target: viewStack
+                        property: "opacity"
+                        from: 0.4
+                        to: 1.0
+                        duration: 130
+                        easing.type: Easing.OutCubic
+                    }
+
                     StackLayout {
                         id: viewStack
                         anchors.fill: parent
                         anchors.leftMargin: window.currentView === "month"
-                                            || window.currentView === "week" ? 0 : 22
+                                            || window.currentView === "week"
+                                            ? 0 : Theme.spacingXL
                         anchors.rightMargin: anchors.leftMargin
                         anchors.topMargin: window.currentView === "month"
-                                           || window.currentView === "week" ? 0 : 18
+                                           || window.currentView === "week"
+                                           ? 0 : Theme.spacingLG
                         anchors.bottomMargin: anchors.topMargin
                         currentIndex: Math.max(0, window.currentViewIndex)
+                        onCurrentIndexChanged: viewSwitchFade.restart()
 
                         AgendaView {
                             currentDate: App.selectedDate
@@ -428,11 +495,11 @@ ApplicationWindow {
                         visible: App.calendars.length === 0 && !App.busy
                         anchors.centerIn: parent
                         width: Math.min(420, parent.width - 60)
-                        iconText: "◫"
+                        iconText: Theme.glyphCalendar
                         title: qsTr("Your calendar, locally first")
                         description: qsTr("Create a device-only calendar or connect Google, CalDAV, or an ICS subscription.")
                         actionText: qsTr("Add a calendar")
-                        onActionRequested: settingsDrawer.open()
+                        onActionRequested: settingsDrawer.openAccounts()
                     }
 
                     Rectangle {
@@ -453,9 +520,9 @@ ApplicationWindow {
                     border.color: Theme.divider
                     RowLayout {
                         anchors.fill: parent
-                        anchors.leftMargin: 12
-                        anchors.rightMargin: 12
-                        spacing: 9
+                        anchors.leftMargin: Theme.spacingMD
+                        anchors.rightMargin: Theme.spacingMD
+                        spacing: Theme.spacingSM
                         Text {
                             textFormat: Text.PlainText
                             Layout.fillWidth: true
@@ -741,7 +808,7 @@ ApplicationWindow {
 
             ColumnLayout {
                 width: conflictMergeDialog.availableWidth
-                spacing: 12
+                spacing: Theme.spacingMD
 
                 Text {
                     textFormat: Text.PlainText
@@ -785,8 +852,8 @@ ApplicationWindow {
                 GridLayout {
                     Layout.fillWidth: true
                     columns: 2
-                    columnSpacing: 8
-                    rowSpacing: 8
+                    columnSpacing: Theme.spacingSM
+                    rowSpacing: Theme.spacingSM
                     AppTextField {
                         id: mergeStartDate
                         Layout.fillWidth: true
@@ -959,6 +1026,8 @@ ApplicationWindow {
         calendarSetsModel: window.appValue("calendarSetsModel", null)
         connected: App.connected
         busy: App.busy
+        statusText: App.statusText
+        lastError: App.lastError
         preferences: window.preferences
         systemTimeZoneId: String(window.appValue("systemTimeZoneId", "UTC"))
         availableTimeZoneIds: window.appValue("availableTimeZoneIds", ["UTC"])
@@ -984,9 +1053,10 @@ ApplicationWindow {
         onAddCalDavRequested: (endpoint, username, password, displayName) =>
                                       App.addCalDavAccount(endpoint, username,
                                                           password, displayName)
-        onAddLocalCalendarRequested: (name, color) =>
+        onAddLocalCalendarRequested: (name, color, muteAlerts) =>
                                              window.callApp("addLocalCalendar",
-                                                            [name, color])
+                                                            [name, color,
+                                                             muteAlerts])
         onRemoveCalendarRequested: calendarId => App.removeCalendar(calendarId)
         onAddIcsSubscriptionRequested: (url, username, password, displayName) =>
                                                window.callApp("addIcsSubscription",
@@ -1044,7 +1114,7 @@ ApplicationWindow {
         standardButtons: Dialog.Cancel
 
         contentItem: ColumnLayout {
-            spacing: 12
+            spacing: Theme.spacingMD
             Text {
                 textFormat: Text.PlainText
                 Layout.fillWidth: true
@@ -1140,7 +1210,7 @@ ApplicationWindow {
         }
 
         contentItem: ColumnLayout {
-            spacing: 12
+            spacing: Theme.spacingMD
             AppComboBox {
                 id: exportScopeBox
                 Layout.fillWidth: true
@@ -1371,6 +1441,49 @@ ApplicationWindow {
     Component.onCompleted: {
         applyInitialPreferences()
         loadRangeFor(App.selectedDate, currentView)
+    }
+
+    function toggleSidebar() {
+        sidebarVisible = !sidebarVisible
+        // An explicit toggle wins over the width rule until the next crossing.
+        sidebarAutoHidden = false
+    }
+
+    function updateSidebarForWidth() {
+        if (width < Theme.sidebarCollapseWidth) {
+            if (sidebarVisible) {
+                sidebarVisible = false
+                sidebarAutoHidden = true
+            }
+        } else if (sidebarAutoHidden) {
+            sidebarVisible = true
+            sidebarAutoHidden = false
+        }
+    }
+
+    function latestCalendarSync() {
+        const values = appList("calendars")
+        let latest = null
+        for (let index = 0; index < values.length; ++index) {
+            const raw = String(values[index].lastSyncAt || "")
+            if (raw.length === 0)
+                continue
+            const parsed = new Date(raw)
+            if (isNaN(parsed.getTime()))
+                continue
+            if (latest === null || parsed.getTime() > latest.getTime())
+                latest = parsed
+        }
+        return latest
+    }
+
+    function cacheFreshnessText() {
+        // clockTick keeps the relative label refreshing once a minute.
+        const tick = clockTick
+        const latest = latestSyncDate
+        if (latest === null)
+            return qsTr("Cached · never synced")
+        return qsTr("Cached · synced ") + Theme.relativeSince(latest, new Date())
     }
 
     function appValue(name, fallbackValue) {

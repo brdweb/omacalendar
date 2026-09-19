@@ -90,7 +90,7 @@ ItemDelegate {
     }
 
     background: Rectangle {
-        radius: root.compact ? 5 : Theme.smallRadius
+        radius: root.compact ? Theme.radiusSM : Theme.radiusMD
         color: root.selected ? Theme.alpha(root.eventColor, 0.28)
                              : root.hovered || root.activeFocus
                                ? Theme.alpha(root.eventColor, 0.22)
@@ -132,7 +132,7 @@ ItemDelegate {
             visible: root.stateText.length > 0 && root.compact
             Layout.preferredWidth: 7
             Layout.preferredHeight: 7
-            radius: 4
+            radius: width / 2
             color: root.stateText === "Conflict" || root.stateText === "Failed"
                   ? Theme.danger
                   : root.stateText === "Retrying" ? Theme.warning
