@@ -115,6 +115,17 @@ target_link_libraries(omacalendar-googleauth-async-test
 )
 add_test(NAME googleauth_async_test COMMAND omacalendar-googleauth-async-test)
 
+add_executable(omacalendar-localprovider-test
+  test_localprovider.cpp
+)
+target_link_libraries(omacalendar-localprovider-test
+  PRIVATE
+    Qt6::Test
+    Qt6::Core
+    omacalendar_sync
+)
+add_test(NAME localprovider_test COMMAND omacalendar-localprovider-test)
+
 add_executable(omacalendar-caldav-test
   test_caldav.cpp
 )
