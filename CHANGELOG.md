@@ -4,6 +4,54 @@ All notable changes to OmaCalendar are recorded here. The project follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and will use Semantic
 Versioning once public releases begin.
 
+## [Unreleased]
+
+## [1.1.0] - 2026-09-19
+
+### Changed
+
+- Make the native x86-64 Arch package the sole supported binary distribution.
+  Stop producing the generic binary archive, Debian package, Flatpak bundle,
+  and AUR recipes; retain source/documentation archives, checksums, the exact
+  Arch payload SBOM, and attestations.
+- Reminders whose trigger time is more than two hours past and whose occurrence
+  already started are dismissed silently instead of delivered. Adding a
+  calendar whose history carries old reminders, or restarting the daemon after
+  downtime, no longer floods the notification center. Reminders for still
+  upcoming occurrences are delivered as catch-up once the daemon returns.
+- Per-calendar "Mute alerts" now also silences reminder notifications for that
+  calendar; previously it muted invitation notifications only.
+- Invitation notifications cover recent invitations only: updates and
+  cancellations to invitations whose occurrence ended more than 48 hours ago
+  are imported silently, including history pulled in by the yearly backfill
+  after a new calendar is added.
+- Invitation baselines are persisted durably, so invitation changes that
+  arrive while the daemon is offline still notify after a restart instead of
+  being swallowed by the startup baseline.
+- More than five simultaneous invitation notifications collapse into a single
+  digest notification instead of arriving as separate toasts.
+
+### Added
+
+- `invitations.list` reports `upcomingTotal` and `pastTotal` bucket counts so
+  clients can summarize the invitation backlog (see docs/IPC.md).
+- "Mute alerts (reminders & invitations)" can be set while creating a local
+  calendar.
+- Dedicated `localprovider_test` target covering the device-only provider's
+  capabilities, status, durable remove acknowledgement and account filtering.
+
+### Fixed
+
+- Desktop UI: inline connection feedback on the Google, CalDAV and ICS forms,
+  a cached-data sync indicator, actionable empty states in the day, week and
+  month views, keyboard support for month-grid and agenda date cells, a
+  keyboard alternative for calendar reordering, initial focus handling for the
+  month overflow popup, theme tokens for spacing and corner radii, unified
+  date/time formatting, responsive window minimums, and consistent icon
+  glyphs with subtle transitions.
+- Documented that moving existing events between calendars is not supported
+  (daemon rejects cross-calendar moves with an explicit error).
+
 ## [1.0.0] - 2026-09-09
 
 - First stable release for current x86-64 Arch/Omarchy.
@@ -13,15 +61,6 @@ Versioning once public releases begin.
 - Clear identification of the built-in local Personal calendar.
 - Companion widget supports read-only event details and direct app activation.
 - Simplified public documentation and Arch-only installation.
-
-## [Unreleased]
-
-### Changed
-
-- Make the native x86-64 Arch package the sole supported binary distribution.
-  Stop producing the generic binary archive, Debian package, Flatpak bundle,
-  and AUR recipes; retain source/documentation archives, checksums, the exact
-  Arch payload SBOM, and attestations.
 
 ## [1.0.0-rc.5] - 2026-09-09
 
