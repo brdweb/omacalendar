@@ -2233,6 +2233,20 @@ def run_contract(harness: DaemonHarness) -> None:
         f"calendar removal did not expose an event miss: {cascaded_event}",
     )
 
+    invitation_page = harness.call("invitations.list", {"limit": 10})
+    require(
+        {"invitations", "total", "upcomingTotal", "pastTotal"}
+        <= invitation_page.keys(),
+        "invitations.list response is missing pagination or bucket totals",
+    )
+    require(
+        invitation_page.get("upcomingTotal", -1) >= 0
+        and invitation_page.get("pastTotal", -1) >= 0
+        and invitation_page.get("upcomingTotal", 0) + invitation_page.get("pastTotal", 0)
+        == invitation_page.get("total", -1),
+        "invitations.list bucket totals disagree with the reported total",
+    )
+
 
 def run_occurrence_patch_contract(harness: DaemonHarness) -> None:
     """A title-only occurrence edit must retain the selected occurrence's time."""

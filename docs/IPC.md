@@ -108,6 +108,11 @@ and cleanup; a started check is not proof of server support.
   `events.respond`, `events.undo`
 - `invitations.list`, `invitations.markSeen`
 
+`invitations.list` returns invitations that need a response, sorted upcoming
+first. Its response reports `total` plus the `upcomingTotal`/`pastTotal`
+bucket counts of the full filtered result, so clients can summarize the
+invitation backlog without paging through it.
+
 Durable `events.create`, `events.update`, `events.remove`, `events.move`, and
 `events.respond` requests use `clientMutationId`, `expectedLocalRevision`,
 `recurrenceScope`, and `guestNotificationPolicy`. Existing-event writes also

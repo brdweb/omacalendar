@@ -1,7 +1,12 @@
 #include "core/domain.h"
 
+#include <QCryptographicHash>
+#include <QJsonArray>
+#include <QJsonDocument>
 #include <QTimeZone>
 #include <QUuid>
+#include <algorithm>
+#include <utility>
 
 namespace omacalendar {
 namespace {
@@ -117,6 +122,56 @@ QString wallTimeKey(const QDateTime& value) {
 }
 
 }  // namespace
+
+QString invitationFingerprint(const Event& event) {
+  QList<QJsonObject> attendees;
+  attendees.reserve(event.attendees.size());
+  for (const QJsonValue& value : event.attendees) {
+    QJsonObject attendee = value.toObject();
+    // A local RSVP acknowledgement is not a remote invitation update.
+    if (attendee.value(QStringLiteral("self")).toBool()) {
+      attendee.remove(QStringLiteral("responseStatus"));
+      attendee.remove(QStringLiteral("partstat"));
+    }
+    attendees.append(attendee);
+  }
+  std::sort(attendees.begin(), attendees.end(),
+            [](const QJsonObject& first, const QJsonObject& second) {
+              const auto identity = [](const QJsonObject& attendee) {
+                return attendee.value(QStringLiteral("email"))
+                    .toString(attendee.value(QStringLiteral("uri")).toString())
+                    .toCaseFolded();
+              };
+              return identity(first) < identity(second);
+            });
+  QJsonArray encodedAttendees;
+  for (const QJsonObject& attendee : std::as_const(attendees)) {
+    encodedAttendees.append(attendee);
+  }
+  const QJsonObject canonical{
+      {QStringLiteral("eventId"), event.id},
+      {QStringLiteral("uid"), event.uid},
+      {QStringLiteral("summary"), event.summary},
+      {QStringLiteral("description"), event.description},
+      {QStringLiteral("location"), event.location},
+      {QStringLiteral("url"), event.url},
+      {QStringLiteral("startUtc"), isoUtc(event.startUtc)},
+      {QStringLiteral("endUtc"), isoUtc(event.endUtc)},
+      {QStringLiteral("startDate"), event.startDate.toString(Qt::ISODate)},
+      {QStringLiteral("endDate"), event.endDate.toString(Qt::ISODate)},
+      {QStringLiteral("allDay"), event.allDay},
+      {QStringLiteral("status"), event.status},
+      {QStringLiteral("sequence"), event.sequence},
+      {QStringLiteral("organizer"), event.organizer},
+      {QStringLiteral("attendees"), encodedAttendees},
+      {QStringLiteral("deleted"), event.deleted},
+  };
+  return QStringLiteral("invitation:") +
+         QString::fromLatin1(QCryptographicHash::hash(QJsonDocument(canonical).toJson(
+                                                          QJsonDocument::Compact),
+                                                      QCryptographicHash::Sha256)
+                                 .toHex());
+}
 
 QString providerKindToString(const ProviderKind kind) {
   switch (kind) {

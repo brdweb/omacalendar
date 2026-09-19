@@ -86,7 +86,7 @@ class ReminderScheduler final : public QObject {
   void onPrepareForSleep(bool sleeping);
 
  private:
-  enum class DeliveryKind { Reminder, Invitation };
+  enum class DeliveryKind { Reminder, Invitation, InvitationDigest };
   struct PendingDelivery {
     DeliveryKind kind = DeliveryKind::Reminder;
     qint64 reminderId = 0;
@@ -95,19 +95,29 @@ class ReminderScheduler final : public QObject {
     QString fingerprint;
     QString deliveryToken;
     QDateTime leaseExpiresAt;
+    // Digest members only: per-event fingerprints claimed for the digest.
+    QStringList memberFingerprints;
+    QStringList memberEventIds;
   };
 
   [[nodiscard]] QDateTime now() const;
   void initializeBackend();
   void connectSystemSleep();
-  void deliver(const ReminderJob& reminder);
+  [[nodiscard]] bool deliver(const ReminderJob& reminder);
   void baselineInvitations(const QStringList& calendarIds);
   void scanInvitations(const QStringList& calendarIds);
   void deliverInvitation(const Event& event, bool changed, const QString& fingerprint);
+  void deliverInvitations(const QList<Event>& invitations);
   [[nodiscard]] CalendarNotification reminderNotification(
       const Event& event, const ReminderJob& reminder) const;
   [[nodiscard]] CalendarNotification invitationNotification(
       const Event& event, bool changed, const QString& fingerprint) const;
+  [[nodiscard]] CalendarNotification invitationDigestNotification(
+      const QList<Event>& events, bool changedOnly) const;
+  [[nodiscard]] bool invitationEndedBeforeCutoff(const Event& event,
+                                                 const QDateTime& current) const;
+  [[nodiscard]] bool finishDigestMembers(const PendingDelivery& digest,
+                                         QString* errorMessage);
   [[nodiscard]] QUrl eventDeepLink(const PendingDelivery& delivery) const;
 
   Database* m_database = nullptr;

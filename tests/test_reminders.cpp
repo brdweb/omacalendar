@@ -846,6 +846,327 @@ class ReminderSchedulerTest final : public QObject {
              QStringLiteral("New calendar invitation"));
   }
 
+  void staleReminderBacklogIsDismissedNotDelivered() {
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    Database database;
+    QString error;
+    QVERIFY2(database.open(directory.filePath(QStringLiteral("store.sqlite")), &error),
+             qPrintable(error));
+    QDateTime current(QDate(2027, 5, 6), QTime(11, 0), QTimeZone::UTC);
+    FakeNotificationBackend backend;
+    ReminderScheduler scheduler(
+        &database, &backend, [&current]() { return current; },
+        [](const QUrl&) { return true; });
+
+    // A past one-time event whose reminder fired long ago must be swept, not
+    // delivered: importing history through a new calendar or a restart must
+    // not flood the user with stale notifications.
+    Event past = reminderEvent(QStringLiteral("Ancient meeting"), current.addDays(-30),
+                               QJsonArray{10});
+    past.calendarId = QStringLiteral("local-default");
+    QVERIFY2(database.saveLocalEvent(&past, OutboxOperation::Create, &error),
+             qPrintable(error));
+    // Upcoming occurrence but the reminder fired two days ago (daemon was
+    // offline): the catch-up delivery is still useful.
+    Event upcoming = reminderEvent(QStringLiteral("Upcoming meeting"),
+                                   current.addDays(1), QJsonArray{60 * 24 * 3});
+    upcoming.calendarId = QStringLiteral("local-default");
+    QVERIFY2(database.saveLocalEvent(&upcoming, OutboxOperation::Create, &error),
+             qPrintable(error));
+    const ReminderJob pastJob = reminderForEvent(&database, past.id);
+    QVERIFY(pastJob.id > 0);
+    QCOMPARE(pastJob.state, QStringLiteral("pending"));
+    const ReminderJob catchUpJob = reminderForEvent(&database, upcoming.id);
+    QVERIFY(catchUpJob.id > 0);
+    QVERIFY(catchUpJob.fireAt < current);
+
+    scheduler.start();
+    scheduler.stop();
+    QCoreApplication::processEvents();
+
+    QCOMPARE(backend.sent.size(), 1);
+    QCOMPARE(backend.sent.constFirst().summary, QStringLiteral("Calendar reminder"));
+    // Dismissed jobs leave the working set entirely; reminders() only returns
+    // pending/snoozed/claimed/delivered states.
+    const ReminderJob swept = reminderForEvent(&database, past.id);
+    QCOMPARE(swept.id, qint64(0));
+    const ReminderJob delivered = reminderForEvent(&database, upcoming.id);
+    QCOMPARE(delivered.state, QStringLiteral("delivered"));
+  }
+
+  void mutedCalendarSuppressesReminderDelivery() {
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    Database database;
+    QString error;
+    QVERIFY2(database.open(directory.filePath(QStringLiteral("store.sqlite")), &error),
+             qPrintable(error));
+    QDateTime current(QDate(2027, 5, 6), QTime(11, 0), QTimeZone::UTC);
+    FakeNotificationBackend backend;
+    ReminderScheduler scheduler(
+        &database, &backend, [&current]() { return current; },
+        [](const QUrl&) { return true; });
+
+    Calendar muted;
+    muted.id = QStringLiteral("muted-calendar");
+    muted.accountId = QStringLiteral("local-account");
+    muted.name = QStringLiteral("Muted");
+    muted.enabled = true;
+    muted.ignoreAlerts = true;
+    QVERIFY2(database.upsertCalendar(muted, &error), qPrintable(error));
+    Event event = reminderEvent(QStringLiteral("Muted meeting"),
+                                current.addSecs(30 * 60), QJsonArray{10});
+    event.calendarId = muted.id;
+    QVERIFY2(database.saveLocalEvent(&event, OutboxOperation::Create, &error),
+             qPrintable(error));
+
+    scheduler.start();
+    scheduler.stop();
+    QCoreApplication::processEvents();
+
+    QCOMPARE(backend.sent.size(), 0);
+    const ReminderJob job = reminderForEvent(&database, event.id);
+    QCOMPARE(job.state, QStringLiteral("pending"));
+  }
+
+  void invitationPastHistoryImportsSilently() {
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    Database database;
+    QString error;
+    QVERIFY2(database.open(directory.filePath(QStringLiteral("store.sqlite")), &error),
+             qPrintable(error));
+    QDateTime current(QDate(2027, 5, 6), QTime(11, 0), QTimeZone::UTC);
+    FakeNotificationBackend backend;
+    ReminderScheduler scheduler(
+        &database, &backend, [&current]() { return current; },
+        [](const QUrl&) { return true; });
+    scheduler.start();
+    scheduler.stop();
+    QCoreApplication::processEvents();
+
+    const auto remoteInvitation = [&](const QString& remoteId, const QString& summary,
+                                      const QDateTime& start) {
+      Event event = invitationEvent(summary, start);
+      event.calendarId = QStringLiteral("local-default");
+      event.remoteId = remoteId;
+      event.uid = remoteId + QStringLiteral("@example.test");
+      return event;
+    };
+
+    // A newly arriving invitation for a meeting that ended ten days ago is
+    // history, not news: it must be imported silently.
+    Event ancient = remoteInvitation(QStringLiteral("ancient-invitation"),
+                                     QStringLiteral("Ancient"), current.addDays(-10));
+    QVERIFY2(database.applyRemoteEvent(ancient, &error), qPrintable(error));
+    // applyRemoteEvent takes the event by value; the stored id must be read
+    // back from the database.
+    ancient = database.eventByRemoteId(ancient.calendarId, ancient.remoteId, &error);
+    QVERIFY(!ancient.id.isEmpty());
+    scheduler.eventsChanged({ancient.calendarId});
+    QCOMPARE(backend.sent.size(), 0);
+    QVERIFY(database.hasNotificationDeliveryForEvent(ancient.id, &error));
+
+    // An update to that same past invitation stays silent as well.
+    ancient.summary = QStringLiteral("Ancient (updated)");
+    QVERIFY2(database.applyRemoteEvent(ancient, &error), qPrintable(error));
+    scheduler.eventsChanged({ancient.calendarId});
+    QCOMPARE(backend.sent.size(), 0);
+
+    // An invitation that ended recently still notifies, and an upcoming one
+    // keeps notifying through the same path.
+    Event recent = remoteInvitation(QStringLiteral("recent-invitation"),
+                                    QStringLiteral("Recent"), current.addSecs(-3600));
+    QVERIFY2(database.applyRemoteEvent(recent, &error), qPrintable(error));
+    recent = database.eventByRemoteId(recent.calendarId, recent.remoteId, &error);
+    QVERIFY(!recent.id.isEmpty());
+    scheduler.eventsChanged({recent.calendarId});
+    QCOMPARE(backend.sent.size(), 1);
+    QCOMPARE(backend.sent.constFirst().summary,
+             QStringLiteral("New calendar invitation"));
+  }
+
+  void invitationDigestCollapsesBursts() {
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    Database database;
+    QString error;
+    QVERIFY2(database.open(directory.filePath(QStringLiteral("store.sqlite")), &error),
+             qPrintable(error));
+    QDateTime current(QDate(2027, 5, 6), QTime(11, 0), QTimeZone::UTC);
+    FakeNotificationBackend backend;
+    ReminderScheduler scheduler(
+        &database, &backend, [&current]() { return current; },
+        [](const QUrl&) { return true; });
+    scheduler.start();
+    scheduler.stop();
+    QCoreApplication::processEvents();
+
+    for (int index = 0; index < 6; ++index) {
+      Event event = invitationEvent(QStringLiteral("Invite %1").arg(index),
+                                    current.addDays(index + 1));
+      event.calendarId = QStringLiteral("local-default");
+      event.remoteId = QStringLiteral("digest-invitation-%1").arg(index);
+      event.uid = QStringLiteral("digest-invitation-%1@example.test").arg(index);
+      QVERIFY2(database.applyRemoteEvent(event, &error), qPrintable(error));
+    }
+    scheduler.eventsChanged({QStringLiteral("local-default")});
+    QCOMPARE(backend.sent.size(), 1);
+    QVERIFY(backend.sent.constFirst().summary.contains(QStringLiteral("6")));
+    // Every digest member's fingerprint claim was finished after delivery.
+    for (int index = 0; index < 6; ++index) {
+      const Event stored = database.eventByRemoteId(
+          QStringLiteral("local-default"),
+          QStringLiteral("digest-invitation-%1").arg(index), &error);
+      QVERIFY(!stored.id.isEmpty());
+      QVERIFY2(database.hasNotificationDeliveryForEvent(stored.id, &error),
+               qPrintable(error));
+    }
+    // Re-scanning the same history must not re-notify digest members.
+    scheduler.eventsChanged({QStringLiteral("local-default")});
+    QCOMPARE(backend.sent.size(), 1);
+
+    // A failed digest backend releases the per-event claims so a later scan
+    // can retry instead of permanently suppressing the invitations.
+    Event digestRetry =
+        invitationEvent(QStringLiteral("Digest retry"), current.addDays(20));
+    digestRetry.calendarId = QStringLiteral("local-default");
+    digestRetry.remoteId = QStringLiteral("digest-invitation-retry");
+    digestRetry.uid = QStringLiteral("digest-invitation-retry@example.test");
+    QVERIFY2(database.applyRemoteEvent(digestRetry, &error), qPrintable(error));
+    backend.result = FakeNotificationBackend::Result::Failure;
+    scheduler.eventsChanged({digestRetry.calendarId});
+    QCOMPARE(backend.sent.size(), 2);
+    QVERIFY(!database.hasNotificationDeliveryForEvent(digestRetry.id, &error));
+    backend.result = FakeNotificationBackend::Result::Success;
+    scheduler.eventsChanged({digestRetry.calendarId});
+    QCOMPARE(backend.sent.size(), 3);
+    QVERIFY(database.hasNotificationDeliveryForEvent(digestRetry.id, &error));
+
+    // A small follow-up batch notifies individually again.
+    Event extra = invitationEvent(QStringLiteral("Invite later"), current.addDays(10));
+    extra.calendarId = QStringLiteral("local-default");
+    extra.remoteId = QStringLiteral("digest-invitation-later");
+    extra.uid = QStringLiteral("digest-invitation-later@example.test");
+    QVERIFY2(database.applyRemoteEvent(extra, &error), qPrintable(error));
+    scheduler.eventsChanged({extra.calendarId});
+    QCOMPARE(backend.sent.size(), 4);
+    QCOMPARE(backend.sent.constLast().summary,
+             QStringLiteral("New calendar invitation"));
+  }
+
+  void allDayInvitationCutoffUsesExclusiveEndDate() {
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    Database database;
+    QString error;
+    QVERIFY2(database.open(directory.filePath(QStringLiteral("store.sqlite")), &error),
+             qPrintable(error));
+    QDateTime current(QDate(2027, 5, 6), QTime(11, 0), QTimeZone::UTC);
+    FakeNotificationBackend backend;
+    ReminderScheduler scheduler(
+        &database, &backend, [&current]() { return current; },
+        [](const QUrl&) { return true; });
+    scheduler.start();
+    scheduler.stop();
+    QCoreApplication::processEvents();
+
+    const auto allDayInvitation = [&](const QString& remoteId, const QDate& endDate) {
+      Event event =
+          invitationEvent(QStringLiteral("All day %1").arg(remoteId),
+                          QDateTime(endDate.addDays(-1), QTime(9, 0), QTimeZone::UTC));
+      event.calendarId = QStringLiteral("local-default");
+      event.remoteId = remoteId;
+      event.uid = remoteId + QStringLiteral("@example.test");
+      event.allDay = true;
+      event.startDate = endDate.addDays(-2);
+      event.endDate = endDate;
+      event.startUtc = QDateTime(event.startDate, QTime(0, 0), QTimeZone::UTC);
+      event.endUtc = QDateTime(endDate, QTime(0, 0), QTimeZone::UTC);
+      return event;
+    };
+
+    // endDate is exclusive: 2027-05-05 00:00 UTC is the event's end instant.
+    // At 35 hours past that boundary the invitation still notifies.
+    Event recent =
+        allDayInvitation(QStringLiteral("all-day-recent"), QDate(2027, 5, 5));
+    QVERIFY2(database.applyRemoteEvent(recent, &error), qPrintable(error));
+    scheduler.eventsChanged({recent.calendarId});
+    QCOMPARE(backend.sent.size(), 1);
+
+    // At 83 hours past it is silent history.
+    Event ancient =
+        allDayInvitation(QStringLiteral("all-day-ancient"), QDate(2027, 5, 3));
+    QVERIFY2(database.applyRemoteEvent(ancient, &error), qPrintable(error));
+    scheduler.eventsChanged({ancient.calendarId});
+    QCOMPARE(backend.sent.size(), 1);
+  }
+
+  void invitationBaselineSurvivesRestart() {
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    Database database;
+    QString error;
+    QVERIFY2(database.open(directory.filePath(QStringLiteral("store.sqlite")), &error),
+             qPrintable(error));
+    QDateTime current(QDate(2027, 5, 6), QTime(11, 0), QTimeZone::UTC);
+
+    {
+      FakeNotificationBackend backend;
+      ReminderScheduler scheduler(
+          &database, &backend, [&current]() { return current; },
+          [](const QUrl&) { return true; });
+      scheduler.start();
+      scheduler.stop();
+      QCoreApplication::processEvents();
+
+      Account account;
+      account.id = QStringLiteral("restart-account");
+      account.provider = ProviderKind::Google;
+      account.displayName = QStringLiteral("Restart account");
+      account.principal = QStringLiteral("user@example.test");
+      account.enabled = true;
+      account.authStatus = QStringLiteral("connected");
+      QVERIFY2(database.upsertAccount(account, &error), qPrintable(error));
+      Calendar calendar;
+      calendar.id = QStringLiteral("restart-calendar");
+      calendar.accountId = account.id;
+      calendar.remoteId = QStringLiteral("remote-restart-calendar");
+      calendar.name = QStringLiteral("Restart calendar");
+      calendar.enabled = true;
+      QVERIFY2(database.upsertCalendar(calendar, &error), qPrintable(error));
+
+      Event invitation =
+          invitationEvent(QStringLiteral("Baseline session"), current.addDays(1));
+      invitation.calendarId = calendar.id;
+      invitation.remoteId = QStringLiteral("baseline-invitation");
+      invitation.uid = QStringLiteral("baseline-invitation@example.test");
+      QVERIFY2(database.applyRemoteEvent(invitation, &error), qPrintable(error));
+      scheduler.eventsChanged({calendar.id});
+      QCOMPARE(backend.sent.size(), 0);
+      scheduler.syncCompleted(account.id);
+      QCOMPARE(backend.sent.size(), 0);
+
+      // The invitation changes while the daemon is down. The durable baseline
+      // must preserve the change instead of swallowing it at startup.
+      invitation.summary = QStringLiteral("Baseline session (moved)");
+      QVERIFY2(database.applyRemoteEvent(invitation, &error), qPrintable(error));
+    }
+
+    FakeNotificationBackend restartedBackend;
+    ReminderScheduler restarted(
+        &database, &restartedBackend, [&current]() { return current; },
+        [](const QUrl&) { return true; });
+    restarted.start();
+    restarted.stop();
+    QCoreApplication::processEvents();
+    restarted.eventsChanged({QStringLiteral("restart-calendar")});
+    QCOMPARE(restartedBackend.sent.size(), 1);
+    QCOMPARE(restartedBackend.sent.constFirst().summary,
+             QStringLiteral("Invitation updated"));
+  }
+
   void existingSchemaRepairAndInvitationCrashWindow() {
     QTemporaryDir directory;
     QVERIFY(directory.isValid());

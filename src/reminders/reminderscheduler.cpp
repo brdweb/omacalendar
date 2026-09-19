@@ -10,6 +10,7 @@
 #include <QJsonObject>
 #include <QProcess>
 #include <QTime>
+#include <QTimeZone>
 #include <QTimer>
 #include <QUrlQuery>
 #include <QUuid>
@@ -21,6 +22,13 @@ namespace {
 
 constexpr auto kDesktopEntry = "org.omacalendar.OmaCalendar";
 constexpr int kReminderClaimLeaseSeconds = 2 * 60;
+// Above this many simultaneous invitations a single digest notification is
+// sent instead of one notification per invitation.
+constexpr int kInvitationDigestThreshold = 5;
+// Invitations for occurrences that ended before this cutoff are imported
+// silently (fingerprint recorded, no notification). Covers historical
+// invitation backfill after adding a calendar with past invites.
+constexpr int kInvitationPastCutoffHours = 48;
 
 QString notificationPrivacy(const Database* database) {
   return database == nullptr ? QStringLiteral("generic")
@@ -28,56 +36,6 @@ QString notificationPrivacy(const Database* database) {
                                    ->setting(QStringLiteral("notificationPrivacy"),
                                              QStringLiteral("generic"))
                                    .toString();
-}
-
-QString invitationFingerprint(const Event& event) {
-  QList<QJsonObject> attendees;
-  attendees.reserve(event.attendees.size());
-  for (const QJsonValue& value : event.attendees) {
-    QJsonObject attendee = value.toObject();
-    // A local RSVP acknowledgement is not a remote invitation update.
-    if (attendee.value(QStringLiteral("self")).toBool()) {
-      attendee.remove(QStringLiteral("responseStatus"));
-      attendee.remove(QStringLiteral("partstat"));
-    }
-    attendees.append(attendee);
-  }
-  std::sort(attendees.begin(), attendees.end(),
-            [](const QJsonObject& first, const QJsonObject& second) {
-              const auto identity = [](const QJsonObject& attendee) {
-                return attendee.value(QStringLiteral("email"))
-                    .toString(attendee.value(QStringLiteral("uri")).toString())
-                    .toCaseFolded();
-              };
-              return identity(first) < identity(second);
-            });
-  QJsonArray encodedAttendees;
-  for (const QJsonObject& attendee : std::as_const(attendees)) {
-    encodedAttendees.append(attendee);
-  }
-  const QJsonObject canonical{
-      {QStringLiteral("eventId"), event.id},
-      {QStringLiteral("uid"), event.uid},
-      {QStringLiteral("summary"), event.summary},
-      {QStringLiteral("description"), event.description},
-      {QStringLiteral("location"), event.location},
-      {QStringLiteral("url"), event.url},
-      {QStringLiteral("startUtc"), isoUtc(event.startUtc)},
-      {QStringLiteral("endUtc"), isoUtc(event.endUtc)},
-      {QStringLiteral("startDate"), event.startDate.toString(Qt::ISODate)},
-      {QStringLiteral("endDate"), event.endDate.toString(Qt::ISODate)},
-      {QStringLiteral("allDay"), event.allDay},
-      {QStringLiteral("status"), event.status},
-      {QStringLiteral("sequence"), event.sequence},
-      {QStringLiteral("organizer"), event.organizer},
-      {QStringLiteral("attendees"), encodedAttendees},
-      {QStringLiteral("deleted"), event.deleted},
-  };
-  return QStringLiteral("invitation:") +
-         QString::fromLatin1(QCryptographicHash::hash(QJsonDocument(canonical).toJson(
-                                                          QJsonDocument::Compact),
-                                                      QCryptographicHash::Sha256)
-                                 .toHex());
 }
 
 QString eventTitle(const Event& event) {
@@ -233,6 +191,15 @@ void ReminderScheduler::checkNow() {
     emit notificationError(QStringLiteral("recovery"), error);
     return;
   }
+  const qint64 dismissed =
+      m_database->dismissStaleReminders(current, kStaleReminderGraceSeconds, &error);
+  if (dismissed < 0) {
+    emit notificationError(QStringLiteral("stale-sweep"), error);
+    return;
+  }
+  if (dismissed > 0) {
+    emit reminderStateChanged();
+  }
   for (auto iterator = m_pending.begin(); iterator != m_pending.end();) {
     if (iterator->kind == DeliveryKind::Reminder &&
         iterator->leaseExpiresAt.isValid() && iterator->leaseExpiresAt <= current) {
@@ -247,8 +214,15 @@ void ReminderScheduler::checkNow() {
     emit notificationError(QStringLiteral("reminder-query"), error);
     return;
   }
+  bool progressed = false;
   for (const ReminderJob& reminder : due) {
-    deliver(reminder);
+    progressed = deliver(reminder) || progressed;
+  }
+  // A full window with progress means a backlog is still waiting; drain it on
+  // the next loop turn instead of waiting a whole timer interval. Without
+  // progress (e.g. a failing backend) the timer interval applies instead.
+  if (progressed && due.size() >= 100) {
+    QTimer::singleShot(0, this, &ReminderScheduler::checkNow);
   }
 }
 
@@ -306,14 +280,14 @@ void ReminderScheduler::handlePrepareForSleep(const bool sleeping) {
   }
 }
 
-void ReminderScheduler::deliver(const ReminderJob& reminder) {
+bool ReminderScheduler::deliver(const ReminderJob& reminder) {
   const Event event = m_database->event(reminder.eventId);
   if (event.id.isEmpty() || event.deleted ||
       event.status.compare(QStringLiteral("cancelled"), Qt::CaseInsensitive) == 0) {
     if (m_database->dismissReminder(reminder.id)) {
       emit reminderStateChanged();
     }
-    return;
+    return false;
   }
   if (!event.recurrenceId.isEmpty()) {
     QString seriesError;
@@ -321,26 +295,41 @@ void ReminderScheduler::deliver(const ReminderJob& reminder) {
         m_database->hasPendingSeriesRemoval(event.calendarId, event.uid, &seriesError);
     if (!seriesError.isEmpty()) {
       emit notificationError(reminder.fingerprint, seriesError);
-      return;
+      return false;
     }
     if (seriesRemovalPending) {
       // Keep the job pending: acknowledgement deletes the whole series and its
       // jobs atomically, while undo makes this same job deliverable again.
-      return;
+      return false;
     }
   }
   const QDateTime claimedAt = now();
   const QDateTime leaseExpiresAt = claimedAt.addSecs(kReminderClaimLeaseSeconds);
   const QString deliveryToken = QUuid::createUuid().toString(QUuid::WithoutBraces);
+  // Defensive re-check for jobs that aged past the grace window between the
+  // due query and this claim (e.g. a long event-loop stall). Snoozed jobs are
+  // explicit user intent and always deliver. An unparseable occurrence id is
+  // not evidence of a past occurrence: the due query resolves chronology from
+  // event_instances, so only a validly parsed past occurrence dismisses here.
+  if (reminder.state.compare(QStringLiteral("pending"), Qt::CaseInsensitive) == 0 &&
+      reminder.fireAt < claimedAt.addSecs(-kStaleReminderGraceSeconds)) {
+    const QDateTime occurrence = dateTimeFromIso(reminder.occurrenceId);
+    if (occurrence.isValid() && occurrence <= claimedAt) {
+      if (m_database->dismissReminder(reminder.id)) {
+        emit reminderStateChanged();
+      }
+      return false;
+    }
+  }
   bool claimed = false;
   QString error;
   if (!m_database->claimReminderDelivery(reminder.id, deliveryToken, claimedAt,
                                          leaseExpiresAt, &claimed, &error)) {
     emit notificationError(reminder.fingerprint, error);
-    return;
+    return false;
   }
   if (!claimed) {
-    return;
+    return false;
   }
   PendingDelivery pending;
   pending.kind = DeliveryKind::Reminder;
@@ -354,6 +343,7 @@ void ReminderScheduler::deliver(const ReminderJob& reminder) {
   CalendarNotification notification = reminderNotification(event, reminder);
   notification.deliveryToken = deliveryToken;
   m_backend->send(notification);
+  return true;
 }
 
 void ReminderScheduler::baselineInvitations(const QStringList& calendarIds) {
@@ -367,7 +357,31 @@ void ReminderScheduler::baselineInvitations(const QStringList& calendarIds) {
     emit notificationError(QStringLiteral("invitation-baseline"), error);
     return;
   }
+  // Durable baselines survive daemon restarts. Only events without any
+  // durable delivery record are baselined here: re-recording the current
+  // fingerprint of a known event would swallow changes that arrived while
+  // the daemon was offline.
+  QList<Event> fresh;
+  fresh.reserve(invitations.size());
   for (const Event& event : invitations) {
+    error.clear();
+    const bool durable = m_database->hasNotificationDeliveryForEvent(event.id, &error);
+    if (!error.isEmpty()) {
+      emit notificationError(QStringLiteral("invitation-baseline"), error);
+      return;
+    }
+    if (!durable) {
+      fresh.append(event);
+    }
+  }
+  if (fresh.isEmpty()) {
+    return;
+  }
+  if (!m_database->persistInvitationBaselines(fresh, &error)) {
+    emit notificationError(QStringLiteral("invitation-baseline"), error);
+    return;
+  }
+  for (const Event& event : fresh) {
     m_invitationBaseline.insert(event.id, invitationFingerprint(event));
   }
 }
@@ -384,10 +398,44 @@ void ReminderScheduler::scanInvitations(const QStringList& calendarIds) {
     emit notificationError(QStringLiteral("invitation-query"), error);
     return;
   }
+  const QDateTime current = now();
+
+  struct Deliverable {
+    Event event;
+    bool changed = false;
+    QString fingerprint;
+  };
+  QList<Deliverable> deliverables;
+  deliverables.reserve(invitations.size());
+  QList<Event> silentBaselines;
+  silentBaselines.reserve(invitations.size());
+
   for (const Event& event : invitations) {
     if (event.dirty) {
       continue;
     }
+    error.clear();
+    const QString fingerprint = invitationFingerprint(event);
+    if (m_invitationBaseline.contains(event.id)) {
+      if (m_invitationBaseline.value(event.id) == fingerprint) {
+        continue;
+      }
+    } else {
+      // In-memory state is only a fast path. After a daemon restart the
+      // durable record for this exact version decides: any prior claim,
+      // delivery, digest or baseline for this fingerprint means it was seen.
+      const bool fingerprintKnown =
+          m_database->notificationDeliveryExists(fingerprint, &error);
+      if (!error.isEmpty()) {
+        emit notificationError(fingerprint, error);
+        continue;
+      }
+      if (fingerprintKnown) {
+        m_invitationBaseline.insert(event.id, fingerprint);
+        continue;
+      }
+    }
+
     error.clear();
     const bool durableHistory =
         m_database->hasNotificationDeliveryForEvent(event.id, &error);
@@ -395,13 +443,6 @@ void ReminderScheduler::scanInvitations(const QStringList& calendarIds) {
       emit notificationError(QStringLiteral("invitation-history"), error);
       continue;
     }
-    const QString fingerprint = invitationFingerprint(event);
-    const bool baselineHistory = m_invitationBaseline.contains(event.id);
-    if (!durableHistory && baselineHistory &&
-        m_invitationBaseline.value(event.id) == fingerprint) {
-      continue;
-    }
-    const bool changed = durableHistory || baselineHistory;
     const bool seen =
         m_database
             ->setting(QStringLiteral("invitation_seen_%1").arg(event.id), false, &error)
@@ -410,25 +451,92 @@ void ReminderScheduler::scanInvitations(const QStringList& calendarIds) {
       emit notificationError(fingerprint, error);
       continue;
     }
-    bool claimed = false;
-    if (seen && !changed) {
-      if (m_database->claimNotificationDelivery(
-              fingerprint, QStringLiteral("invitation_seen"), event.id,
-              event.localRevision, now(), &claimed, &error) &&
-          claimed) {
-        m_database->finishNotificationDelivery(fingerprint, now(), &error);
-      }
-      if (!error.isEmpty()) {
+    if (seen && !durableHistory) {
+      const bool claimOk = m_database->claimNotificationDelivery(
+          fingerprint, QStringLiteral("invitation_seen"), event.id, event.localRevision,
+          current, nullptr, &error);
+      if (!claimOk && !error.isEmpty()) {
         emit notificationError(fingerprint, error);
+        continue;
       }
+      error.clear();
+      if (!m_database->finishNotificationDelivery(fingerprint, current, &error) &&
+          !error.isEmpty()) {
+        emit notificationError(fingerprint, error);
+        continue;
+      }
+      m_invitationBaseline.insert(event.id, fingerprint);
       continue;
     }
-    if ((event.deleted ||
-         event.status.compare(QStringLiteral("cancelled"), Qt::CaseInsensitive) == 0) &&
-        !changed) {
+
+    const bool changed = durableHistory;
+    const bool cancelled =
+        event.deleted ||
+        event.status.compare(QStringLiteral("cancelled"), Qt::CaseInsensitive) == 0;
+    // Notifications cover recent invitations only. Older invitation history
+    // (for example pulled in by the one-year backfill chunks after a new
+    // calendar is added) and cancellations of long-past meetings are imported
+    // silently; the baseline batch records their fingerprints once.
+    if (cancelled || invitationEndedBeforeCutoff(event, current)) {
+      silentBaselines.append(event);
       continue;
     }
-    deliverInvitation(event, changed, fingerprint);
+    deliverables.append({event, changed, fingerprint});
+  }
+
+  if (!silentBaselines.isEmpty() &&
+      !m_database->persistInvitationBaselines(silentBaselines, &error)) {
+    emit notificationError(QStringLiteral("invitation-baseline"), error);
+  }
+  if (deliverables.isEmpty()) {
+    return;
+  }
+  if (deliverables.size() > kInvitationDigestThreshold) {
+    // Claim every member fingerprint before sending. A claimed fingerprint is
+    // a durable in-flight marker: finishing it on success or releasing it on
+    // failure keeps digest members exactly-once across restarts and backend
+    // failures instead of silently swallowing them.
+    PendingDelivery digest;
+    digest.kind = DeliveryKind::InvitationDigest;
+    digest.fingerprint = QStringLiteral("invitation-digest:") +
+                         QUuid::createUuid().toString(QUuid::WithoutBraces);
+    digest.deliveryToken = QUuid::createUuid().toString(QUuid::WithoutBraces);
+    bool changedOnly = true;
+    for (const Deliverable& deliverable : deliverables) {
+      const bool claimOk = m_database->claimNotificationDelivery(
+          deliverable.fingerprint, QStringLiteral("invitation_digest"),
+          deliverable.event.id, deliverable.event.localRevision, current, nullptr,
+          &error);
+      if (!claimOk && !error.isEmpty()) {
+        emit notificationError(deliverable.fingerprint, error);
+        continue;
+      }
+      digest.memberFingerprints.append(deliverable.fingerprint);
+      digest.memberEventIds.append(deliverable.event.id);
+      changedOnly = changedOnly && deliverable.changed;
+      m_invitationBaseline.insert(deliverable.event.id, deliverable.fingerprint);
+    }
+    if (digest.memberFingerprints.isEmpty()) {
+      return;
+    }
+    QList<Event> events;
+    events.reserve(digest.memberFingerprints.size());
+    for (const Deliverable& deliverable : deliverables) {
+      if (digest.memberEventIds.contains(deliverable.event.id)) {
+        events.append(deliverable.event);
+      }
+    }
+    m_pending.insert(digest.deliveryToken, digest);
+    CalendarNotification notification =
+        invitationDigestNotification(events, changedOnly);
+    notification.fingerprint = digest.fingerprint;
+    notification.deliveryToken = digest.deliveryToken;
+    m_backend->send(notification);
+    emit reminderStateChanged();
+    return;
+  }
+  for (const Deliverable& deliverable : std::as_const(deliverables)) {
+    deliverInvitation(deliverable.event, deliverable.changed, deliverable.fingerprint);
   }
 }
 
@@ -528,6 +636,45 @@ CalendarNotification ReminderScheduler::invitationNotification(
   return notification;
 }
 
+bool ReminderScheduler::invitationEndedBeforeCutoff(const Event& event,
+                                                    const QDateTime& current) const {
+  // endDate is exclusive (see daemon's invitationEnd): it is already the day
+  // after the final day of an all-day occurrence.
+  const QDateTime end = event.allDay
+                            ? QDateTime(event.endDate, QTime(0, 0), QTimeZone::UTC)
+                            : event.endUtc;
+  if (!end.isValid()) {
+    return false;
+  }
+  return end <= current.addSecs(-kInvitationPastCutoffHours * 3600);
+}
+
+CalendarNotification ReminderScheduler::invitationDigestNotification(
+    const QList<Event>& events, const bool changedOnly) const {
+  CalendarNotification notification;
+  notification.fingerprint = QStringLiteral("invitation-digest");
+  const QString privacy = notificationPrivacy(m_database);
+  notification.summary =
+      changedOnly ? QStringLiteral("%1 invitations updated").arg(events.size())
+                  : QStringLiteral("%1 calendar invitations").arg(events.size());
+  if (privacy == QStringLiteral("full_details") ||
+      privacy == QStringLiteral("title_only")) {
+    QStringList titles;
+    for (const Event& event : events) {
+      titles.append(eventTitle(event));
+    }
+    notification.body = titles.join(QStringLiteral(", "));
+  } else {
+    notification.body = QStringLiteral("Open OmaCalendar to review them");
+  }
+  notification.actions = {QStringLiteral("default"), QStringLiteral("Open")};
+  notification.hints = {
+      {QStringLiteral("desktop-entry"), QString::fromLatin1(kDesktopEntry)},
+      {QStringLiteral("category"), QStringLiteral("x-omacalendar.invitation")},
+  };
+  return notification;
+}
+
 void ReminderScheduler::onNotificationResult(const QString& fingerprint,
                                              const QString& deliveryToken,
                                              const uint notificationId,
@@ -543,6 +690,14 @@ void ReminderScheduler::onNotificationResult(const QString& fingerprint,
     if (delivery.kind == DeliveryKind::Reminder) {
       m_database->releaseReminderDelivery(delivery.reminderId, delivery.deliveryToken,
                                           &databaseError);
+    } else if (delivery.kind == DeliveryKind::InvitationDigest) {
+      for (const QString& memberFingerprint :
+           std::as_const(delivery.memberFingerprints)) {
+        m_database->releaseNotificationDelivery(memberFingerprint, &databaseError);
+      }
+      for (const QString& memberEventId : std::as_const(delivery.memberEventIds)) {
+        m_invitationBaseline.remove(memberEventId);
+      }
     } else {
       m_database->releaseNotificationDelivery(delivery.fingerprint, &databaseError);
     }
@@ -556,6 +711,8 @@ void ReminderScheduler::onNotificationResult(const QString& fingerprint,
       delivery.kind == DeliveryKind::Reminder
           ? m_database->finishReminderDelivery(
                 delivery.reminderId, delivery.deliveryToken, now(), &databaseError)
+      : delivery.kind == DeliveryKind::InvitationDigest
+          ? finishDigestMembers(delivery, &databaseError)
           : m_database->finishNotificationDelivery(delivery.fingerprint, now(),
                                                    &databaseError);
   // Keep the durable lease on persistence failure. Its expiry causes an
@@ -565,11 +722,29 @@ void ReminderScheduler::onNotificationResult(const QString& fingerprint,
   if (!persisted) {
     emit notificationError(fingerprint, databaseError);
   }
-  if (delivery.kind == DeliveryKind::Invitation) {
+  if (delivery.kind == DeliveryKind::Invitation && !delivery.eventId.isEmpty()) {
     m_invitationBaseline.insert(delivery.eventId, delivery.fingerprint);
   }
   m_active.insert(notificationId, delivery);
   emit reminderStateChanged();
+}
+
+bool ReminderScheduler::finishDigestMembers(const PendingDelivery& digest,
+                                            QString* errorMessage) {
+  // Members were claimed before the digest was sent; the digest callback
+  // finishes every claim. A member claim that cannot be finished stays
+  // claimed until its recovery path retries it.
+  for (const QString& memberFingerprint : std::as_const(digest.memberFingerprints)) {
+    QString memberError;
+    if (!m_database->finishNotificationDelivery(memberFingerprint, now(),
+                                                &memberError) &&
+        !memberError.isEmpty()) {
+      if (errorMessage != nullptr && errorMessage->isEmpty()) {
+        *errorMessage = memberError;
+      }
+    }
+  }
+  return true;
 }
 
 void ReminderScheduler::onActionInvoked(const uint notificationId,
@@ -602,6 +777,10 @@ void ReminderScheduler::onActionInvoked(const uint notificationId,
 QUrl ReminderScheduler::eventDeepLink(const PendingDelivery& delivery) const {
   QUrl url;
   url.setScheme(QStringLiteral("omacalendar"));
+  if (delivery.kind == DeliveryKind::InvitationDigest) {
+    url.setHost(QStringLiteral("invitations"));
+    return url;
+  }
   url.setHost(QStringLiteral("event"));
   url.setPath(QLatin1Char('/') + delivery.eventId);
   if (!delivery.occurrenceId.isEmpty()) {
