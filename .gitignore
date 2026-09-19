@@ -22,3 +22,6 @@ google-oauth*.json
 *.sqlite
 *.sqlite3
 *.db
+
+# Local agent-plan scratch space
+/.omo/
