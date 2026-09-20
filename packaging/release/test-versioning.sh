@@ -20,6 +20,29 @@ for version in v1.0.0 01.0.0 1.00.0 1.0.00 1.0 1.0.0- 1.0.0-alpha..1 \
   fi
 done
 
+while read -r version expected_support_line; do
+  if ! actual_support_line=$(release_support_line "${version}"); then
+    echo "valid release version was rejected for support-line derivation: ${version}" >&2
+    exit 1
+  fi
+  if [[ ${actual_support_line} != "${expected_support_line}" ]]; then
+    echo "${version} became ${actual_support_line}, expected ${expected_support_line}" >&2
+    exit 1
+  fi
+done <<'SUPPORT_LINES'
+1.1.0 1.1
+1.1.0-rc.1 1.1
+1.1.0-beta.2 1.1
+10.12.3-rc.4 10.12
+SUPPORT_LINES
+
+for version in v1.1.0 1.1 1.1.0- 1.1.0-beta.01 1.1.0+build; do
+  if release_support_line "${version}" >/dev/null; then
+    echo "invalid release version was accepted for support-line derivation: ${version}" >&2
+    exit 1
+  fi
+done
+
 if requires_public_release_gates 1.0.0-alpha; then
   echo "the already-published 1.0.0-alpha unexpectedly requires the expanded release gates" >&2
   exit 1
@@ -35,6 +58,10 @@ configured_version=$(cmake_release_version "${repository_root}")
 # The active install guide must contain the current native package version and
 # must not advertise retired binary formats.
 expected_arch="omacalendar-$(arch_pkgver "${configured_version}")-1-x86_64.pkg.tar.zst"
+grep -Fq "[Download ${configured_version}](https://github.com/brdweb/omacalendar/releases/tag/v${configured_version})" \
+  "${repository_root}/README.md"
+grep -Fq "OmaCalendar ${configured_version} supports" "${repository_root}/docs/INSTALL.md"
+grep -Fxq "version=${configured_version}" "${repository_root}/docs/INSTALL.md"
 grep -Fq "${expected_arch}" "${repository_root}/docs/INSTALL.md"
 if grep -Eqi 'omacalendar_.*amd64\.deb|omacalendar-.*\.flatpak|^## (Ubuntu|Flatpak)' \
   "${repository_root}/docs/INSTALL.md"; then
@@ -43,6 +70,7 @@ if grep -Eqi 'omacalendar_.*amd64\.deb|omacalendar-.*\.flatpak|^## (Ubuntu|Flatp
 fi
 release_workflow="${repository_root}/.github/workflows/release.yml"
 grep -Fq 'arch-candidate' "${release_workflow}"
+grep -Eq "^[[:space:]]+default: ${configured_version}$" "${release_workflow}"
 if grep -Eqi 'debian-candidate|flatpak-candidate|artifacts/.*linux-x86_64\.tar|PKGBUILD-bin' \
   "${release_workflow}"; then
   echo "release workflow still produces a retired binary distribution" >&2
@@ -54,6 +82,10 @@ for retired_path in packaging/aur packaging/debian packaging/flatpak; do
     exit 1
   fi
 done
+configured_minor=$(release_support_line "${configured_version}")
+grep -Fq "OmaCalendar ${configured_minor} supports" "${repository_root}/SUPPORT.md"
+grep -Fq "OmaCalendar ${configured_minor} is" "${repository_root}/docs/PLAN.md"
+grep -Fq "latest ${configured_minor}.x release" "${repository_root}/SECURITY.md"
 "${repository_root}/packaging/release/verify-release-metadata.sh" \
   "${configured_version}"
 acceptance_record="${repository_root}/docs/releases/${configured_version}.md"
