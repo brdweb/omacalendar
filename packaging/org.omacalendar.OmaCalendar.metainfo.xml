@@ -12,8 +12,8 @@
       available when network providers are offline.
     </p>
     <p>
-      The planned 1.0 release supports local calendars, Google Calendar, generic
-      CalDAV, and read-only iCalendar subscriptions.
+      OmaCalendar supports local calendars, Google Calendar, generic CalDAV,
+      and read-only iCalendar subscriptions.
     </p>
   </description>
   <developer id="org.omacalendar">
