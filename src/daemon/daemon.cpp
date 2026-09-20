@@ -15,6 +15,7 @@
 #include "core/paths.h"
 #include "core/recurrenceexpander.h"
 #include "core/widgeteventquery.h"
+#include "daemon/invitationclassification.h"
 #include "providers/caldav/icalcodec.h"
 
 namespace {
@@ -24,42 +25,6 @@ constexpr int kMaxEventPageLimit = 5000;
 constexpr int kDefaultInvitationPageLimit = 500;
 constexpr int kMaxInvitationPageLimit = 500;
 constexpr int kWidgetInvitationLimit = 100;
-
-QDateTime invitationStart(const omacalendar::Event& event) {
-  return event.allDay ? QDateTime(event.startDate, QTime(0, 0), QTimeZone::UTC)
-                      : event.startUtc;
-}
-
-QDateTime invitationEnd(const omacalendar::Event& event) {
-  return event.allDay ? QDateTime(event.endDate, QTime(0, 0), QTimeZone::UTC)
-                      : event.endUtc;
-}
-
-void sortInvitations(QList<omacalendar::Event>* events, const QDateTime& now) {
-  std::stable_sort(
-      events->begin(), events->end(), [&now](const auto& left, const auto& right) {
-        const bool leftUpcoming = invitationEnd(left) > now;
-        const bool rightUpcoming = invitationEnd(right) > now;
-        if (leftUpcoming != rightUpcoming) {
-          return leftUpcoming;
-        }
-        const QDateTime leftStart = invitationStart(left);
-        const QDateTime rightStart = invitationStart(right);
-        if (leftUpcoming && leftStart != rightStart) {
-          return leftStart < rightStart;
-        }
-        if (!leftUpcoming && left.updatedAt != right.updatedAt) {
-          return left.updatedAt > right.updatedAt;
-        }
-        if (leftStart != rightStart) {
-          return leftUpcoming ? leftStart < rightStart : leftStart > rightStart;
-        }
-        if (left.id != right.id) {
-          return left.id < right.id;
-        }
-        return left.recurrenceId < right.recurrenceId;
-      });
-}
 
 QString normalizedInvitationResponse(QString response) {
   response = response.trimmed().toLower();
@@ -2768,15 +2733,7 @@ QJsonValue Daemon::onInvitationsList(const QJsonObject& params, ipc::Error* erro
     sortInvitations(&awaitingResponse, now);
     m_invitationReadCache = std::move(awaitingResponse);
     m_invitationReadCacheRevision = revision;
-    m_invitationReadCacheExpiresAt = now.addSecs(60);
-    // An invitation changing from current/upcoming to past changes the sort
-    // bucket even without a database revision. Expire at that boundary.
-    for (const Event& event : std::as_const(m_invitationReadCache)) {
-      const QDateTime end = invitationEnd(event);
-      if (end > now && end < m_invitationReadCacheExpiresAt) {
-        m_invitationReadCacheExpiresAt = end;
-      }
-    }
+    m_invitationReadCacheExpiresAt = invitationCacheExpiry(m_invitationReadCache, now);
   }
   const QList<Event>& events = m_invitationReadCache;
   int requestedLimit =
@@ -2787,15 +2744,7 @@ QJsonValue Daemon::onInvitationsList(const QJsonObject& params, ipc::Error* erro
   const int limit = qBound(1, requestedLimit, kMaxInvitationPageLimit);
   const int requestedOffset = qMax(0, params.value(QStringLiteral("offset")).toInt());
   const int total = static_cast<int>(events.size());
-  int upcomingTotal = 0;
-  int pastTotal = 0;
-  for (const Event& event : events) {
-    if (invitationEnd(event) > now) {
-      ++upcomingTotal;
-    } else {
-      ++pastTotal;
-    }
-  }
+  const InvitationBucketTotals bucketTotals = invitationBucketTotals(events, now);
   const int offset = qMin(requestedOffset, total);
   const int count = qMin(limit, total - offset);
 
@@ -2823,8 +2772,8 @@ QJsonValue Daemon::onInvitationsList(const QJsonObject& params, ipc::Error* erro
                      {QStringLiteral("offset"), offset},
                      {QStringLiteral("limit"), limit},
                      {QStringLiteral("total"), total},
-                     {QStringLiteral("upcomingTotal"), upcomingTotal},
-                     {QStringLiteral("pastTotal"), pastTotal},
+                     {QStringLiteral("upcomingTotal"), bucketTotals.upcoming},
+                     {QStringLiteral("pastTotal"), bucketTotals.past},
                      {QStringLiteral("hasMore"), offset + count < total},
                      {QStringLiteral("nextOffset"), offset + count},
                      {QStringLiteral("revision"), m_database.changeRevision()}};
