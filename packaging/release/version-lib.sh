@@ -31,6 +31,16 @@ release_base_version() {
   printf '%s\n' "${version%%-*}"
 }
 
+release_support_line() {
+  if [[ $# -ne 1 ]] || ! validate_release_version "$1"; then
+    return 1
+  fi
+
+  local base_version
+  base_version=$(release_base_version "$1")
+  printf '%s\n' "${base_version%.*}"
+}
+
 release_version_suffix() {
   local version=$1
   local base
