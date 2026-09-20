@@ -192,6 +192,8 @@ target_link_libraries(omacalendar_sync
 add_executable(omacalendard
   src/daemon/daemon.cpp
   src/daemon/daemon.h
+  src/daemon/invitationclassification.cpp
+  src/daemon/invitationclassification.h
   src/daemon/main.cpp
   src/reminders/reminderscheduler.cpp
   src/reminders/reminderscheduler.h

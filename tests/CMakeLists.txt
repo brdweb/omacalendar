@@ -152,6 +152,19 @@ target_link_libraries(omacalendar-reminder-test
 )
 add_test(NAME reminder_test COMMAND omacalendar-reminder-test)
 
+add_executable(omacalendar-daemon-invitation-test
+  test_daemon_invitations.cpp
+  ${CMAKE_SOURCE_DIR}/src/daemon/invitationclassification.cpp
+  ${CMAKE_SOURCE_DIR}/src/daemon/invitationclassification.h
+)
+target_link_libraries(omacalendar-daemon-invitation-test
+  PRIVATE
+    Qt6::Test
+    Qt6::Core
+    omacalendar_core
+)
+add_test(NAME daemon_invitation_test COMMAND omacalendar-daemon-invitation-test)
+
 add_executable(omacalendar-appcontroller-test
   test_appcontroller.cpp
   ${CMAKE_SOURCE_DIR}/src/app/applicationinstance.cpp
