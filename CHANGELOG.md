@@ -49,8 +49,10 @@ Versioning once public releases begin.
   month overflow popup, theme tokens for spacing and corner radii, unified
   date/time formatting, responsive window minimums, and consistent icon
   glyphs with subtle transitions.
-- Documented that moving existing events between calendars is not supported
-  (daemon rejects cross-calendar moves with an explicit error).
+- Correct the documented calendar-move contract: event series and individual
+  occurrences can move between writable calendars, and cross-account or
+  cross-provider moves require confirmation. This-and-future moves remain
+  unsupported.
 
 ## [1.0.0] - 2026-09-09
 
@@ -283,7 +285,9 @@ Versioning once public releases begin.
   and emits verifiable build provenance for tagged release candidates. The
   separately documented historical OAuth incident remains a pre-tag gate.
 
-[Unreleased]: https://github.com/brdweb/omacalendar/compare/v1.0.0-rc.5...HEAD
+[Unreleased]: https://github.com/brdweb/omacalendar/compare/v1.1.0...HEAD
+[1.1.0]: https://github.com/brdweb/omacalendar/compare/v1.0.0...v1.1.0
+[1.0.0]: https://github.com/brdweb/omacalendar/compare/v1.0.0-rc.5...v1.0.0
 [1.0.0-rc.5]: https://github.com/brdweb/omacalendar/compare/v1.0.0-rc.4...v1.0.0-rc.5
 [1.0.0-rc.4]: https://github.com/brdweb/omacalendar/compare/v1.0.0-rc.3...v1.0.0-rc.4
 [1.0.0-rc.3]: https://github.com/brdweb/omacalendar/compare/v1.0.0-rc.2...v1.0.0-rc.3
