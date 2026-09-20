@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Black-box IPC 2.0 release-foundation contract.
+"""Black-box IPC 2.1 release-foundation contract.
 
 The test launches the built daemon with disposable XDG roots and drives it
 through the built CLI plus one raw Unix-socket subscriber. It must never read
@@ -27,6 +27,7 @@ from typing import Any
 
 
 PROTOCOL_MAJOR = 2
+PROTOCOL_MINOR = 1
 SCHEMA_VERSION = 2
 
 
@@ -1443,7 +1444,7 @@ def run_contract(harness: DaemonHarness) -> None:
     require(isinstance(info, dict), "system.info result is not an object")
     require(info.get("server") == "omacalendard", "unexpected server identity")
     require(info.get("protocolMajor") == PROTOCOL_MAJOR, "wrong IPC protocol major")
-    require(isinstance(info.get("protocolMinor"), int), "missing protocol minor")
+    require(info.get("protocolMinor") == PROTOCOL_MINOR, "wrong IPC protocol minor")
     require(info.get("schemaVersion") == SCHEMA_VERSION, "wrong schema version")
     require(isinstance(info.get("version"), str) and info["version"], "missing version")
     required_methods = {
@@ -1637,7 +1638,7 @@ def run_contract(harness: DaemonHarness) -> None:
                 "event": {
                     "calendarId": "contract-local",
                     "summary": "Timed contract event",
-                    "description": "Created through IPC 2.0",
+                    "description": "Created through IPC 2.1",
                     "location": "Local",
                     "startUtc": "2026-09-01T13:00:00Z",
                     "endUtc": "2026-09-01T14:00:00Z",
@@ -1870,6 +1871,22 @@ def run_contract(harness: DaemonHarness) -> None:
         "recurrence_scope_unsupported",
         "unsupported local future delete rejection",
     )
+    reject_without_durable_mutation(
+        "events.move",
+        {
+            "eventRef": {
+                "eventId": recurring["id"],
+                "recurrenceId": "2026-09-06T13:00:00.000Z",
+            },
+            "targetCalendarId": "contract-move-target",
+            "expectedLocalRevision": recurring["localRevision"],
+            "clientMutationId": "contract-unsupported-future-move",
+            "recurrenceScope": "future",
+            "guestNotificationPolicy": "none",
+        },
+        "recurrence_scope_unsupported",
+        "unsupported future move rejection",
+    )
 
     listed = harness.call(
         "events.list",
@@ -2054,6 +2071,28 @@ def run_contract(harness: DaemonHarness) -> None:
 
     protocol_client = JsonSocket(harness.socket_path)
     try:
+        protocol_client.send("protocol-major-only", "system.info")
+        major_only = protocol_client.receive()
+        protocol_client.send_value(
+            {
+                "id": "protocol-minor-zero",
+                "protocolMajor": PROTOCOL_MAJOR,
+                "protocolMinor": 0,
+                "method": "system.info",
+                "params": {},
+            }
+        )
+        minor_zero = protocol_client.receive()
+        protocol_client.send_value(
+            {
+                "id": "protocol-minor-unknown",
+                "protocolMajor": PROTOCOL_MAJOR,
+                "protocolMinor": 99,
+                "method": "system.info",
+                "params": {},
+            }
+        )
+        unknown_minor = protocol_client.receive()
         protocol_client.send(
             "protocol-mismatch", "system.info", protocol_major=PROTOCOL_MAJOR - 1
         )
@@ -2088,6 +2127,18 @@ def run_contract(harness: DaemonHarness) -> None:
         non_object = protocol_client.receive()
     finally:
         protocol_client.close()
+    for response, request_id in (
+        (major_only, "protocol-major-only"),
+        (minor_zero, "protocol-minor-zero"),
+        (unknown_minor, "protocol-minor-unknown"),
+    ):
+        require(response.get("id") == request_id, "compatible response lost ID")
+        result = response.get("result", {})
+        require(
+            result.get("protocolMajor") == PROTOCOL_MAJOR
+            and result.get("protocolMinor") == PROTOCOL_MINOR,
+            f"compatible request was rejected: {response}",
+        )
     require(mismatch.get("id") == "protocol-mismatch", "mismatch response lost ID")
     assert_ipc_error(
         mismatch.get("error", {}),
@@ -2410,7 +2461,7 @@ def main() -> int:
     finally:
         signal.signal(signal.SIGTERM, previous_sigterm)
         signal.signal(signal.SIGINT, previous_sigint)
-    print("daemon IPC 2.0 release-foundation contract passed")
+    print("daemon IPC 2.1 release-foundation contract passed")
     return 0
 
 

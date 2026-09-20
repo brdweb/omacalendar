@@ -1,4 +1,4 @@
-# Local IPC protocol 2.0
+# Local IPC protocol 2.1
 
 ## Transport and trust boundary
 
@@ -20,8 +20,12 @@ IPC.
 
 ## Versioning
 
-Every request carries `protocolMajor: 2`. A different major is rejected with
-`protocol_mismatch`; minor additions are discovered through `system.info`.
+Every request carries `protocolMajor: 2`. `protocolMinor` is optional request
+metadata and does not participate in routing: requests that omit it, send `0`,
+or send an unknown value remain compatible when the major is `2`. A different
+major is rejected with `incompatible_protocol`. The daemon advertises
+`protocolMinor: 1` through `system.info`; clients discover additive fields and
+methods from that response rather than requiring an exact minor match.
 
 ```json
 {"id":"8aee...","protocolMajor":2,"method":"system.health","params":{}}
@@ -54,9 +58,9 @@ Clients also re-query after reconnect or daemon restart.
 Subscription state belongs to one socket connection and is cleared when that
 connection closes. Before a successful subscription the socket receives only
 its request/protocol responses, not asynchronous domain notifications. Omitting
-`topics` subscribes to `*` for IPC 2.0 compatibility; an explicit list replaces
-the connection's prior list and may contain `*`, a family such as `events`, a
-family wildcard such as `events.*`, or an exact event such as
+`topics` subscribes to `*` for IPC 2.0 client compatibility; an explicit list
+replaces the connection's prior list and may contain `*`, a family such as
+`events`, a family wildcard such as `events.*`, or an exact event such as
 `events.changed`.
 
 ## Method surface
@@ -109,9 +113,12 @@ and cleanup; a started check is not proof of server support.
 - `invitations.list`, `invitations.markSeen`
 
 `invitations.list` returns invitations that need a response, sorted upcoming
-first. Its response reports `total` plus the `upcomingTotal`/`pastTotal`
-bucket counts of the full filtered result, so clients can summarize the
-invitation backlog without paging through it.
+first. IPC 2.1 additively introduces the `upcomingTotal` and `pastTotal` result
+fields alongside `total`. These bucket counts describe the full filtered result,
+so clients can summarize the invitation backlog without paging through it.
+Timed invitations move to the past bucket at `endUtc`; all-day invitations move
+at machine-local midnight on their exclusive `endDate`. IPC 2.0 clients may
+ignore the additional fields.
 
 Durable `events.create`, `events.update`, `events.remove`, `events.move`, and
 `events.respond` requests use `clientMutationId`, `expectedLocalRevision`,

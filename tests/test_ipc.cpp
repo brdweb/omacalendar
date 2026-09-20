@@ -103,6 +103,36 @@ class IpcTest final : public QObject {
                  .toInt(),
              4);
 
+    QJsonObject protocolMinorZero = request;
+    protocolMinorZero[QStringLiteral("id")] = 18;
+    protocolMinorZero[QStringLiteral("protocolMinor")] = 0;
+    QCOMPARE(router.route(protocolMinorZero)
+                 .value(QStringLiteral("result"))
+                 .toObject()
+                 .value(QStringLiteral("value"))
+                 .toInt(),
+             4);
+
+    QJsonObject unknownProtocolMinor = request;
+    unknownProtocolMinor[QStringLiteral("id")] = 19;
+    unknownProtocolMinor[QStringLiteral("protocolMinor")] = 99;
+    QCOMPARE(router.route(unknownProtocolMinor)
+                 .value(QStringLiteral("result"))
+                 .toObject()
+                 .value(QStringLiteral("value"))
+                 .toInt(),
+             4);
+
+    QJsonObject wrongProtocolMajor = request;
+    wrongProtocolMajor[QStringLiteral("id")] = 20;
+    wrongProtocolMajor[QStringLiteral("protocolMajor")] = kIpcProtocolMajor + 1;
+    QCOMPARE(router.route(wrongProtocolMajor)
+                 .value(QStringLiteral("error"))
+                 .toObject()
+                 .value(QStringLiteral("code"))
+                 .toString(),
+             QStringLiteral("incompatible_protocol"));
+
     QJsonObject missingId = request;
     missingId.remove(QStringLiteral("id"));
     const QJsonObject missingIdResponse = router.route(missingId);
