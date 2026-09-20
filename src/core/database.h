@@ -282,10 +282,12 @@ class Database final {
                                   QString* errorMessage = nullptr);
   bool releaseNotificationDelivery(const QString& fingerprint,
                                    QString* errorMessage = nullptr);
-  [[nodiscard]] bool hasNotificationDeliveryForEvent(
+  [[nodiscard]] bool hasAnyNotificationDeliveryForEvent(
       const QString& eventId, QString* errorMessage = nullptr) const;
-  [[nodiscard]] bool notificationDeliveryExists(const QString& fingerprint,
-                                                QString* errorMessage = nullptr) const;
+  [[nodiscard]] bool hasCompletedNotificationDeliveryForEvent(
+      const QString& eventId, QString* errorMessage = nullptr) const;
+  [[nodiscard]] bool isNotificationDeliveryCompleted(
+      const QString& fingerprint, QString* errorMessage = nullptr) const;
   // Persists durable baseline markers for the given invitation events so a
   // daemon restart does not re-notify or silently re-suppress them.
   bool persistInvitationBaselines(const QList<Event>& invitations,
