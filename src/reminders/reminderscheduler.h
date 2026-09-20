@@ -104,10 +104,9 @@ class ReminderScheduler final : public QObject {
   void initializeBackend();
   void connectSystemSleep();
   [[nodiscard]] bool deliver(const ReminderJob& reminder);
-  void baselineInvitations(const QStringList& calendarIds);
+  [[nodiscard]] bool baselineInvitations(const QStringList& calendarIds);
   void scanInvitations(const QStringList& calendarIds);
   void deliverInvitation(const Event& event, bool changed, const QString& fingerprint);
-  void deliverInvitations(const QList<Event>& invitations);
   [[nodiscard]] CalendarNotification reminderNotification(
       const Event& event, const ReminderJob& reminder) const;
   [[nodiscard]] CalendarNotification invitationNotification(

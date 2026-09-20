@@ -4423,7 +4423,7 @@ QList<ReminderJob> Database::dueReminders(const QDateTime& now, const int limit,
       COALESCE(NULLIF(j.snoozed_until,''),j.fire_at),j.id LIMIT ?
   )SQL"));
   const QString nowIso = isoUtc(now);
-  const QString todayIso = nowIso.left(10);
+  const QString todayIso = now.toLocalTime().date().toString(Qt::ISODate);
   query.addBindValue(nowIso);
   query.addBindValue(isoUtc(now.addSecs(-kStaleReminderGraceSeconds)));
   query.addBindValue(nowIso);
@@ -4625,7 +4625,6 @@ bool Database::recoverClaimedNotificationDeliveries(const QDateTime& recoveredAt
     rollback.exec(QStringLiteral("RELEASE recover_notification_claims"));
     return false;
   };
-  const QString timestamp = isoUtc(recoveredAt);
   QSqlQuery reminders(m_database);
   reminders.prepare(QStringLiteral(R"SQL(
     UPDATE reminder_jobs
@@ -4634,20 +4633,20 @@ bool Database::recoverClaimedNotificationDeliveries(const QDateTime& recoveredAt
     WHERE state='claimed'
       AND (lease_expires_at='' OR lease_expires_at<=?)
   )SQL"));
-  reminders.addBindValue(timestamp);
+  reminders.addBindValue(isoUtc(recoveredAt));
   QSqlQuery invitations(m_database);
   invitations.prepare(QStringLiteral(R"SQL(
     UPDATE notification_deliveries
-    SET state='delivered',delivered_at=COALESCE(NULLIF(claimed_at,''),?)
+    SET state='retry_pending',delivered_at=''
     WHERE state='claimed'
   )SQL"));
-  invitations.addBindValue(timestamp);
   if (!reminders.exec() || !invitations.exec()) {
     if (errorMessage != nullptr) {
       *errorMessage =
           reminders.lastError().isValid()
               ? sqlError(reminders, QStringLiteral("recover reminder claims"))
-              : sqlError(invitations, QStringLiteral("recover invitation claims"));
+              : sqlError(invitations,
+                         QStringLiteral("release abandoned notification claims"));
     }
     return fail();
   }
@@ -4737,7 +4736,7 @@ qint64 Database::dismissStaleReminders(const QDateTime& now, const int graceSeco
   )SQL"));
   query.addBindValue(isoUtc(now.addSecs(-graceSeconds)));
   query.addBindValue(isoUtc(now));
-  query.addBindValue(isoUtc(now).left(10));
+  query.addBindValue(now.toLocalTime().date().toString(Qt::ISODate));
   if (!query.exec()) {
     if (errorMessage != nullptr) {
       *errorMessage = sqlError(query, QStringLiteral("dismiss stale reminders"));
@@ -4820,9 +4819,17 @@ bool Database::claimNotificationDelivery(const QString& fingerprint,
   }
   QSqlQuery query(m_database);
   query.prepare(QStringLiteral(R"SQL(
-    INSERT OR IGNORE INTO notification_deliveries
-      (fingerprint,kind,event_id,event_revision,state,claimed_at)
-    VALUES (?,?,?,?,'claimed',?)
+    INSERT INTO notification_deliveries
+      (fingerprint,kind,event_id,event_revision,state,claimed_at,delivered_at)
+    VALUES (?,?,?,?,'claimed',?,'')
+    ON CONFLICT(fingerprint) DO UPDATE SET
+      kind=excluded.kind,
+      event_id=excluded.event_id,
+      event_revision=excluded.event_revision,
+      state='claimed',
+      claimed_at=excluded.claimed_at,
+      delivered_at=''
+    WHERE notification_deliveries.state='retry_pending'
   )SQL"));
   query.addBindValue(fingerprint);
   query.addBindValue(kind);
@@ -4864,8 +4871,11 @@ bool Database::finishNotificationDelivery(const QString& fingerprint,
 bool Database::releaseNotificationDelivery(const QString& fingerprint,
                                            QString* errorMessage) {
   QSqlQuery query(m_database);
-  query.prepare(QStringLiteral(
-      "DELETE FROM notification_deliveries WHERE fingerprint=? AND state='claimed'"));
+  query.prepare(QStringLiteral(R"SQL(
+    UPDATE notification_deliveries
+    SET state='retry_pending',delivered_at=''
+    WHERE fingerprint=? AND state='claimed'
+  )SQL"));
   query.addBindValue(fingerprint);
   if (!query.exec()) {
     if (errorMessage != nullptr) {
@@ -4876,8 +4886,8 @@ bool Database::releaseNotificationDelivery(const QString& fingerprint,
   return query.numRowsAffected() == 0 || bumpChangeRevision(errorMessage);
 }
 
-bool Database::hasNotificationDeliveryForEvent(const QString& eventId,
-                                               QString* errorMessage) const {
+bool Database::hasAnyNotificationDeliveryForEvent(const QString& eventId,
+                                                  QString* errorMessage) const {
   QSqlQuery query(m_database);
   query.prepare(
       QStringLiteral("SELECT 1 FROM notification_deliveries WHERE event_id=? LIMIT 1"));
@@ -4891,11 +4901,31 @@ bool Database::hasNotificationDeliveryForEvent(const QString& eventId,
   return query.next();
 }
 
-bool Database::notificationDeliveryExists(const QString& fingerprint,
-                                          QString* errorMessage) const {
+bool Database::hasCompletedNotificationDeliveryForEvent(const QString& eventId,
+                                                        QString* errorMessage) const {
   QSqlQuery query(m_database);
-  query.prepare(QStringLiteral(
-      "SELECT 1 FROM notification_deliveries WHERE fingerprint=? LIMIT 1"));
+  query.prepare(QStringLiteral(R"SQL(
+    SELECT 1 FROM notification_deliveries
+    WHERE event_id=? AND state='delivered' LIMIT 1
+  )SQL"));
+  query.addBindValue(eventId);
+  if (!query.exec()) {
+    if (errorMessage != nullptr) {
+      *errorMessage =
+          sqlError(query, QStringLiteral("check completed notification history"));
+    }
+    return false;
+  }
+  return query.next();
+}
+
+bool Database::isNotificationDeliveryCompleted(const QString& fingerprint,
+                                               QString* errorMessage) const {
+  QSqlQuery query(m_database);
+  query.prepare(QStringLiteral(R"SQL(
+    SELECT 1 FROM notification_deliveries
+    WHERE fingerprint=? AND state='delivered' LIMIT 1
+  )SQL"));
   query.addBindValue(fingerprint);
   if (!query.exec()) {
     if (errorMessage != nullptr) {
