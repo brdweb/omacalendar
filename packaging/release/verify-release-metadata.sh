@@ -44,16 +44,45 @@ if ! grep -Eq \
   exit 1
 fi
 
+extract_domain_constant() {
+  local constant_name=$1
+  local domain_header="${repository_root}/src/core/domain.h"
+  local pattern="^[[:space:]]*inline[[:space:]]+constexpr[[:space:]]+int[[:space:]]+${constant_name}[[:space:]]*=[[:space:]]*([0-9]+)[[:space:]]*;[[:space:]]*$"
+  local line value=
+  local matches=0
+
+  while IFS= read -r line; do
+    if [[ ${line} =~ ${pattern} ]]; then
+      value=${BASH_REMATCH[1]}
+      ((matches += 1))
+    fi
+  done <"${domain_header}"
+  if [[ ${matches} -ne 1 ]]; then
+    echo "${domain_header} must define exactly one numeric ${constant_name}" >&2
+    return 1
+  fi
+  printf '%s' "${value}"
+}
+
+ipc_protocol_major=$(extract_domain_constant kIpcProtocolMajor)
+ipc_protocol_minor=$(extract_domain_constant kIpcProtocolMinor)
+ipc_protocol_version="${ipc_protocol_major}.${ipc_protocol_minor}"
 if ! grep -Fq \
-  "| \`${release_version}\` | 2 | 2 |" \
+  "| \`${release_version}\` | ${ipc_protocol_version} | 2 |" \
   "${repository_root}/docs/COMPATIBILITY.md"; then
-  echo "compatibility matrix has no exact app ${release_version} row" >&2
+  echo "compatibility matrix has no exact app ${release_version}, IPC ${ipc_protocol_version}, schema 2 row" >&2
   exit 1
 fi
 
 acceptance_record="${repository_root}/docs/releases/${release_version}.md"
 if [[ ! -s ${acceptance_record} ]]; then
   echo "release acceptance record is missing: docs/releases/${release_version}.md" >&2
+  exit 1
+fi
+if ! grep -Fq \
+  "App ${release_version}; IPC ${ipc_protocol_version}; schema 2" \
+  "${acceptance_record}"; then
+  echo "release acceptance record has no exact app, IPC, and schema identity" >&2
   exit 1
 fi
 for required_heading in \
@@ -86,6 +115,13 @@ declare -a PRETAG_GATE_LABELS=(
   "Secret scan and dependency review"
   "No unresolved critical or high defect"
 )
+declare -a POSTTAG_GATE_LABELS=(
+  "Signed app tag and exact target commit independently verified"
+  "Checksums and package-specific provenance/SBOM attestations verified"
+  "Native Arch package installation, restart, and removal"
+  "Complete owner and live-provider acceptance"
+  "Maintainer approval to publish"
+)
 declare -a EXTERNAL_APPROVAL_LABELS=(
   "Historical Google installed-app OAuth credential revoked or rotated"
   "Repository-history hygiene decision recorded"
@@ -106,15 +142,16 @@ if requires_public_release_gates "${release_version}"; then
   )
 fi
 
-require_completed_section() {
+require_section_rows() {
   local section=$1
   local row_label=$2
-  local expected_status=$3
-  shift 3
+  local expected_status_description=$3
+  local expected_status_pattern=$4
+  shift 4
   local -a expected_labels=("$@")
   local found_rows=0
   local failed=0
-  local label status _leading _evidence _trailing
+  local label status evidence _leading _trailing
   local expected_label
   local -A required_labels=()
   local -A seen_labels=()
@@ -123,9 +160,10 @@ require_completed_section() {
     required_labels["${expected_label}"]=1
   done
 
-  while IFS='|' read -r _leading label status _evidence _trailing; do
+  while IFS='|' read -r _leading label status evidence _trailing; do
     label=$(trim_whitespace "${label}")
     status=$(trim_whitespace "${status}")
+    evidence=$(trim_whitespace "${evidence}")
     if [[ -z ${label} || ${label} == "${row_label}" || ${label} == ---* ]]; then
       continue
     fi
@@ -141,8 +179,12 @@ require_completed_section() {
     fi
     seen_labels["${label}"]=1
     ((found_rows += 1))
-    if [[ ${status} != "${expected_status}" ]]; then
-      echo "${section} is incomplete: ${label} (${status:-missing status})" >&2
+    if [[ ! ${status} =~ ${expected_status_pattern} ]]; then
+      echo "${section} has invalid status for ${label}: ${status:-missing}; expected ${expected_status_description}" >&2
+      failed=1
+    fi
+    if [[ -z ${evidence} ]]; then
+      echo "${section} has no evidence note for ${label}" >&2
       failed=1
     fi
   done < <(
@@ -165,12 +207,31 @@ require_completed_section() {
   [[ ${failed} -eq 0 ]]
 }
 
+acceptance_structure_failed=0
+require_section_rows \
+  "Pre-tag gates" "Gate" "PASS or PENDING" \
+  '^(PASS|PENDING([[:space:]]+-.*)?)$' \
+  "${PRETAG_GATE_LABELS[@]}" || acceptance_structure_failed=1
+require_section_rows \
+  "Post-tag draft gates" "Gate" "PASS, APPROVED, or PENDING" \
+  '^(PASS|APPROVED|PENDING([[:space:]]+-.*)?)$' \
+  "${POSTTAG_GATE_LABELS[@]}" || acceptance_structure_failed=1
+require_section_rows \
+  "External approvals" "Approval" "APPROVED or PENDING" \
+  '^(APPROVED|PENDING([[:space:]]+-.*)?)$' \
+  "${EXTERNAL_APPROVAL_LABELS[@]}" || acceptance_structure_failed=1
+if [[ ${acceptance_structure_failed} -ne 0 ]]; then
+  echo "release acceptance record has an invalid gate structure" >&2
+  exit 1
+fi
+
 if [[ ${require_pretag_pass} -eq 1 ]]; then
   pretag_failed=0
-  require_completed_section \
-    "Pre-tag gates" "Gate" "PASS" "${PRETAG_GATE_LABELS[@]}" || pretag_failed=1
-  require_completed_section \
-    "External approvals" "Approval" "APPROVED" \
+  require_section_rows \
+    "Pre-tag gates" "Gate" "PASS" '^PASS$' \
+    "${PRETAG_GATE_LABELS[@]}" || pretag_failed=1
+  require_section_rows \
+    "External approvals" "Approval" "APPROVED" '^APPROVED$' \
     "${EXTERNAL_APPROVAL_LABELS[@]}" || pretag_failed=1
   if [[ ${pretag_failed} -ne 0 ]]; then
     echo "release acceptance record is not approved for tagging" >&2
