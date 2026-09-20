@@ -12,7 +12,7 @@ native daemon installed by the Arch package.
 
 ## 1. Close the qualification gates
 
-Stable `1.0.0` requires every applicable app criterion in [PLAN.md](PLAN.md),
+Stable `1.1.0` requires every applicable app criterion in [PLAN.md](PLAN.md),
 [release validation](OWNER_TESTING.md), and no unresolved critical or
 high defect. Provider, desktop, widget, security, and exact-package evidence
 remain separate; one kind of pass does not imply another.
@@ -46,13 +46,13 @@ attestations and cannot be published as the final package.
 Create a signed annotated tag from the accepted clean commit:
 
 ```bash
-git tag -s v1.0.0 -m 'OmaCalendar 1.0.0'
-packaging/release/verify-release.sh v1.0.0
-git push origin v1.0.0
+git tag -s v1.1.0 -m 'OmaCalendar 1.1.0'
+packaging/release/verify-release.sh v1.1.0
+git push origin v1.1.0
 ```
 
 For an RC draft, use its exact version and
-`verify-release.sh --draft-candidate v1.0.0-rc.N`. This validates draft-only
+`verify-release.sh --draft-candidate v1.1.0-rc.N`. This validates draft-only
 authorization without granting stable acceptance.
 
 Never move a pushed tag or replace assets on a published release. Correct an
