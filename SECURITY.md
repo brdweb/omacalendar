@@ -2,7 +2,7 @@
 
 ## Supported versions
 
-The latest 1.0.x release receives security fixes. Upgrade to the latest patch
+The latest 1.1.x release receives security fixes. Upgrade to the latest patch
 release before reporting a vulnerability. Prereleases are no longer supported.
 
 ## Report a vulnerability
