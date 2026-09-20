@@ -4,7 +4,7 @@ A native, local-first calendar for **Omarchy Linux**. Bring Google Calendar,
 CalDAV, device calendars and ICS subscriptions together in a fast Qt desktop
 app, with an optional Quickshell bar widget.
 
-[Download 1.0.0](https://github.com/brdweb/omacalendar/releases/tag/v1.0.0) ·
+[Download 1.1.0](https://github.com/brdweb/omacalendar/releases/tag/v1.1.0) ·
 [Website](https://omacalendar.brdweb.com/) · [Installation](docs/INSTALL.md) ·
 [Support](SUPPORT.md)
 
@@ -14,6 +14,8 @@ app, with an optional Quickshell bar widget.
 
 - Agenda, day, week, month and year views.
 - Event editing, recurring events, reminders and invitations.
+- Series and occurrence moves between writable calendars, with confirmation
+  before cross-account or cross-provider moves.
 - Calendar sets, visibility controls and calendar colors.
 - Google Calendar, CalDAV, local calendars and read-only ICS subscriptions.
 - Local cached data for responsive offline use; queued changes sync on reconnect.

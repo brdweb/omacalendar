@@ -1,6 +1,6 @@
 # Install OmaCalendar
 
-OmaCalendar 1.0.0 supports current **Arch/Omarchy on x86-64**. Install the
+OmaCalendar 1.1.0 supports current **Arch/Omarchy on x86-64**. Install the
 native Arch package; no custom package repository is required. A working
 Linux Secret Service keyring is required for connected calendar accounts.
 
@@ -11,8 +11,8 @@ and SPDX software inventory; `curl` downloads the files.
 
 ```bash
 set -euo pipefail
-version=1.0.0
-package=omacalendar-1.0.0-1-x86_64.pkg.tar.zst
+version=1.1.0
+package=omacalendar-1.1.0-1-x86_64.pkg.tar.zst
 release_url="https://github.com/brdweb/omacalendar/releases/download/v${version}"
 curl -fLO "${release_url}/${package}"
 curl -fLO "${release_url}/SHA256SUMS"
