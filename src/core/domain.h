@@ -10,7 +10,7 @@
 namespace omacalendar {
 
 inline constexpr int kIpcProtocolMajor = 2;
-inline constexpr int kIpcProtocolMinor = 0;
+inline constexpr int kIpcProtocolMinor = 1;
 
 enum class ProviderKind {
   Local,
