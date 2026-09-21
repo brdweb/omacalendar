@@ -1192,8 +1192,8 @@ class ReminderSchedulerTest final : public QObject {
     QVERIFY(directory.isValid());
     Database database;
     QString error;
-    QVERIFY2(database.open(directory.filePath(QStringLiteral("store.sqlite")), &error),
-             qPrintable(error));
+    const QString databasePath = directory.filePath(QStringLiteral("store.sqlite"));
+    QVERIFY2(database.open(databasePath, &error), qPrintable(error));
     QDateTime current(QDate(2027, 5, 6), QTime(11, 0), QTimeZone::UTC);
     FakeNotificationBackend backend;
     ReminderScheduler scheduler(
@@ -1212,14 +1212,93 @@ class ReminderSchedulerTest final : public QObject {
     event.calendarId = muted.id;
     QVERIFY2(database.saveLocalEvent(&event, OutboxOperation::Create, &error),
              qPrintable(error));
+    const ReminderJob pending = reminderForEvent(&database, event.id);
+    QVERIFY(pending.id > 0);
+    QCOMPARE(pending.state, QStringLiteral("pending"));
 
-    scheduler.start();
-    scheduler.stop();
-    QCoreApplication::processEvents();
+    current = pending.fireAt;
+    scheduler.checkNow();
 
     QCOMPARE(backend.sent.size(), 0);
-    const ReminderJob job = reminderForEvent(&database, event.id);
-    QCOMPARE(job.state, QStringLiteral("pending"));
+    QCOMPARE(reminderForEvent(&database, event.id).id, qint64(0));
+
+    database.close();
+    QVERIFY2(database.open(databasePath, &error), qPrintable(error));
+    QVERIFY2(database.updateCalendarPreferences(muted.id, true, {}, 0, false, &error),
+             qPrintable(error));
+    current = current.addSecs(60);
+    scheduler.checkNow();
+
+    QCOMPARE(backend.sent.size(), 0);
+    QCOMPARE(database.dueReminders(current, 20, &error).size(), 0);
+    QVERIFY2(error.isEmpty(), qPrintable(error));
+  }
+
+  void unmuteConsumesDuePendingReminderBeforeNextSchedulerTick() {
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    Database database;
+    QString error;
+    const QString databasePath = directory.filePath(QStringLiteral("store.sqlite"));
+    QVERIFY2(database.open(databasePath, &error), qPrintable(error));
+    QDateTime current = QDateTime::currentDateTimeUtc();
+    FakeNotificationBackend backend;
+    ReminderScheduler scheduler(
+        &database, &backend, [&current]() { return current; },
+        [](const QUrl&) { return true; });
+
+    Calendar muted;
+    muted.id = QStringLiteral("unmute-race-calendar");
+    muted.accountId = QStringLiteral("local-account");
+    muted.name = QStringLiteral("Unmute race");
+    muted.enabled = true;
+    muted.ignoreAlerts = true;
+    QVERIFY2(database.upsertCalendar(muted, &error), qPrintable(error));
+
+    Event due = reminderEvent(QStringLiteral("Due while muted"),
+                              current.addSecs(10 * 60), QJsonArray{10});
+    due.calendarId = muted.id;
+    QVERIFY2(database.saveLocalEvent(&due, OutboxOperation::Create, &error),
+             qPrintable(error));
+    const ReminderJob dueJob = reminderForEvent(&database, due.id);
+    QVERIFY(dueJob.id > 0);
+    QCOMPARE(dueJob.fireAt, current);
+
+    Event future = reminderEvent(QStringLiteral("Future while muted"),
+                                 current.addSecs(20 * 60), QJsonArray{10});
+    future.calendarId = muted.id;
+    QVERIFY2(database.saveLocalEvent(&future, OutboxOperation::Create, &error),
+             qPrintable(error));
+    const ReminderJob futureJob = reminderForEvent(&database, future.id);
+    QVERIFY(futureJob.id > 0);
+    QVERIFY(futureJob.fireAt > current);
+
+    Event snoozed = reminderEvent(QStringLiteral("Snoozed while muted"),
+                                  current.addSecs(10 * 60), QJsonArray{10});
+    snoozed.calendarId = muted.id;
+    QVERIFY2(database.saveLocalEvent(&snoozed, OutboxOperation::Create, &error),
+             qPrintable(error));
+    const ReminderJob snoozedJob = reminderForEvent(&database, snoozed.id);
+    QVERIFY2(database.snoozeReminderAt(snoozedJob.id, 5, current, &error),
+             qPrintable(error));
+
+    QVERIFY2(database.updateCalendarPreferences(muted.id, true, {}, 0, false, &error),
+             qPrintable(error));
+
+    QCOMPARE(reminderForEvent(&database, due.id).id, qint64(0));
+    QCOMPARE(reminderForEvent(&database, future.id).state, QStringLiteral("pending"));
+    QCOMPARE(reminderForEvent(&database, snoozed.id).state, QStringLiteral("snoozed"));
+
+    database.close();
+    QVERIFY2(database.open(databasePath, &error), qPrintable(error));
+    current = current.addSecs(60);
+    scheduler.checkNow();
+
+    QCOMPARE(backend.sent.size(), 0);
+    QCOMPARE(reminderForEvent(&database, due.id).id, qint64(0));
+    QCOMPARE(reminderForEvent(&database, future.id).id, futureJob.id);
+    QCOMPARE(reminderForEvent(&database, future.id).state, QStringLiteral("pending"));
+    QCOMPARE(reminderForEvent(&database, snoozed.id).state, QStringLiteral("snoozed"));
   }
 
   void invitationPastHistoryImportsSilently() {

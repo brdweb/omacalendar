@@ -1734,6 +1734,41 @@ bool Database::updateCalendarPreferences(const QString& calendarId, const bool e
                                          const QString& colorOverride,
                                          const int position, const bool ignoreAlerts,
                                          QString* errorMessage) {
+  QSqlQuery savepoint(m_database);
+  if (!savepoint.exec(QStringLiteral("SAVEPOINT update_calendar_preferences"))) {
+    if (errorMessage != nullptr) {
+      *errorMessage =
+          sqlError(savepoint, QStringLiteral("start calendar preference update"));
+    }
+    return false;
+  }
+  const auto rollback = [this]() {
+    QSqlQuery query(m_database);
+    query.exec(QStringLiteral("ROLLBACK TO update_calendar_preferences"));
+    query.exec(QStringLiteral("RELEASE update_calendar_preferences"));
+  };
+  if (!ignoreAlerts) {
+    QSqlQuery dismiss(m_database);
+    dismiss.prepare(QStringLiteral(R"SQL(
+      UPDATE reminder_jobs
+      SET state='dismissed',claimed_at='',claim_token='',lease_expires_at=''
+      WHERE state='pending' AND fire_at<=? AND EXISTS (
+        SELECT 1 FROM events e
+        JOIN calendars c ON c.id=e.calendar_id
+        WHERE e.id=reminder_jobs.event_id AND c.id=? AND c.ignore_alerts=1
+      )
+    )SQL"));
+    dismiss.addBindValue(isoUtc(nowUtc()));
+    dismiss.addBindValue(calendarId);
+    if (!dismiss.exec()) {
+      if (errorMessage != nullptr) {
+        *errorMessage =
+            sqlError(dismiss, QStringLiteral("dismiss muted calendar reminders"));
+      }
+      rollback();
+      return false;
+    }
+  }
   QSqlQuery query(m_database);
   query.prepare(QStringLiteral(R"SQL(
     UPDATE calendars SET enabled=?, color_override=?, position=?, ignore_alerts=?
@@ -1751,9 +1786,23 @@ bool Database::updateCalendarPreferences(const QString& calendarId, const bool e
               ? sqlError(query, QStringLiteral("update calendar preferences"))
               : QStringLiteral("Calendar not found");
     }
+    rollback();
     return false;
   }
-  return bumpChangeRevision(errorMessage);
+  if (!bumpChangeRevision(errorMessage)) {
+    rollback();
+    return false;
+  }
+  QSqlQuery release(m_database);
+  if (!release.exec(QStringLiteral("RELEASE update_calendar_preferences"))) {
+    if (errorMessage != nullptr) {
+      *errorMessage =
+          sqlError(release, QStringLiteral("commit calendar preference update"));
+    }
+    rollback();
+    return false;
+  }
+  return true;
 }
 
 QList<Calendar> Database::calendars(const QString& accountId,
@@ -4717,23 +4766,31 @@ bool Database::dismissReminder(const qint64 id, QString* errorMessage) {
 
 qint64 Database::dismissStaleReminders(const QDateTime& now, const int graceSeconds,
                                        QString* errorMessage) {
-  // A pending job older than the grace window is stale unless its occurrence
-  // is still upcoming — resolved from event_instances, the same guard as
-  // dueReminders (see its comment for the canonical-column rationale).
+  // A due pending job is consumed while its calendar is muted. Otherwise it is
+  // stale only past the grace window and once its occurrence is no longer
+  // upcoming. Snoozed jobs preserve the user's explicit delivery intent.
   QSqlQuery query(m_database);
   query.prepare(QStringLiteral(R"SQL(
     UPDATE reminder_jobs
     SET state='dismissed',claimed_at='',claim_token='',lease_expires_at=''
     WHERE state='pending'
-      AND fire_at<?
-      AND NOT EXISTS (
-        SELECT 1 FROM event_instances ei
-        WHERE ei.event_id=reminder_jobs.event_id
-          AND ei.recurrence_id=reminder_jobs.occurrence_id
-          AND (ei.start_utc>?
-               OR (ei.start_utc='' AND ei.start_date<>'' AND ei.start_date>?))
+      AND (
+        (fire_at<=? AND EXISTS (
+          SELECT 1 FROM events e
+          JOIN calendars c ON c.id=e.calendar_id
+          WHERE e.id=reminder_jobs.event_id AND c.ignore_alerts=1
+        )) OR (
+          fire_at<? AND NOT EXISTS (
+            SELECT 1 FROM event_instances ei
+            WHERE ei.event_id=reminder_jobs.event_id
+              AND ei.recurrence_id=reminder_jobs.occurrence_id
+              AND (ei.start_utc>?
+                   OR (ei.start_utc='' AND ei.start_date<>'' AND ei.start_date>?))
+          )
+        )
       )
   )SQL"));
+  query.addBindValue(isoUtc(now));
   query.addBindValue(isoUtc(now.addSecs(-graceSeconds)));
   query.addBindValue(isoUtc(now));
   query.addBindValue(now.toLocalTime().date().toString(Qt::ISODate));

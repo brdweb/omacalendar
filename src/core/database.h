@@ -264,10 +264,10 @@ class Database final {
   bool snoozeReminderAt(qint64 id, int minutes, const QDateTime& now,
                         QString* errorMessage = nullptr);
   bool dismissReminder(qint64 id, QString* errorMessage = nullptr);
-  // Dismisses pending reminder jobs that are long overdue and attached to
-  // occurrences that have already started or passed. Returns how many jobs
-  // were dismissed. Jobs for still-upcoming occurrences survive so a daemon
-  // that was offline can catch up on pre-event warnings it missed.
+  // Dismisses due pending jobs on muted calendars and long-overdue jobs whose
+  // occurrences have started or passed. Jobs for still-upcoming occurrences
+  // survive the stale sweep so an offline daemon can catch up on warnings.
+  // Returns how many jobs were dismissed.
   [[nodiscard]] qint64 dismissStaleReminders(const QDateTime& now, int graceSeconds,
                                              QString* errorMessage = nullptr);
   bool markReminderDelivered(qint64 id, QString* errorMessage = nullptr);
