@@ -16,7 +16,7 @@ ApplicationWindow {
 
     width: 1440
     height: 900
-    minimumWidth: 760
+    minimumWidth: 980
     minimumHeight: 560
     visible: true
     title: "OmaCalendar"
