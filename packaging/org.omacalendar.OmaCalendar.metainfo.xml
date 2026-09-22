@@ -35,6 +35,9 @@
   </recommends>
   <content_rating type="oars-1.1" />
   <releases>
+    <release version="1.1.1" date="2026-09-22" type="stable">
+      <description><p>A correctness fix for all-day events published with an inclusive end date: the Google and iCalendar read paths normalize the span to the exclusive next day, an iCalendar payload with a backwards all-day span no longer fails to parse as a whole, and already-cached events are repaired on read.</p></description>
+    </release>
     <release version="1.1.0" date="2026-09-19" type="stable">
       <description><p>Notification hardening for imported calendars: stale reminders and old invitation history are imported silently, durable invitation baselines survive daemon restarts, burst invitations collapse into a digest, and inline connection feedback plus keyboard and theming polish across the desktop UI.</p></description>
     </release>

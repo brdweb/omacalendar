@@ -2,8 +2,9 @@
 
 | App version | IPC | Schema | Distribution |
 |---|---:|---:|---|
-| `1.1.0` | 2.1 | 2 | Current x86-64 Arch/Omarchy |
-| `1.0.0` | 2.0 | 2 | Previous x86-64 Arch/Omarchy release |
+| `1.1.1` | 2.1 | 2 | Current x86-64 Arch/Omarchy |
+| `1.1.0` | 2.1 | 2 | Previous x86-64 Arch/Omarchy release |
+| `1.0.0` | 2.0 | 2 | Earlier x86-64 Arch/Omarchy release |
 
 The companion widget 0.1.0 uses IPC 2.0 and remains compatible with the
 additive IPC 2.1 revision. It requires Omarchy 4.0.0 or newer and Quickshell

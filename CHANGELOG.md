@@ -6,6 +6,17 @@ Versioning once public releases begin.
 
 ## [Unreleased]
 
+## [1.1.1] - 2026-09-22
+
+### Fixed
+
+- All-day events that arrive with an inclusive end date (`DTEND`/`end.date`
+  equal to the start date, as some subscribed Google calendars publish) are
+  normalized to the exclusive next-day end the rest of the app assumes. The
+  Google and iCalendar read paths both repair the span, an iCalendar payload
+  with a backwards all-day span no longer fails to parse as a whole, and rows
+  already cached with the inclusive shape are repaired on read.
+
 ## [1.1.0] - 2026-09-19
 
 ### Changed
@@ -285,7 +296,8 @@ Versioning once public releases begin.
   and emits verifiable build provenance for tagged release candidates. The
   separately documented historical OAuth incident remains a pre-tag gate.
 
-[Unreleased]: https://github.com/brdweb/omacalendar/compare/v1.1.0...HEAD
+[Unreleased]: https://github.com/brdweb/omacalendar/compare/v1.1.1...HEAD
+[1.1.1]: https://github.com/brdweb/omacalendar/compare/v1.1.0...v1.1.1
 [1.1.0]: https://github.com/brdweb/omacalendar/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/brdweb/omacalendar/compare/v1.0.0-rc.5...v1.0.0
 [1.0.0-rc.5]: https://github.com/brdweb/omacalendar/compare/v1.0.0-rc.4...v1.0.0-rc.5
