@@ -1166,16 +1166,14 @@ ICalendarParseResult ICalendarCodec::parse(const QByteArray& payload) {
                                                               : TimeKind::Zoned);
     if (event.allDay) {
       event.startDate = start.date;
-      event.endDate =
-          end.valid ? end.date
-                    : start.date.addDays(duration > 0 ? duration / (24 * 60 * 60) : 1);
       // RFC 5545 DTEND is exclusive, but some publishers emit an inclusive end
       // date (DTEND == DTSTART for a one-day event). Fold that -- and any other
-      // non-positive span -- into the exclusive next-day convention the rest of
-      // the app assumes, rather than rejecting the whole calendar payload.
-      if (event.endDate <= event.startDate) {
-        event.endDate = event.startDate.addDays(1);
-      }
+      // non-positive span -- into the exclusive next-day convention, rather
+      // than rejecting the whole calendar payload over one VEVENT.
+      event.endDate = exclusiveAllDayEnd(
+          event.startDate,
+          end.valid ? end.date
+                    : start.date.addDays(duration > 0 ? duration / (24 * 60 * 60) : 1));
     } else {
       event.startUtc = start.utc;
       event.endUtc = end.valid ? end.utc : start.utc.addSecs(duration);

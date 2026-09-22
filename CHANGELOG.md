@@ -13,9 +13,11 @@ Versioning once public releases begin.
 - All-day events that arrive with an inclusive end date (`DTEND`/`end.date`
   equal to the start date, as some subscribed Google calendars publish) are
   normalized to the exclusive next-day end the rest of the app assumes. The
-  Google and iCalendar read paths both repair the span, an iCalendar payload
-  with a backwards all-day span no longer fails to parse as a whole, and rows
-  already cached with the inclusive shape are repaired on read.
+  Google and iCalendar read paths both repair the span, storage rejects an
+  inclusive span from any caller, and an existing cache is repaired when the
+  daemon next opens it, so affected events reappear without a resync. An
+  iCalendar payload with a backwards all-day span no longer fails to parse as
+  a whole.
 
 ## [1.1.0] - 2026-09-19
 

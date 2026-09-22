@@ -348,6 +348,7 @@ class Database final {
   bool ensureSyncCoverageSchema(QString* errorMessage);
   bool ensureProviderResourcesSchema(QString* errorMessage);
   bool ensureReadPerformanceIndexes(QString* errorMessage);
+  bool repairInclusiveAllDayEndDates(QString* errorMessage);
   bool archiveLegacyDatabase(const QString& path, QString* errorMessage);
   bool execute(const QString& sql, QString* errorMessage) const;
   bool bumpChangeRevision(QString* errorMessage = nullptr) const;

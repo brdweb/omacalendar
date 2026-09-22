@@ -148,9 +148,9 @@ class DatabaseTest final : public QObject {
     QCOMPARE(db.setting("missing", 123, &error).toInt(), 123);
   }
 
-  void cachedInclusiveAllDayEndDatesAreRepairedOnRead() {
-    // Rows written before the provider read paths normalized inclusive all-day
-    // end dates must still read back as an exclusive next-day span. See #28.
+  void inclusiveAllDayEndDatesAreNormalizedOnWrite() {
+    // Whatever a caller supplies, an all-day span must reach storage with an
+    // exclusive end date: SQL range predicates compare it directly. See #28.
     QTemporaryDir directory;
     QVERIFY(directory.isValid());
     Database db;
@@ -176,6 +176,73 @@ class DatabaseTest final : public QObject {
     QVERIFY(stored.allDay);
     QCOMPARE(stored.startDate, QDate(2026, 9, 26));
     QCOMPARE(stored.endDate, QDate(2026, 9, 27));
+
+    // The row has to be stored exclusive, not merely corrected after reading:
+    // a read-time fix never sees a row the range predicate already discarded.
+    const QList<Event> sameDay = db.eventsBetween(
+        QDateTime(QDate(2026, 9, 26), QTime(0, 0), QTimeZone::utc()),
+        QDateTime(QDate(2026, 9, 27), QTime(0, 0), QTimeZone::utc()), {cal.id}, &error);
+    QCOMPARE(sameDay.size(), 1);
+    QCOMPARE(sameDay.first().remoteId, inclusive.remoteId);
+    QCOMPARE(sameDay.first().endDate, QDate(2026, 9, 27));
+  }
+
+  void legacyInclusiveAllDayRowsAreRepairedOnOpen() {
+    // A cache written before the read paths normalized inclusive end dates is
+    // repaired when the daemon next opens it, so the affected events reappear
+    // in range queries without a resync. See #28.
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const QString path = directory.filePath(QStringLiteral("store.sqlite"));
+    QString error;
+
+    Account account = makeAccount("acc-legacy", "Legacy");
+    Calendar cal = makeCalendar("cal-legacy", account.id);
+    Database db;
+    QVERIFY(db.open(path));
+    QVERIFY(db.upsertAccount(account, &error));
+    QVERIFY(db.upsertCalendar(cal, &error));
+
+    Event legacy = makeRemoteEvent(cal.id, "legacy", 0);
+    legacy.allDay = true;
+    legacy.timeKind = TimeKind::AllDay;
+    legacy.startUtc = QDateTime(QDate(2026, 9, 26), QTime(0, 0), QTimeZone::utc());
+    legacy.endUtc = QDateTime(QDate(2026, 9, 27), QTime(0, 0), QTimeZone::utc());
+    legacy.startDate = QDate(2026, 9, 26);
+    legacy.endDate = QDate(2026, 9, 27);
+    QVERIFY2(db.applyRemoteEvent(legacy, &error),
+             qPrintable(error.isEmpty() ? QStringLiteral("missing error") : error));
+    db.close();
+
+    // Rewrite the span the way a pre-fix provider read path stored it. The save
+    // path is not the source of these rows, so it cannot produce one now.
+    const QString connectionName =
+        QStringLiteral("legacy-all-day-%1")
+            .arg(QUuid::createUuid().toString(QUuid::WithoutBraces));
+    {
+      QSqlDatabase raw =
+          QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), connectionName);
+      raw.setDatabaseName(path);
+      QVERIFY(raw.open());
+      QSqlQuery query(raw);
+      QVERIFY2(query.exec(QStringLiteral(
+                   "UPDATE events SET end_date=start_date WHERE all_day=1")),
+               qPrintable(query.lastError().text()));
+      QVERIFY2(query.exec(QStringLiteral("UPDATE event_instances "
+                                         "SET end_date=start_date WHERE all_day=1")),
+               qPrintable(query.lastError().text()));
+      raw.close();
+    }
+    QSqlDatabase::removeDatabase(connectionName);
+
+    Database reopened;
+    QVERIFY2(reopened.open(path, &error), qPrintable(error));
+    const QList<Event> sameDay = reopened.eventsBetween(
+        QDateTime(QDate(2026, 9, 26), QTime(0, 0), QTimeZone::utc()),
+        QDateTime(QDate(2026, 9, 27), QTime(0, 0), QTimeZone::utc()), {cal.id}, &error);
+    QCOMPARE(sameDay.size(), 1);
+    QCOMPARE(sameDay.first().startDate, QDate(2026, 9, 26));
+    QCOMPARE(sameDay.first().endDate, QDate(2026, 9, 27));
   }
 
   void schema2OpenIsRepeatableAndClean() {

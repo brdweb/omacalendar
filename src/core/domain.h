@@ -201,6 +201,13 @@ Event eventFromJson(const QJsonObject& object);
 
 QString newUuid();
 QString isoUtc(const QDateTime& value);
+
+// All-day spans are stored with an exclusive end date, so a one-day event ends
+// the following day. Providers may publish an inclusive end date instead, and
+// SQL range predicates compare the stored end date directly, so every import
+// and every write normalizes the span through this helper. A start-less or
+// timed event is returned untouched.
+QDate exclusiveAllDayEnd(const QDate& startDate, const QDate& endDate);
 QDateTime dateTimeFromIso(const QString& value);
 
 // Pending reminders older than this grace window are dismissed instead of

@@ -416,7 +416,8 @@ bool Database::migrate(QString* errorMessage) {
            ensureReminderDeliverySchema(errorMessage) &&
            ensureSyncCoverageSchema(errorMessage) &&
            ensureProviderResourcesSchema(errorMessage) &&
-           ensureReadPerformanceIndexes(errorMessage);
+           ensureReadPerformanceIndexes(errorMessage) &&
+           repairInclusiveAllDayEndDates(errorMessage);
   }
   if (!m_database.transaction()) {
     if (errorMessage != nullptr) {
@@ -797,7 +798,8 @@ bool Database::migrate(QString* errorMessage) {
          ensureReminderDeliverySchema(errorMessage) &&
          ensureSyncCoverageSchema(errorMessage) &&
          ensureProviderResourcesSchema(errorMessage) &&
-         ensureReadPerformanceIndexes(errorMessage);
+         ensureReadPerformanceIndexes(errorMessage) &&
+         repairInclusiveAllDayEndDates(errorMessage);
 }
 
 bool Database::ensureOutboxMoveSchema(QString* errorMessage) {
@@ -1236,6 +1238,34 @@ bool Database::ensureProviderResourcesSchema(QString* errorMessage) {
           sqlError(release, QStringLiteral("commit provider resource schema repair"));
     }
     return fail(QStringLiteral("Unable to commit provider resource schema repair"));
+  }
+  return true;
+}
+
+bool Database::repairInclusiveAllDayEndDates(QString* errorMessage) {
+  // Provider read paths once accepted an inclusive all-day end date, so an
+  // existing cache can hold a same-day span. Range queries compare the stored
+  // end_date in SQL, which discards such a row before any read-time repair can
+  // see it, so the stored rows themselves have to be corrected. Keep this
+  // idempotent: it is a no-op once every span is exclusive.
+  const QStringList statements = {
+      QStringLiteral(R"SQL(
+        UPDATE events SET end_date=date(start_date,'+1 day')
+        WHERE all_day=1 AND start_date<>''
+          AND (end_date='' OR end_date<=start_date)
+          AND date(start_date,'+1 day') IS NOT NULL
+      )SQL"),
+      QStringLiteral(R"SQL(
+        UPDATE event_instances SET end_date=date(start_date,'+1 day')
+        WHERE all_day=1 AND start_date<>''
+          AND (end_date='' OR end_date<=start_date)
+          AND date(start_date,'+1 day') IS NOT NULL
+      )SQL"),
+  };
+  for (const QString& statement : statements) {
+    if (!execute(statement, errorMessage)) {
+      return false;
+    }
   }
   return true;
 }
@@ -2156,7 +2186,12 @@ bool Database::upsertEventRecord(const Event& event, QString* errorMessage,
   query.addBindValue(isoUtc(event.startUtc));
   query.addBindValue(isoUtc(event.endUtc));
   query.addBindValue(nonNull(event.startDate.toString(Qt::ISODate)));
-  query.addBindValue(nonNull(event.endDate.toString(Qt::ISODate)));
+  // Range queries compare the stored end date in SQL, so an inclusive all-day
+  // span must never reach storage regardless of which caller supplied it.
+  query.addBindValue(
+      nonNull((event.allDay ? exclusiveAllDayEnd(event.startDate, event.endDate)
+                            : event.endDate)
+                  .toString(Qt::ISODate)));
   query.addBindValue(nonNull(event.startTimeZone));
   query.addBindValue(nonNull(event.endTimeZone));
   query.addBindValue(event.allDay);
@@ -3599,13 +3634,6 @@ Event Database::eventFromQuery(const QSqlQuery& query) const {
   result.startTimeZone = query.value(QStringLiteral("start_timezone")).toString();
   result.endTimeZone = query.value(QStringLiteral("end_timezone")).toString();
   result.allDay = query.value(QStringLiteral("all_day")).toBool();
-  // Rows cached before the provider read paths normalized inclusive all-day end
-  // dates can still hold a same-day span. Repair them on read so consumers of
-  // the cache never see an all-day event that ends before it starts.
-  if (result.allDay && result.startDate.isValid() &&
-      (!result.endDate.isValid() || result.endDate <= result.startDate)) {
-    result.endDate = result.startDate.addDays(1);
-  }
   result.timeKind =
       timeKindFromString(query.value(QStringLiteral("time_kind")).toString());
   result.status = query.value(QStringLiteral("status")).toString();
