@@ -148,6 +148,36 @@ class DatabaseTest final : public QObject {
     QCOMPARE(db.setting("missing", 123, &error).toInt(), 123);
   }
 
+  void cachedInclusiveAllDayEndDatesAreRepairedOnRead() {
+    // Rows written before the provider read paths normalized inclusive all-day
+    // end dates must still read back as an exclusive next-day span. See #28.
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    Database db;
+    QVERIFY(db.open(directory.filePath("store.sqlite")));
+    QString error;
+
+    Account account = makeAccount("acc-inclusive", "Inclusive");
+    QVERIFY(db.upsertAccount(account, &error));
+    Calendar cal = makeCalendar("cal-inclusive", account.id);
+    QVERIFY(db.upsertCalendar(cal, &error));
+
+    Event inclusive = makeRemoteEvent(cal.id, "inclusive", 0);
+    inclusive.allDay = true;
+    inclusive.timeKind = TimeKind::AllDay;
+    inclusive.startUtc = QDateTime(QDate(2026, 9, 26), QTime(0, 0), QTimeZone::utc());
+    inclusive.endUtc = QDateTime(QDate(2026, 9, 27), QTime(0, 0), QTimeZone::utc());
+    inclusive.startDate = QDate(2026, 9, 26);
+    inclusive.endDate = QDate(2026, 9, 26);
+    QVERIFY2(db.applyRemoteEvent(inclusive, &error),
+             qPrintable(error.isEmpty() ? QStringLiteral("missing error") : error));
+
+    const Event stored = db.eventByRemoteId(cal.id, inclusive.remoteId, &error);
+    QVERIFY(stored.allDay);
+    QCOMPARE(stored.startDate, QDate(2026, 9, 26));
+    QCOMPARE(stored.endDate, QDate(2026, 9, 27));
+  }
+
   void schema2OpenIsRepeatableAndClean() {
     QTemporaryDir directory;
     QVERIFY(directory.isValid());

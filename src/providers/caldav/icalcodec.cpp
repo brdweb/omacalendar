@@ -1169,12 +1169,12 @@ ICalendarParseResult ICalendarCodec::parse(const QByteArray& payload) {
       event.endDate =
           end.valid ? end.date
                     : start.date.addDays(duration > 0 ? duration / (24 * 60 * 60) : 1);
-      if (event.endDate < event.startDate) {
-        result.events.clear();
-        result.error = {QStringLiteral("invalid_range"),
-                        QStringLiteral("VEVENT ends before it starts"),
-                        static_cast<int>(index)};
-        return result;
+      // RFC 5545 DTEND is exclusive, but some publishers emit an inclusive end
+      // date (DTEND == DTSTART for a one-day event). Fold that -- and any other
+      // non-positive span -- into the exclusive next-day convention the rest of
+      // the app assumes, rather than rejecting the whole calendar payload.
+      if (event.endDate <= event.startDate) {
+        event.endDate = event.startDate.addDays(1);
       }
     } else {
       event.startUtc = start.utc;

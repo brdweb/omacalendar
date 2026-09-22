@@ -41,6 +41,7 @@ class ProviderTest final : public QObject {
   void googleCalendarMapping();
   void googleEventMappingAndWriteSanitization();
   void googleAllDayAndCancellationMapping();
+  void allDayInclusiveEndDatesAreNormalized();
   void googleOccurrenceMutationTargeting();
   void googleRequestConstructionAndHydrationBounds();
   void googleResponseClassification();
@@ -518,6 +519,74 @@ void ProviderTest::googleAllDayAndCancellationMapping() {
   QVERIFY(!floatingWrite.value(QStringLiteral("start"))
                .toObject()
                .contains(QStringLiteral("timeZone")));
+}
+
+void ProviderTest::allDayInclusiveEndDatesAreNormalized() {
+  // Some publishers emit an inclusive end date for a one-day all-day event.
+  // Both read boundaries must fold that into the exclusive next-day convention
+  // the rest of the app assumes. See issue #28.
+  const QJsonObject inclusiveResource{
+      {QStringLiteral("id"), QStringLiteral("game-day")},
+      {QStringLiteral("iCalUID"), QStringLiteral("game-day@example.test")},
+      {QStringLiteral("summary"), QStringLiteral("Away game")},
+      {QStringLiteral("start"),
+       QJsonObject{{QStringLiteral("date"), QStringLiteral("2026-09-26")}}},
+      {QStringLiteral("end"),
+       QJsonObject{{QStringLiteral("date"), QStringLiteral("2026-09-26")}}},
+  };
+  const Event inclusive =
+      google::eventFromGoogleJson(inclusiveResource, QStringLiteral("calendar"));
+  QVERIFY(inclusive.allDay);
+  QCOMPARE(inclusive.startDate, QDate(2026, 9, 26));
+  QCOMPARE(inclusive.endDate, QDate(2026, 9, 27));
+
+  QJsonObject missingEndResource = inclusiveResource;
+  missingEndResource.remove(QStringLiteral("end"));
+  const Event missingEnd =
+      google::eventFromGoogleJson(missingEndResource, QStringLiteral("calendar"));
+  QCOMPARE(missingEnd.endDate, QDate(2026, 9, 27));
+
+  QJsonObject reversedResource = inclusiveResource;
+  reversedResource.insert(
+      QStringLiteral("end"),
+      QJsonObject{{QStringLiteral("date"), QStringLiteral("2026-09-24")}});
+  const Event reversed =
+      google::eventFromGoogleJson(reversedResource, QStringLiteral("calendar"));
+  QCOMPARE(reversed.endDate, QDate(2026, 9, 27));
+
+  const QByteArray payload =
+      "BEGIN:VCALENDAR\r\n"
+      "VERSION:2.0\r\n"
+      "PRODID:-//OmaCalendar Tests//EN\r\n"
+      "BEGIN:VEVENT\r\n"
+      "UID:inclusive@example.test\r\n"
+      "DTSTART;VALUE=DATE:20260926\r\n"
+      "DTEND;VALUE=DATE:20260926\r\n"
+      "SUMMARY:Away game\r\n"
+      "END:VEVENT\r\n"
+      "BEGIN:VEVENT\r\n"
+      "UID:reversed@example.test\r\n"
+      "DTSTART;VALUE=DATE:20260926\r\n"
+      "DTEND;VALUE=DATE:20260924\r\n"
+      "SUMMARY:Backwards\r\n"
+      "END:VEVENT\r\n"
+      "END:VCALENDAR\r\n";
+
+  const caldav::ICalendarParseResult parsed = caldav::ICalendarCodec::parse(payload);
+  QVERIFY2(parsed.ok(), qPrintable(parsed.error.message));
+  QCOMPARE(parsed.events.size(), 2);
+  QCOMPARE(parsed.events.at(0).startDate, QDate(2026, 9, 26));
+  QCOMPARE(parsed.events.at(0).endDate, QDate(2026, 9, 27));
+  // A backwards span is repaired rather than discarding the whole payload.
+  QCOMPARE(parsed.events.at(1).startDate, QDate(2026, 9, 26));
+  QCOMPARE(parsed.events.at(1).endDate, QDate(2026, 9, 27));
+
+  // The normalized event round-trips through the serializer, which rejects
+  // non-exclusive all-day spans outright.
+  const caldav::ICalendarSerializeResult encoded =
+      caldav::ICalendarCodec::serialize(parsed.events.at(0));
+  QVERIFY2(encoded.ok(), qPrintable(encoded.error.message));
+  QVERIFY(encoded.payload.contains("DTEND;VALUE=DATE:20260927\r\n"));
 }
 
 void ProviderTest::googleOccurrenceMutationTargeting() {

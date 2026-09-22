@@ -3599,6 +3599,13 @@ Event Database::eventFromQuery(const QSqlQuery& query) const {
   result.startTimeZone = query.value(QStringLiteral("start_timezone")).toString();
   result.endTimeZone = query.value(QStringLiteral("end_timezone")).toString();
   result.allDay = query.value(QStringLiteral("all_day")).toBool();
+  // Rows cached before the provider read paths normalized inclusive all-day end
+  // dates can still hold a same-day span. Repair them on read so consumers of
+  // the cache never see an all-day event that ends before it starts.
+  if (result.allDay && result.startDate.isValid() &&
+      (!result.endDate.isValid() || result.endDate <= result.startDate)) {
+    result.endDate = result.startDate.addDays(1);
+  }
   result.timeKind =
       timeKindFromString(query.value(QStringLiteral("time_kind")).toString());
   result.status = query.value(QStringLiteral("status")).toString();
