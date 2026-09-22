@@ -1166,16 +1166,14 @@ ICalendarParseResult ICalendarCodec::parse(const QByteArray& payload) {
                                                               : TimeKind::Zoned);
     if (event.allDay) {
       event.startDate = start.date;
-      event.endDate =
+      // RFC 5545 DTEND is exclusive, but some publishers emit an inclusive end
+      // date (DTEND == DTSTART for a one-day event). Fold that -- and any other
+      // non-positive span -- into the exclusive next-day convention, rather
+      // than rejecting the whole calendar payload over one VEVENT.
+      event.endDate = exclusiveAllDayEnd(
+          event.startDate,
           end.valid ? end.date
-                    : start.date.addDays(duration > 0 ? duration / (24 * 60 * 60) : 1);
-      if (event.endDate < event.startDate) {
-        result.events.clear();
-        result.error = {QStringLiteral("invalid_range"),
-                        QStringLiteral("VEVENT ends before it starts"),
-                        static_cast<int>(index)};
-        return result;
-      }
+                    : start.date.addDays(duration > 0 ? duration / (24 * 60 * 60) : 1));
     } else {
       event.startUtc = start.utc;
       event.endUtc = end.valid ? end.utc : start.utc.addSecs(duration);

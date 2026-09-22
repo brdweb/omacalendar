@@ -30,6 +30,16 @@ claims, screenshots, and package metadata must agree with shipped behavior.
 
 A dirty-tree build is development evidence and cannot qualify a release.
 
+### Waiving a gate
+
+A gate the maintainer consciously decides to skip is recorded as
+`WAIVED - reason`, never as an unearned `PASS`. Its evidence column must still
+state what actually ran. `verify-release.sh` accepts a waiver in place of a
+pass, so a patch release can be fast-tracked without the full matrix, and the
+acceptance record keeps saying which qualification the release did not receive.
+Waive deliberately: the skipped checks are the ones that catch what review and
+the unit suites do not.
+
 ## 3. Rehearse the Arch release
 
 Run the **Release candidate** workflow manually with the intended semantic

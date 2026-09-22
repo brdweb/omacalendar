@@ -288,6 +288,16 @@ OutboxState outboxStateFromString(const QString& value) {
 
 QString newUuid() { return QUuid::createUuid().toString(QUuid::WithoutBraces); }
 
+QDate exclusiveAllDayEnd(const QDate& startDate, const QDate& endDate) {
+  if (!startDate.isValid()) {
+    return endDate;
+  }
+  if (!endDate.isValid() || endDate <= startDate) {
+    return startDate.addDays(1);
+  }
+  return endDate;
+}
+
 QString isoUtc(const QDateTime& value) {
   if (!value.isValid()) {
     return QStringLiteral("");

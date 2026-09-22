@@ -438,7 +438,10 @@ Event eventFromGoogleJson(const QJsonObject& resource, const QString& calendarId
   if (event.allDay) {
     event.timeKind = TimeKind::AllDay;
     event.startDate = QDate::fromString(stringValue(start, "date"), Qt::ISODate);
-    event.endDate = QDate::fromString(stringValue(end, "date"), Qt::ISODate);
+    // Some calendars publish all-day events with an inclusive end date, or none
+    // at all; normalize to the exclusive next-day convention on import.
+    event.endDate = exclusiveAllDayEnd(
+        event.startDate, QDate::fromString(stringValue(end, "date"), Qt::ISODate));
   } else {
     event.startTimeZone = stringValue(start, "timeZone");
     event.endTimeZone = stringValue(end, "timeZone");
