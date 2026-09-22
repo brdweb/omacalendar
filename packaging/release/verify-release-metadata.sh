@@ -207,18 +207,24 @@ require_section_rows() {
   [[ ${failed} -eq 0 ]]
 }
 
+# A gate the maintainer consciously skipped is recorded as an explicit
+# "WAIVED - reason" rather than an unearned PASS, so the acceptance record
+# always states what was actually verified. A waiver satisfies strict
+# pre-tag verification; it never claims the gate ran.
+waived_status='WAIVED[[:space:]]+-[[:space:]]*[^[:space:]].*'
+
 acceptance_structure_failed=0
 require_section_rows \
-  "Pre-tag gates" "Gate" "PASS or PENDING" \
-  '^(PASS|PENDING([[:space:]]+-.*)?)$' \
+  "Pre-tag gates" "Gate" "PASS, WAIVED - reason, or PENDING" \
+  "^(PASS|${waived_status}|PENDING([[:space:]]+-.*)?)$" \
   "${PRETAG_GATE_LABELS[@]}" || acceptance_structure_failed=1
 require_section_rows \
-  "Post-tag draft gates" "Gate" "PASS, APPROVED, or PENDING" \
-  '^(PASS|APPROVED|PENDING([[:space:]]+-.*)?)$' \
+  "Post-tag draft gates" "Gate" "PASS, APPROVED, WAIVED - reason, or PENDING" \
+  "^(PASS|APPROVED|${waived_status}|PENDING([[:space:]]+-.*)?)$" \
   "${POSTTAG_GATE_LABELS[@]}" || acceptance_structure_failed=1
 require_section_rows \
-  "External approvals" "Approval" "APPROVED or PENDING" \
-  '^(APPROVED|PENDING([[:space:]]+-.*)?)$' \
+  "External approvals" "Approval" "APPROVED, WAIVED - reason, or PENDING" \
+  "^(APPROVED|${waived_status}|PENDING([[:space:]]+-.*)?)$" \
   "${EXTERNAL_APPROVAL_LABELS[@]}" || acceptance_structure_failed=1
 if [[ ${acceptance_structure_failed} -ne 0 ]]; then
   echo "release acceptance record has an invalid gate structure" >&2
@@ -228,10 +234,12 @@ fi
 if [[ ${require_pretag_pass} -eq 1 ]]; then
   pretag_failed=0
   require_section_rows \
-    "Pre-tag gates" "Gate" "PASS" '^PASS$' \
+    "Pre-tag gates" "Gate" "PASS or WAIVED - reason" \
+    "^(PASS|${waived_status})$" \
     "${PRETAG_GATE_LABELS[@]}" || pretag_failed=1
   require_section_rows \
-    "External approvals" "Approval" "APPROVED" '^APPROVED$' \
+    "External approvals" "Approval" "APPROVED or WAIVED - reason" \
+    "^(APPROVED|${waived_status})$" \
     "${EXTERNAL_APPROVAL_LABELS[@]}" || pretag_failed=1
   if [[ ${pretag_failed} -ne 0 ]]; then
     echo "release acceptance record is not approved for tagging" >&2

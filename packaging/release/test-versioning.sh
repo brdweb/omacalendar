@@ -170,4 +170,59 @@ if [[ $(vercmp 1.0.0beta1 1.0.0) -ge 0 ]] || \
   exit 1
 fi
 
+# A waived gate stands in for a pass only when it states a reason. Exercise both
+# outcomes against a scratch copy so the live acceptance record stays untouched.
+scratch_root=$(mktemp -d)
+trap 'rm -rf "${scratch_root}"' EXIT
+while IFS= read -r tracked_path; do
+  install -D "${repository_root}/${tracked_path}" "${scratch_root}/${tracked_path}"
+done <<SCRATCH_PATHS
+CMakeLists.txt
+CHANGELOG.md
+SECURITY.md
+SUPPORT.md
+docs/BACKUP_AND_RECOVERY.md
+docs/COMPATIBILITY.md
+docs/PRIVACY.md
+docs/RELEASE.md
+docs/UNINSTALL.md
+docs/releases/${configured_version}.md
+packaging/org.omacalendar.OmaCalendar.metainfo.xml
+packaging/release/verify-release-metadata.sh
+packaging/release/version-lib.sh
+src/core/domain.h
+SCRATCH_PATHS
+
+scratch_record="${scratch_root}/docs/releases/${configured_version}.md"
+scratch_verify="${scratch_root}/packaging/release/verify-release-metadata.sh"
+first_pretag_gate="Exact app version metadata and prerelease tooling"
+
+rewrite_first_pretag_status() {
+  local replacement=$1
+  awk -v gate="${first_pretag_gate}" -v replacement="${replacement}" '
+    $0 == "## Pre-tag gates" { in_section = 1 }
+    in_section && /^## / && $0 != "## Pre-tag gates" { in_section = 0 }
+    in_section && index($0, "| " gate " | ") == 1 && !done {
+      split($0, cells, "|")
+      printf "|%s| %s |%s|\n", cells[2], replacement, cells[4]
+      done = 1
+      next
+    }
+    { print }
+  ' "${scratch_record}" >"${scratch_record}.new"
+  mv "${scratch_record}.new" "${scratch_record}"
+}
+
+rewrite_first_pretag_status "WAIVED - owner fast-track"
+if ! "${scratch_verify}" --require-pretag-pass "${configured_version}" >/dev/null; then
+  echo "a waived pre-tag gate with a reason was rejected by strict verification" >&2
+  exit 1
+fi
+
+rewrite_first_pretag_status "WAIVED"
+if "${scratch_verify}" "${configured_version}" >/dev/null 2>&1; then
+  echo "a waived pre-tag gate without a reason was accepted" >&2
+  exit 1
+fi
+
 echo "release versioning contracts passed"
