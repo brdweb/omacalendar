@@ -327,7 +327,7 @@ jobs:
           {
             echo '### Arch package and documentation assembled'
             echo
-            echo 'The native Arch package is the sole supported binary distribution.'
+            echo 'This workflow assembles the native Arch package only; the official Omapak Flatpak is built from a separate catalog manifest PR.'
             echo 'Owner and live-provider acceptance remain separate pending gates.'
             echo 'The workflow never publishes a release; signed tag runs create drafts only.'
           } >>"${GITHUB_STEP_SUMMARY}"

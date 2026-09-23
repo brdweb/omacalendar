@@ -4,12 +4,12 @@
   <metadata_license>CC0-1.0</metadata_license>
   <project_license>MIT</project_license>
   <name>OmaCalendar</name>
-  <summary>A local-first calendar for Omarchy</summary>
+  <summary>A local-first calendar for Linux desktops</summary>
   <description>
     <p>
-      OmaCalendar is a keyboard-friendly calendar application for Omarchy Linux.
-      A local daemon owns synchronization and storage so cached calendars remain
-      available when network providers are offline.
+      OmaCalendar is a keyboard-friendly, local-first calendar application for
+      Linux desktops. A local service owns synchronization and storage so cached
+      calendars remain available when network providers are offline.
     </p>
     <p>
       OmaCalendar supports local calendars, Google Calendar, generic CalDAV,
@@ -22,6 +22,11 @@
   <url type="homepage">https://github.com/brdweb/omacalendar</url>
   <url type="bugtracker">https://github.com/brdweb/omacalendar/issues</url>
   <url type="vcs-browser">https://github.com/brdweb/omacalendar</url>
+  <screenshots>
+    <screenshot type="default">
+      <image type="source">https://raw.githubusercontent.com/brdweb/omacalendar/main/docs/screenshots/desktop-month.png</image>
+    </screenshot>
+  </screenshots>
   <launchable type="desktop-id">org.omacalendar.OmaCalendar.desktop</launchable>
   <provides>
     <binary>omacalendar</binary>

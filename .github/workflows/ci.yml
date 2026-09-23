@@ -52,7 +52,12 @@ jobs:
           for script in packaging/arch/*.in packaging/release/*.sh; do
             bash -n "${script}"
           done
+          for script in packaging/flatpak/omacalendar-launcher \
+            packaging/flatpak/test-instance.sh; do
+            bash -n "${script}"
+          done
           runuser -u package-test -- packaging/release/test-versioning.sh
+          runuser -u package-test -- packaging/flatpak/test-instance.sh
 
       - name: Validate native Arch package assembly
         run: runuser -u package-test -- packaging/release/test-arch-package.sh
