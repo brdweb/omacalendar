@@ -1,0 +1,134 @@
+#!/usr/bin/env bash
+set -euo pipefail
+umask 077
+
+readonly flatpak_id='org.omacalendar.OmaCalendar'
+
+# Native installations use systemd socket activation. The Flatpak keeps its
+# daemon alive only while the launcher which created it has clients to serve.
+if [[ ${FLATPAK_ID:-} != "${flatpak_id}" || -z ${XDG_RUNTIME_DIR:-} ]]; then
+  echo 'This launcher must run inside the OmaCalendar Flatpak.' >&2
+  exit 1
+fi
+
+# Keep this layout in sync with src/core/paths.cpp. Flatpak instances share it
+# across their separate PID namespaces.
+runtime_directory="${XDG_RUNTIME_DIR}/app/${flatpak_id}/omacalendar"
+daemon_socket="${runtime_directory}/daemon.sock"
+app_instance_socket="${runtime_directory}/app-instance.sock"
+daemon_log="${runtime_directory}/daemon.log"
+
+# The defaults are the binaries installed by the current CMake project. The
+# explicit overrides make the isolated launcher fixture independent of /app.
+daemon_binary=${OMACALENDAR_LAUNCHER_DAEMON:-/app/bin/omacalendard}
+cli_binary=${OMACALENDAR_LAUNCHER_CLI:-/app/bin/omacalendarctl}
+gui_binary=${OMACALENDAR_LAUNCHER_GUI:-/app/bin/omacalendar}
+
+daemon_pid=
+client_pid=
+clients_lock_open=false
+
+# A socket alone does not prove that its daemon is usable. The CLI has the
+# same IPC endpoint as the app, so it is the readiness check for all modes.
+daemon_is_ready() {
+  [[ -S ${daemon_socket} ]] && "${cli_binary}" system.ping >/dev/null 2>&1
+}
+
+cleanup() {
+  local status=$?
+  trap - EXIT
+
+  if [[ -n ${client_pid} ]]; then
+    kill "${client_pid}" 2>/dev/null || true
+    wait "${client_pid}" 2>/dev/null || true
+  fi
+
+  if [[ -n ${daemon_pid} ]]; then
+    # Do not take down a daemon or unlink its endpoint while another launcher
+    # is still attached. This is deliberately an exclusive kernel lock rather
+    # than a PID check: Flatpak PID namespaces are not globally meaningful.
+    if [[ ${clients_lock_open} == true ]]; then
+      flock --exclusive 8
+    fi
+    kill "${daemon_pid}" 2>/dev/null || true
+    wait "${daemon_pid}" 2>/dev/null || true
+    # The daemon is ours and no client can be using this endpoint now.
+    rm -f -- "${daemon_socket}" "${app_instance_socket}"
+  fi
+
+  if [[ ${clients_lock_open} == true ]]; then
+    flock --unlock 8
+  fi
+  exit "${status}"
+}
+trap cleanup EXIT
+trap 'exit 143' TERM HUP
+trap 'exit 130' INT
+
+install -d -m 700 "${runtime_directory}"
+
+# Serialize startup while allowing every running GUI/CLI launcher to retain a
+# shared clients lock. flock locks the shared runtime inode across PID
+# namespaces, unlike PID-file based coordination.
+exec 9>"${runtime_directory}/launcher.lock"
+flock --exclusive --timeout 15 9
+exec 8>"${runtime_directory}/clients.lock"
+clients_lock_open=true
+flock --shared 8
+
+if ! daemon_is_ready; then
+  # Upgrading to exclusive is required before removing an endpoint. Recheck
+  # after the lock is held because an existing client may have finished setup
+  # while this launcher was waiting.
+  flock --unlock 8
+  flock --exclusive 8
+  if ! daemon_is_ready; then
+    # Never remove a stale socket while another launcher may be using it.
+    rm -f -- "${daemon_socket}" "${app_instance_socket}"
+
+    "${daemon_binary}" >"${daemon_log}" 2>&1 9>&- 8>&- &
+    daemon_pid=$!
+    ready=false
+    for ((attempt = 0; attempt < 100; ++attempt)); do
+      if daemon_is_ready; then
+        ready=true
+        break
+      fi
+      kill -0 "${daemon_pid}" 2>/dev/null || break
+      sleep 0.05
+    done
+    if [[ ${ready} != true ]]; then
+      echo "OmaCalendar could not start its sandbox daemon. See ${daemon_log}" >&2
+      exit 1
+    fi
+  fi
+  flock --unlock 8
+  flock --shared 8
+fi
+
+flock --unlock 9
+exec 9>&-
+
+case ${1:-} in
+  --daemon)
+    if [[ -z ${daemon_pid} ]]; then
+      echo 'The OmaCalendar Flatpak daemon is already running.' >&2
+      exit 1
+    fi
+    wait "${daemon_pid}"
+    daemon_pid=
+    ;;
+  --cli)
+    shift
+    "${cli_binary}" "$@"
+    ;;
+  *)
+    # The launcher owns daemon lifecycle in the sandbox; the GUI must not
+    # create a competing detached daemon itself.
+    export OMACALENDAR_DISABLE_DAEMON_AUTOSTART=1
+    "${gui_binary}" "$@" &
+    client_pid=$!
+    wait "${client_pid}"
+    client_pid=
+    ;;
+esac

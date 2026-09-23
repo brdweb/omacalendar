@@ -1,10 +1,11 @@
 # OmaCalendar
 
-A native, local-first calendar for **Omarchy Linux**. Bring Google Calendar,
-CalDAV, device calendars and ICS subscriptions together in a fast Qt desktop
-app, with an optional Quickshell bar widget.
+A local-first calendar for **Linux desktops**. Bring Google Calendar, CalDAV,
+device calendars and ICS subscriptions together in a fast Qt desktop app. An
+optional Quickshell bar widget is available with the native Arch/Omarchy
+installation.
 
-[Download 1.1.1](https://github.com/brdweb/omacalendar/releases/tag/v1.1.1) ·
+[Native Arch release 1.1.1](https://github.com/brdweb/omacalendar/releases/tag/v1.1.1) ·
 [Website](https://omacalendar.brdweb.com/) · [Installation](docs/INSTALL.md) ·
 [Support](SUPPORT.md)
 
@@ -19,15 +20,27 @@ app, with an optional Quickshell bar widget.
 - Calendar sets, visibility controls and calendar colors.
 - Google Calendar, CalDAV, local calendars and read-only ICS subscriptions.
 - Local cached data for responsive offline use; queued changes sync on reconnect.
-- Optional [Omarchy widget](https://github.com/brdweb/omacalendar-widget) with
-  an agenda, upcoming events, compact editing and read-only event details.
+- Optional [Omarchy widget](https://github.com/brdweb/omacalendar-widget) for
+  native Arch/Omarchy installations, with an agenda, upcoming events, compact
+  editing and read-only event details.
 
 ## Install
 
-The **native x86-64 Arch package** is the supported binary distribution.
-Download and verify it using the [installation guide](docs/INSTALL.md).
-The package includes the app, background service, CLI and widget setup helper.
-The widget requires this native service; it has its own release and install steps.
+The recommended official route is the **Omapak Flatpak**:
+
+```bash
+flatpak remote-add --user --if-not-exists omapak https://repo.omapak.org/omapak.flatpakrepo
+flatpak install --user omapak org.omacalendar.OmaCalendar
+```
+
+Omapak has an isolated profile, does not integrate with the native widget, and
+keeps background synchronization and reminders active only while its launcher
+remains running. See the [installation guide](docs/INSTALL.md) for Flatpak
+run, update, removal, profile, and Google-credential details.
+
+The verified **native x86-64 Arch/Omarchy package** remains supported. Download
+and verify it using the [installation guide](docs/INSTALL.md); it includes the
+native background service, CLI, and widget setup helper.
 
 ## Getting started
 

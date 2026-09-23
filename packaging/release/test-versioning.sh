@@ -58,7 +58,7 @@ configured_version=$(cmake_release_version "${repository_root}")
 # The active install guide must contain the current native package version and
 # must not advertise retired binary formats.
 expected_arch="omacalendar-$(arch_pkgver "${configured_version}")-1-x86_64.pkg.tar.zst"
-grep -Fq "[Download ${configured_version}](https://github.com/brdweb/omacalendar/releases/tag/v${configured_version})" \
+grep -Fq "[Native Arch release ${configured_version}](https://github.com/brdweb/omacalendar/releases/tag/v${configured_version})" \
   "${repository_root}/README.md"
 grep -Fq "OmaCalendar ${configured_version} supports" "${repository_root}/docs/INSTALL.md"
 grep -Fxq "version=${configured_version}" "${repository_root}/docs/INSTALL.md"
@@ -76,7 +76,7 @@ if grep -Eqi 'debian-candidate|flatpak-candidate|artifacts/.*linux-x86_64\.tar|P
   echo "release workflow still produces a retired binary distribution" >&2
   exit 1
 fi
-for retired_path in packaging/aur packaging/debian packaging/flatpak; do
+for retired_path in packaging/aur packaging/debian; do
   if [[ -e ${repository_root}/${retired_path} ]]; then
     echo "retired packaging path still exists: ${retired_path}" >&2
     exit 1
