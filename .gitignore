@@ -25,3 +25,6 @@ google-oauth*.json
 
 # Local agent-plan scratch space
 /.omo/
+
+# Local Hermes workspace state
+.hermes/
