@@ -172,8 +172,13 @@ bool Database::open(const QString& path, QString* errorMessage) {
       }
       return false;
     }
+    // Temporary b-trees (sorting, UNION ALL range queries, FTS merges) stay in
+    // memory, and a 16 MiB page cache keeps a warm working set of recent
+    // ranges instead of SQLite's 2 MiB default.
     if (!execute(QStringLiteral("PRAGMA foreign_keys = ON"), errorMessage) ||
-        !execute(QStringLiteral("PRAGMA busy_timeout = 5000"), errorMessage)) {
+        !execute(QStringLiteral("PRAGMA busy_timeout = 5000"), errorMessage) ||
+        !execute(QStringLiteral("PRAGMA temp_store = MEMORY"), errorMessage) ||
+        !execute(QStringLiteral("PRAGMA cache_size = -16384"), errorMessage)) {
       return false;
     }
     return true;
@@ -252,8 +257,13 @@ bool Database::open(const QString& path, QString* errorMessage) {
     close();
     return false;
   }
+  // synchronous stays at SQLite's FULL default: with WAL, NORMAL can lose the
+  // last commits on power loss, including a local edit and its outbox entry,
+  // which no provider resync can restore. Reads are served from a 64 MiB
+  // memory map.
   if (path != QStringLiteral(":memory:") &&
-      !execute(QStringLiteral("PRAGMA journal_mode = WAL"), errorMessage)) {
+      (!execute(QStringLiteral("PRAGMA journal_mode = WAL"), errorMessage) ||
+       !execute(QStringLiteral("PRAGMA mmap_size = 67108864"), errorMessage))) {
     close();
     return false;
   }
@@ -346,6 +356,13 @@ bool Database::archiveLegacyDatabase(const QString& path, QString* errorMessage)
 void Database::close() {
   if (!m_database.isValid()) {
     return;
+  }
+  if (m_database.isOpen()) {
+    // Refresh query-planner statistics for tables whose shape changed during
+    // this connection. It is best effort and bounded by SQLite's analysis
+    // limit, so a failure here never blocks shutdown.
+    QSqlQuery optimize(m_database);
+    optimize.exec(QStringLiteral("PRAGMA optimize"));
   }
   m_database.close();
   m_database = QSqlDatabase();
