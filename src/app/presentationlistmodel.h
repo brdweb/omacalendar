@@ -25,6 +25,10 @@ class PresentationListModel final : public QAbstractListModel {
   Q_INVOKABLE [[nodiscard]] QVariantMap get(int row) const;
   Q_INVOKABLE [[nodiscard]] QVariantList toList() const;
 
+  // Replaces the rows. When every row has a unique identity, only the
+  // removed, moved, inserted and changed rows are reported, so delegates,
+  // scroll position and focus survive a refresh. Otherwise, or when most
+  // rows changed position, the model resets.
   void replace(const QVariantList& rows);
   void clear();
 
@@ -32,6 +36,10 @@ class PresentationListModel final : public QAbstractListModel {
   void countChanged();
 
  private:
+  [[nodiscard]] static QString rowKey(const QVariantMap& row);
+  bool applyIncrementally(QList<QVariantMap>& nextRows);
+  void resetTo(QList<QVariantMap>&& nextRows);
+
   QList<QVariantMap> m_rows;
 };
 
