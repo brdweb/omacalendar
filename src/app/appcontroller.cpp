@@ -86,8 +86,9 @@ AppController::AppController(QObject* parent) : QObject(parent) {
   m_refreshTimer.setSingleShot(true);
   m_refreshTimer.setInterval(120);
   connect(&m_refreshTimer, &QTimer::timeout, this, [this]() {
+    const int parts = std::exchange(m_pendingRefreshParts, 0);
     if (connected()) {
-      refresh();
+      refreshParts(parts);
     }
   });
   m_preferences = {
@@ -106,6 +107,8 @@ AppController::AppController(QObject* parent) : QObject(parent) {
     emit connectedChanged();
     if (connected()) {
       m_daemonStartAttempted = false;
+      // The daemon may have been upgraded while disconnected.
+      m_settingsGetManySupported = true;
       setError({});
       setStatus(tr("Calendar service connected"));
       QJsonObject subscription{
@@ -133,6 +136,7 @@ AppController::AppController(QObject* parent) : QObject(parent) {
       m_pendingErrors.clear();
       m_backgroundRequests.clear();
       m_refreshTimer.stop();
+      m_pendingRefreshParts = 0;
       m_activeRequests = 0;
       setBusy(false);
       setStatus(tr("Reconnecting to calendar service…"));
@@ -182,13 +186,9 @@ AppController::AppController(QObject* parent) : QObject(parent) {
           }
           return;
         }
-        if (event == QStringLiteral("events.changed") ||
-            event == QStringLiteral("calendars.changed") ||
-            event == QStringLiteral("accounts.changed") ||
-            event == QStringLiteral("calendarSets.changed") ||
-            event == QStringLiteral("invitations.changed") ||
-            event == QStringLiteral("reminders.changed")) {
-          m_refreshTimer.start();
+        const int parts = refreshPartsForNotification(event);
+        if (parts != 0) {
+          scheduleRefresh(parts);
         } else if (event == QStringLiteral("sync.statusChanged")) {
           const QJsonObject status = data.value(QStringLiteral("status")).toObject();
           const QString state = status.value(QStringLiteral("state")).toString();
@@ -334,63 +334,165 @@ QString AppController::send(const QString& method, const QJsonObject& params,
   return id;
 }
 
-void AppController::refresh() {
-  if (!connected()) {
+void AppController::refresh() { refreshParts(RefreshAll); }
+
+int AppController::refreshPartsForNotification(const QString& event) {
+  // Each notification names what changed; reload only the lists it can
+  // affect. Reminder state is not presented, so reminders.changed, which the
+  // daemon sends for every delivered or dismissed reminder, reloads nothing.
+  if (event == QStringLiteral("events.changed")) {
+    return RefreshEvents | RefreshInvitations;
+  }
+  if (event == QStringLiteral("invitations.changed")) {
+    return RefreshInvitations;
+  }
+  if (event == QStringLiteral("calendarSets.changed")) {
+    return RefreshCalendarSets;
+  }
+  // Calendar changes can hide or remove events and invalidate the default
+  // calendar; account changes can do the same through their calendars.
+  if (event == QStringLiteral("calendars.changed")) {
+    return RefreshCalendars | RefreshEvents | RefreshInvitations | RefreshPreferences;
+  }
+  if (event == QStringLiteral("accounts.changed")) {
+    return RefreshAccounts | RefreshCalendars | RefreshEvents | RefreshInvitations |
+           RefreshPreferences;
+  }
+  return 0;
+}
+
+void AppController::scheduleRefresh(const int parts) {
+  m_pendingRefreshParts |= parts;
+  m_refreshTimer.start();
+}
+
+void AppController::refreshParts(const int parts) {
+  if (!connected() || parts == 0) {
     return;
   }
   const auto background = [this](const QString& method, const QJsonObject& params,
                                  ResultHandler handler) {
     send(method, params, std::move(handler), false);
   };
-  background(QStringLiteral("system.info"), {}, [this](const QJsonValue& value) {
-    const bool configured = value.toObject()
-                                .value(QStringLiteral("providers"))
-                                .toObject()
-                                .value(QStringLiteral("google"))
-                                .toObject()
-                                .value(QStringLiteral("configured"))
-                                .toBool();
-    if (configured != m_googleOAuthConfigured) {
-      m_googleOAuthConfigured = configured;
-      emit googleOAuthConfiguredChanged();
+  if ((parts & RefreshSystemInfo) != 0) {
+    background(QStringLiteral("system.info"), {}, [this](const QJsonValue& value) {
+      const bool configured = value.toObject()
+                                  .value(QStringLiteral("providers"))
+                                  .toObject()
+                                  .value(QStringLiteral("google"))
+                                  .toObject()
+                                  .value(QStringLiteral("configured"))
+                                  .toBool();
+      if (configured != m_googleOAuthConfigured) {
+        m_googleOAuthConfigured = configured;
+        emit googleOAuthConfiguredChanged();
+      }
+    });
+  }
+  if ((parts & RefreshAccounts) != 0) {
+    background(QStringLiteral("accounts.list"), {}, [this](const QJsonValue& value) {
+      m_accounts = variantList(value, QStringLiteral("accounts"));
+      m_accountsModel.replace(m_accounts);
+      emit accountsChanged();
+    });
+  }
+  if ((parts & RefreshCalendars) != 0) {
+    background(QStringLiteral("calendars.list"), {}, [this](const QJsonValue& value) {
+      m_calendars = variantList(value, QStringLiteral("calendars"));
+      m_calendarsModel.replace(m_calendars);
+      emit calendarsChanged();
+    });
+  }
+  if ((parts & RefreshCalendarSets) != 0) {
+    background(QStringLiteral("calendarSets.list"), {},
+               [this](const QJsonValue& value) {
+                 m_calendarSets = variantList(value, QStringLiteral("calendarSets"));
+                 m_calendarSetsModel.replace(m_calendarSets);
+                 const QString active = value.toObject()
+                                            .value(QStringLiteral("activeId"))
+                                            .toString(QStringLiteral("all-calendars"));
+                 if (active != m_activeCalendarSetId) {
+                   m_activeCalendarSetId = active;
+                   emit activeCalendarSetIdChanged();
+                 }
+                 emit calendarSetsChanged();
+               });
+  }
+  if ((parts & RefreshInvitations) != 0) {
+    background(QStringLiteral("invitations.list"), {}, [this](const QJsonValue& value) {
+      m_invitations = variantList(value, QStringLiteral("invitations"));
+      applyDisplayTimes(&m_invitations);
+      m_invitationsModel.replace(m_invitations);
+      emit invitationsChanged();
+    });
+  }
+  if ((parts & RefreshPreferences) != 0) {
+    loadPreferences();
+  }
+  if ((parts & RefreshEvents) != 0) {
+    if (!m_rangeStart.isValid() || !m_rangeEnd.isValid()) {
+      m_rangeStart = QDate::currentDate().addDays(-14);
+      m_rangeEnd = QDate::currentDate().addDays(45);
     }
-  });
-  background(QStringLiteral("accounts.list"), {}, [this](const QJsonValue& value) {
-    m_accounts = variantList(value, QStringLiteral("accounts"));
-    m_accountsModel.replace(m_accounts);
-    emit accountsChanged();
-  });
-  background(QStringLiteral("calendars.list"), {}, [this](const QJsonValue& value) {
-    m_calendars = variantList(value, QStringLiteral("calendars"));
-    m_calendarsModel.replace(m_calendars);
-    emit calendarsChanged();
-  });
-  background(QStringLiteral("calendarSets.list"), {}, [this](const QJsonValue& value) {
-    m_calendarSets = variantList(value, QStringLiteral("calendarSets"));
-    m_calendarSetsModel.replace(m_calendarSets);
-    const QString active = value.toObject()
-                               .value(QStringLiteral("activeId"))
-                               .toString(QStringLiteral("all-calendars"));
-    if (active != m_activeCalendarSetId) {
-      m_activeCalendarSetId = active;
-      emit activeCalendarSetIdChanged();
-    }
-    emit calendarSetsChanged();
-  });
-  background(QStringLiteral("invitations.list"), {}, [this](const QJsonValue& value) {
-    m_invitations = variantList(value, QStringLiteral("invitations"));
-    applyDisplayTimes(&m_invitations);
-    m_invitationsModel.replace(m_invitations);
-    emit invitationsChanged();
-  });
-  const QStringList preferenceKeys = {
-      QStringLiteral("firstDayOfWeek"),    QStringLiteral("workDayStart"),
-      QStringLiteral("workDayEnd"),        QStringLiteral("timeFormat"),
-      QStringLiteral("displayTimeZone"),   QStringLiteral("defaultDuration"),
-      QStringLiteral("defaultCalendarId"), QStringLiteral("notificationPrivacy"),
-      QStringLiteral("currentView"),       QStringLiteral("widgetConsentDecision")};
-  for (const QString& key : preferenceKeys) {
-    background(
+    loadRange(m_rangeStart, m_rangeEnd);
+  }
+}
+
+QStringList AppController::preferenceKeys() {
+  return {QStringLiteral("firstDayOfWeek"),    QStringLiteral("workDayStart"),
+          QStringLiteral("workDayEnd"),        QStringLiteral("timeFormat"),
+          QStringLiteral("displayTimeZone"),   QStringLiteral("defaultDuration"),
+          QStringLiteral("defaultCalendarId"), QStringLiteral("notificationPrivacy"),
+          QStringLiteral("currentView"),       QStringLiteral("widgetConsentDecision")};
+}
+
+void AppController::markPreferencesLoaded() {
+  if (!m_preferencesLoaded) {
+    m_preferencesLoaded = true;
+    emit preferencesLoadedChanged();
+  }
+}
+
+void AppController::loadPreferences() {
+  if (!m_settingsGetManySupported) {
+    loadPreferencesIndividually();
+    return;
+  }
+  QJsonArray keys;
+  QJsonObject fallbacks;
+  for (const QString& key : preferenceKeys()) {
+    keys.append(key);
+    fallbacks.insert(key, QJsonValue::fromVariant(m_preferences.value(key)));
+  }
+  send(
+      QStringLiteral("settings.getMany"),
+      {{QStringLiteral("keys"), keys}, {QStringLiteral("fallbacks"), fallbacks}},
+      [this](const QJsonValue& value) {
+        const QJsonObject values =
+            value.toObject().value(QStringLiteral("values")).toObject();
+        for (auto it = values.constBegin(); it != values.constEnd(); ++it) {
+          m_preferences.insert(it.key(), it.value().toVariant());
+        }
+        markPreferencesLoaded();
+        emit preferencesChanged();
+      },
+      false,
+      [this](const QJsonObject& error) {
+        // An IPC 2.1 daemon, for example one still running from before an
+        // upgrade, has no settings.getMany.
+        if (error.value(QStringLiteral("code")).toString() !=
+            QStringLiteral("method_not_found")) {
+          return false;
+        }
+        m_settingsGetManySupported = false;
+        loadPreferencesIndividually();
+        return true;
+      });
+}
+
+void AppController::loadPreferencesIndividually() {
+  for (const QString& key : preferenceKeys()) {
+    send(
         QStringLiteral("settings.get"),
         {{QStringLiteral("key"), key},
          {QStringLiteral("fallback"),
@@ -398,18 +500,13 @@ void AppController::refresh() {
         [this, key](const QJsonValue& value) {
           m_preferences.insert(
               key, value.toObject().value(QStringLiteral("value")).toVariant());
-          if (key == QStringLiteral("widgetConsentDecision") && !m_preferencesLoaded) {
-            m_preferencesLoaded = true;
-            emit preferencesLoadedChanged();
+          if (key == QStringLiteral("widgetConsentDecision")) {
+            markPreferencesLoaded();
           }
           emit preferencesChanged();
-        });
+        },
+        false);
   }
-  if (!m_rangeStart.isValid() || !m_rangeEnd.isValid()) {
-    m_rangeStart = QDate::currentDate().addDays(-14);
-    m_rangeEnd = QDate::currentDate().addDays(45);
-  }
-  loadRange(m_rangeStart, m_rangeEnd);
 }
 
 void AppController::loadRange(const QDate& firstDate, const QDate& lastDate) {

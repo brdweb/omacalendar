@@ -38,6 +38,7 @@ class FakeDaemon final : public QObject {
       : m_eventsPerRange(eventsPerRange), m_maxEventsPerResponse(maxEventsPerResponse) {
     connect(&m_server, &QLocalServer::newConnection, this, [this]() {
       while (QLocalSocket* socket = m_server.nextPendingConnection()) {
+        m_sockets.append(socket);
         connect(socket, &QLocalSocket::readyRead, this,
                 [this, socket]() { read(socket); });
       }
@@ -55,6 +56,25 @@ class FakeDaemon final : public QObject {
     return m_eventListRequests;
   }
 
+  // Every method received, in order.
+  [[nodiscard]] QStringList methods() const { return m_methods; }
+  void clearMethods() { m_methods.clear(); }
+
+  // Behave like an IPC 2.1 daemon, which has no settings.getMany.
+  void setSettingsGetManySupported(const bool supported) {
+    m_settingsGetManySupported = supported;
+  }
+  void setStoredSetting(const QString& key, const QJsonValue& value) {
+    m_settings.insert(key, value);
+  }
+
+  void broadcast(const QString& event) {
+    for (QLocalSocket* socket : std::as_const(m_sockets)) {
+      socket->write(ipc::frame(
+          {{QStringLiteral("event"), event}, {QStringLiteral("data"), QJsonObject()}}));
+    }
+  }
+
  private:
   void read(QLocalSocket* socket) {
     QByteArray& buffer = m_buffers[socket];
@@ -67,8 +87,34 @@ class FakeDaemon final : public QObject {
       const QJsonObject params = request.value(QStringLiteral("params")).toObject();
       QJsonObject response{{QStringLiteral("id"), request.value("id")},
                            {QStringLiteral("result"), QJsonObject()}};
-      if (request.value(QStringLiteral("method")).toString() ==
-          QStringLiteral("events.list")) {
+      const QString method = request.value(QStringLiteral("method")).toString();
+      m_methods.append(method);
+      if (method == QStringLiteral("settings.getMany")) {
+        if (m_settingsGetManySupported) {
+          QJsonObject values = params.value(QStringLiteral("fallbacks")).toObject();
+          for (auto it = m_settings.constBegin(); it != m_settings.constEnd(); ++it) {
+            values.insert(it.key(), it.value());
+          }
+          response.insert(QStringLiteral("result"),
+                          QJsonObject{{QStringLiteral("values"), values}});
+        } else {
+          response.remove(QStringLiteral("result"));
+          response.insert(
+              QStringLiteral("error"),
+              QJsonObject{{QStringLiteral("code"), QStringLiteral("method_not_found")},
+                          {QStringLiteral("message"),
+                           QStringLiteral("Unknown method: settings.getMany")},
+                          {QStringLiteral("retryable"), false}});
+        }
+      } else if (method == QStringLiteral("settings.get")) {
+        const QString key = params.value(QStringLiteral("key")).toString();
+        response.insert(QStringLiteral("result"),
+                        QJsonObject{{QStringLiteral("key"), key},
+                                    {QStringLiteral("value"),
+                                     m_settings.contains(key)
+                                         ? m_settings.value(key)
+                                         : params.value(QStringLiteral("fallback"))}});
+      } else if (method == QStringLiteral("events.list")) {
         m_eventListRequests.append(params);
         const QJsonObject page = eventPage(params);
         if (page.value(QStringLiteral("events")).toArray().size() >
@@ -121,7 +167,11 @@ class FakeDaemon final : public QObject {
   }
 
   QLocalServer m_server;
+  QList<QLocalSocket*> m_sockets;
   QHash<QLocalSocket*, QByteArray> m_buffers;
+  QStringList m_methods;
+  QJsonObject m_settings;
+  bool m_settingsGetManySupported = true;
   QList<QJsonObject> m_eventListRequests;
   int m_eventsPerRange = 0;
   int m_maxEventsPerResponse = kPageCap;
@@ -156,6 +206,9 @@ class AppControllerTest final : public QObject {
   void rangeLoadingFollowsEveryEventPage();
   void staleRangePagesAreDiscarded();
   void oversizedRangePagesAreRequestedInSmallerPages();
+  void notificationsReloadOnlyWhatChanged();
+  void preferencesLoadInOneRequest();
+  void preferencesFallBackWithoutGetMany();
 
  private:
   QTemporaryDir m_xdgRoot;
@@ -605,6 +658,93 @@ void AppControllerTest::oversizedRangePagesAreRequestedInSmallerPages() {
   for (int index = 3; index < limits.size(); ++index) {
     QCOMPARE(limits.at(index), 62);
   }
+}
+
+namespace {
+
+// Waits past the controller's refresh debounce and any follow-up requests.
+QStringList settledMethods(FakeDaemon& daemon) {
+  QTest::qWait(400);
+  QStringList methods = daemon.methods();
+  methods.sort();
+  return methods;
+}
+
+}  // namespace
+
+void AppControllerTest::notificationsReloadOnlyWhatChanged() {
+  FakeDaemon daemon(3);
+  QVERIFY(daemon.listen());
+  AppController controller;
+  QTRY_VERIFY(controller.connected());
+  QTRY_VERIFY(daemon.methods().contains(QStringLiteral("events.list")));
+  settledMethods(daemon);
+
+  daemon.clearMethods();
+  daemon.broadcast(QStringLiteral("events.changed"));
+  QCOMPARE(settledMethods(daemon), (QStringList{QStringLiteral("events.list"),
+                                                QStringLiteral("invitations.list")}));
+
+  daemon.clearMethods();
+  daemon.broadcast(QStringLiteral("calendarSets.changed"));
+  QCOMPARE(settledMethods(daemon), QStringList{QStringLiteral("calendarSets.list")});
+
+  // Reminder delivery changes nothing the app presents.
+  daemon.clearMethods();
+  daemon.broadcast(QStringLiteral("reminders.changed"));
+  QCOMPARE(settledMethods(daemon), QStringList());
+
+  daemon.clearMethods();
+  daemon.broadcast(QStringLiteral("calendars.changed"));
+  QCOMPARE(settledMethods(daemon),
+           (QStringList{QStringLiteral("calendars.list"), QStringLiteral("events.list"),
+                        QStringLiteral("invitations.list"),
+                        QStringLiteral("settings.getMany")}));
+
+  // Notifications inside the debounce window merge into one reload.
+  daemon.clearMethods();
+  daemon.broadcast(QStringLiteral("events.changed"));
+  daemon.broadcast(QStringLiteral("events.changed"));
+  daemon.broadcast(QStringLiteral("calendarSets.changed"));
+  QCOMPARE(settledMethods(daemon), (QStringList{QStringLiteral("calendarSets.list"),
+                                                QStringLiteral("events.list"),
+                                                QStringLiteral("invitations.list")}));
+}
+
+void AppControllerTest::preferencesLoadInOneRequest() {
+  FakeDaemon daemon(0);
+  daemon.setStoredSetting(QStringLiteral("timeFormat"), QStringLiteral("24h"));
+  QVERIFY(daemon.listen());
+  AppController controller;
+  QTRY_VERIFY(controller.preferencesLoaded());
+  const QStringList methods = settledMethods(daemon);
+  QCOMPARE(methods.count(QStringLiteral("settings.getMany")), 1);
+  QCOMPARE(methods.count(QStringLiteral("settings.get")), 0);
+  QCOMPARE(controller.preferences().value(QStringLiteral("timeFormat")).toString(),
+           QStringLiteral("24h"));
+  QCOMPARE(controller.preferences().value(QStringLiteral("workDayStart")).toInt(), 8);
+}
+
+void AppControllerTest::preferencesFallBackWithoutGetMany() {
+  FakeDaemon daemon(0);
+  daemon.setSettingsGetManySupported(false);
+  daemon.setStoredSetting(QStringLiteral("timeFormat"), QStringLiteral("24h"));
+  QVERIFY(daemon.listen());
+  AppController controller;
+  QTRY_VERIFY(controller.preferencesLoaded());
+  QStringList methods = settledMethods(daemon);
+  QCOMPARE(methods.count(QStringLiteral("settings.getMany")), 1);
+  QCOMPARE(methods.count(QStringLiteral("settings.get")), 10);
+  QCOMPARE(controller.preferences().value(QStringLiteral("timeFormat")).toString(),
+           QStringLiteral("24h"));
+  QVERIFY2(controller.lastError().isEmpty(), qPrintable(controller.lastError()));
+
+  // Later reloads go straight to settings.get.
+  daemon.clearMethods();
+  daemon.broadcast(QStringLiteral("calendars.changed"));
+  methods = settledMethods(daemon);
+  QCOMPARE(methods.count(QStringLiteral("settings.getMany")), 0);
+  QCOMPARE(methods.count(QStringLiteral("settings.get")), 10);
 }
 
 #include "test_appcontroller.moc"
