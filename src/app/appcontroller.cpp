@@ -409,14 +409,36 @@ void AppController::loadRange(const QDate& firstDate, const QDate& lastDate) {
   }
   m_rangeStart = firstDate;
   m_rangeEnd = lastDate;
+  // A newer range supersedes any page still in flight for an older one.
+  ++m_rangeGeneration;
+  m_rangePages.clear();
+  requestRangePage(m_rangeGeneration, 0);
+}
+
+void AppController::requestRangePage(const quint64 generation, const int offset) {
   const QJsonObject params = {
-      {QStringLiteral("start"), isoUtc(startOfDateUtc(firstDate))},
-      {QStringLiteral("end"), isoUtc(startOfDateUtc(lastDate.addDays(1)))},
+      {QStringLiteral("start"), isoUtc(startOfDateUtc(m_rangeStart))},
+      {QStringLiteral("end"), isoUtc(startOfDateUtc(m_rangeEnd.addDays(1)))},
+      {QStringLiteral("offset"), offset},
+      {QStringLiteral("limit"), kEventPageLimit},
   };
   send(
       QStringLiteral("events.list"), params,
-      [this](const QJsonValue& value) {
-        m_events = variantList(value, QStringLiteral("events"));
+      [this, generation, offset](const QJsonValue& value) {
+        if (generation != m_rangeGeneration) {
+          return;
+        }
+        const QJsonObject page = value.toObject();
+        m_rangePages.append(variantList(value, QStringLiteral("events")));
+        const int nextOffset = page.value(QStringLiteral("nextOffset")).toInt(-1);
+        // The daemon caps each page, so keep reading until it reports the
+        // range complete. A next offset that does not advance would loop
+        // forever; treat it as the end of the range.
+        if (page.value(QStringLiteral("hasMore")).toBool() && nextOffset > offset) {
+          requestRangePage(generation, nextOffset);
+          return;
+        }
+        m_events = std::exchange(m_rangePages, {});
         applyDisplayTimes(&m_events);
         m_eventsModel.replace(m_events);
         setStatus(tr("Calendar is up to date locally"));

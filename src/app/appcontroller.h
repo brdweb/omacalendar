@@ -209,6 +209,10 @@ class AppController final : public QObject {
   void refreshWidgetStatus();
   void processPendingDeepLink();
   void applyDisplayTimes(QVariantList* events) const;
+  void requestRangePage(quint64 generation, int offset);
+
+  // The daemon's maximum events.list page size.
+  static constexpr int kEventPageLimit = 5000;
 
   ipc::IpcClient m_client;
   QHash<QString, ResultHandler> m_pending;
@@ -234,6 +238,8 @@ class AppController final : public QObject {
   QDate m_selectedDate = QDate::currentDate();
   QDate m_rangeStart;
   QDate m_rangeEnd;
+  quint64 m_rangeGeneration = 0;
+  QVariantList m_rangePages;
   QString m_statusText = QStringLiteral("Connecting to calendar service…");
   QString m_lastError;
   int m_activeRequests = 0;
