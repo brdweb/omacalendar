@@ -198,9 +198,13 @@ class AppController final : public QObject {
 
  private:
   using ResultHandler = std::function<void(const QJsonValue&)>;
+  // Returns true when it handled the error, which suppresses the generic
+  // user-visible error message.
+  using ErrorHandler = std::function<bool(const QJsonObject&)>;
 
   QString send(const QString& method, const QJsonObject& params,
-               ResultHandler handler = {}, bool contributesToBusy = true);
+               ResultHandler handler = {}, bool contributesToBusy = true,
+               ErrorHandler errorHandler = {});
   void removeInvitation(const QString& eventId, const QString& recurrenceId);
   void setError(const QString& message);
   void setStatus(const QString& message);
@@ -209,13 +213,15 @@ class AppController final : public QObject {
   void refreshWidgetStatus();
   void processPendingDeepLink();
   void applyDisplayTimes(QVariantList* events) const;
-  void requestRangePage(quint64 generation, int offset);
+  void requestRangePage(quint64 generation, int offset, int limit);
 
-  // The daemon's maximum events.list page size.
-  static constexpr int kEventPageLimit = 5000;
+  // The daemon's default events.list page size. Pages shrink when a response
+  // would exceed the IPC frame limit.
+  static constexpr int kEventPageLimit = 500;
 
   ipc::IpcClient m_client;
   QHash<QString, ResultHandler> m_pending;
+  QHash<QString, ErrorHandler> m_pendingErrors;
   QSet<QString> m_backgroundRequests;
   QTimer m_refreshTimer;
   QVariantList m_accounts;

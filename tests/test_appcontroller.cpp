@@ -31,7 +31,11 @@ class FakeDaemon final : public QObject {
  public:
   static constexpr int kPageCap = 500;
 
-  explicit FakeDaemon(const int eventsPerRange) : m_eventsPerRange(eventsPerRange) {
+  // Pages holding more than maxEventsPerResponse events fail the way
+  // omacalendard does when a response exceeds the IPC frame limit.
+  explicit FakeDaemon(const int eventsPerRange,
+                      const int maxEventsPerResponse = kPageCap)
+      : m_eventsPerRange(eventsPerRange), m_maxEventsPerResponse(maxEventsPerResponse) {
     connect(&m_server, &QLocalServer::newConnection, this, [this]() {
       while (QLocalSocket* socket = m_server.nextPendingConnection()) {
         connect(socket, &QLocalSocket::readyRead, this,
@@ -61,14 +65,27 @@ class FakeDaemon final : public QObject {
           QJsonDocument::fromJson(buffer.left(newline)).object();
       buffer.remove(0, newline + 1);
       const QJsonObject params = request.value(QStringLiteral("params")).toObject();
-      QJsonObject result;
+      QJsonObject response{{QStringLiteral("id"), request.value("id")},
+                           {QStringLiteral("result"), QJsonObject()}};
       if (request.value(QStringLiteral("method")).toString() ==
           QStringLiteral("events.list")) {
         m_eventListRequests.append(params);
-        result = eventPage(params);
+        const QJsonObject page = eventPage(params);
+        if (page.value(QStringLiteral("events")).toArray().size() >
+            m_maxEventsPerResponse) {
+          response.remove(QStringLiteral("result"));
+          response.insert(
+              QStringLiteral("error"),
+              QJsonObject{
+                  {QStringLiteral("code"), QStringLiteral("response_too_large")},
+                  {QStringLiteral("message"),
+                   QStringLiteral("Response must be requested in smaller pages")},
+                  {QStringLiteral("retryable"), false}});
+        } else {
+          response.insert(QStringLiteral("result"), page);
+        }
       }
-      socket->write(ipc::frame({{QStringLiteral("id"), request.value("id")},
-                                {QStringLiteral("result"), result}}));
+      socket->write(ipc::frame(response));
     }
   }
 
@@ -107,6 +124,7 @@ class FakeDaemon final : public QObject {
   QHash<QLocalSocket*, QByteArray> m_buffers;
   QList<QJsonObject> m_eventListRequests;
   int m_eventsPerRange = 0;
+  int m_maxEventsPerResponse = kPageCap;
 };
 
 }  // namespace
@@ -137,6 +155,7 @@ class AppControllerTest final : public QObject {
   void flatpakActivationRecoversAfterKilledPrimary();
   void rangeLoadingFollowsEveryEventPage();
   void staleRangePagesAreDiscarded();
+  void oversizedRangePagesAreRequestedInSmallerPages();
 
  private:
   QTemporaryDir m_xdgRoot;
@@ -550,6 +569,42 @@ void AppControllerTest::staleRangePagesAreDiscarded() {
     }
   }
   QCOMPARE(supersededPages, 1);
+}
+
+void AppControllerTest::oversizedRangePagesAreRequestedInSmallerPages() {
+  // Large events can make a full page exceed the IPC frame limit. The
+  // controller must shrink its pages instead of abandoning the range.
+  constexpr int kEvents = 2 * FakeDaemon::kPageCap + 3;
+  constexpr int kMaxEventsPerResponse = 120;
+  FakeDaemon daemon(kEvents, kMaxEventsPerResponse);
+  QVERIFY(daemon.listen());
+  AppController controller;
+  QTRY_VERIFY(controller.connected());
+
+  controller.loadRange(QDate(2026, 1, 1), QDate(2026, 12, 31));
+  const QString prefix = QStringLiteral("2026-01-01");
+  QTRY_COMPARE(controller.eventsModel()->rowCount(), kEvents);
+  QSet<QString> ids;
+  for (const QVariant& event : controller.events()) {
+    const QString id = event.toMap().value(QStringLiteral("id")).toString();
+    QVERIFY2(id.startsWith(prefix), qPrintable(id));
+    ids.insert(id);
+  }
+  QCOMPARE(ids.size(), kEvents);
+  QVERIFY2(controller.lastError().isEmpty(), qPrintable(controller.lastError()));
+
+  QList<int> limits;
+  for (const QJsonObject& request : daemon.eventListRequests()) {
+    if (request.value(QStringLiteral("start")).toString().startsWith(prefix)) {
+      limits.append(request.value(QStringLiteral("limit")).toInt());
+    }
+  }
+  // 500 → 250 → 125 are rejected; 62-event pages then cover the range.
+  QCOMPARE(limits.mid(0, 4), (QList<int>{500, 250, 125, 62}));
+  QVERIFY(limits.size() > 4);
+  for (int index = 3; index < limits.size(); ++index) {
+    QCOMPARE(limits.at(index), 62);
+  }
 }
 
 #include "test_appcontroller.moc"
