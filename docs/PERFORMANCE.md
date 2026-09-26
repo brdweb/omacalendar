@@ -74,3 +74,34 @@ ctest --test-dir build-performance \
 
 A failed hardware gate is a release blocker until a repeat run on the same idle
 reference machine confirms whether the cause is a regression or host contention.
+
+## Desktop view benchmark
+
+The daemon gate above does not cover the desktop app, which can spend far
+longer turning a response into pixels than the daemon spends producing it.
+`tests/qml-bench/tst_ViewBenchmark.qml` renders the agenda, day, week, month
+and year views with deterministic synthetic events spread over one year and
+measures, per view:
+
+- `render`: creating the view with the full event list until layout settles.
+- `update`: replacing the list with a copy in which one event changed, as the
+  controller does after a single edit or sync change.
+
+It also measures `all-views update`: the same one-event change delivered to all
+five views at once, which is what happens when every view stays alive.
+
+The report is informational. Timings are not asserted, because shared CI
+workers are too noisy to gate on; compare runs on the same machine instead.
+
+```sh
+python3 scripts/performance/ui_benchmark.py \
+  --qmltestrunner "$(qmake6 -query QT_INSTALL_BINS)/qmltestrunner" \
+  --events 500 5000 50000 \
+  --output build/ui-benchmark.json
+```
+
+`--events` selects the dataset sizes (500, 5,000 and 50,000). The default,
+also used by the `ui_benchmark_smoke` CTest, is 500 and 5,000; the
+50,000-event rows take several minutes and are for manual comparisons. The
+JSON report records every sample, the median, the source revision and the
+machine.
