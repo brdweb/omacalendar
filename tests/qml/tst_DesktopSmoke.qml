@@ -287,11 +287,18 @@ Item {
                                 4)
                     } else if (factoryIndex === 3)
                         compare(populatedView.eventsForDate(scene.referenceDate).length, 6)
-                    else
-                        // YearView intentionally marks the start date only for
-                        // timed multi-day events; the continuation is covered
-                        // by the agenda/month assertions above.
-                        compare(populatedView.eventCount(scene.referenceDate), 5)
+                    else {
+                        // YearView counts every day an event covers, like the
+                        // agenda and month views, including the continuation
+                        // of the overnight conference.
+                        compare(populatedView.eventCount(scene.referenceDate), 6)
+                        compare(populatedView.eventCount(
+                                    new Date(2026, 7, 16, 12, 0, 0)), 1)
+                        compare(populatedView.eventCount(
+                                    new Date(2026, 7, 18, 12, 0, 0)), 1)
+                        compare(populatedView.eventCount(
+                                    new Date(2026, 7, 19, 12, 0, 0)), 0)
+                    }
                     populatedView.destroy()
                     wait(0)
                 }

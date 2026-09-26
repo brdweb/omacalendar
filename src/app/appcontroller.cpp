@@ -130,6 +130,7 @@ AppController::AppController(QObject* parent) : QObject(parent) {
       processPendingDeepLink();
     } else {
       m_pending.clear();
+      m_pendingErrors.clear();
       m_backgroundRequests.clear();
       m_refreshTimer.stop();
       m_activeRequests = 0;
@@ -141,6 +142,7 @@ AppController::AppController(QObject* parent) : QObject(parent) {
   connect(&m_client, &ipc::IpcClient::responseReceived, this,
           [this](const QString& id, const QJsonValue& result) {
             const ResultHandler handler = m_pending.take(id);
+            m_pendingErrors.remove(id);
             const bool background = m_backgroundRequests.remove(id);
             if (!background && m_activeRequests > 0) {
               --m_activeRequests;
@@ -153,10 +155,14 @@ AppController::AppController(QObject* parent) : QObject(parent) {
   connect(&m_client, &ipc::IpcClient::errorReceived, this,
           [this](const QString& id, const QJsonObject& error) {
             m_pending.remove(id);
+            const ErrorHandler errorHandler = m_pendingErrors.take(id);
             const bool background = m_backgroundRequests.remove(id);
             if (!background && m_activeRequests > 0) {
               --m_activeRequests;
               setBusy(m_activeRequests > 0);
+            }
+            if (errorHandler && errorHandler(error)) {
+              return;
             }
             setError(error.value(QStringLiteral("message"))
                          .toString(tr("Calendar service request failed")));
@@ -303,7 +309,8 @@ void AppController::startDaemonIfNeeded() {
 }
 
 QString AppController::send(const QString& method, const QJsonObject& params,
-                            ResultHandler handler, const bool contributesToBusy) {
+                            ResultHandler handler, const bool contributesToBusy,
+                            ErrorHandler errorHandler) {
   if (!connected()) {
     setError(tr("Calendar service is not connected"));
     startDaemonIfNeeded();
@@ -315,6 +322,9 @@ QString AppController::send(const QString& method, const QJsonObject& params,
     return {};
   }
   m_pending.insert(id, std::move(handler));
+  if (errorHandler) {
+    m_pendingErrors.insert(id, std::move(errorHandler));
+  }
   if (contributesToBusy) {
     ++m_activeRequests;
     setBusy(true);
@@ -409,20 +419,57 @@ void AppController::loadRange(const QDate& firstDate, const QDate& lastDate) {
   }
   m_rangeStart = firstDate;
   m_rangeEnd = lastDate;
+  // A newer range supersedes any page still in flight for an older one.
+  ++m_rangeGeneration;
+  m_rangePages.clear();
+  requestRangePage(m_rangeGeneration, 0, kEventPageLimit);
+}
+
+void AppController::requestRangePage(const quint64 generation, const int offset,
+                                     const int limit) {
   const QJsonObject params = {
-      {QStringLiteral("start"), isoUtc(startOfDateUtc(firstDate))},
-      {QStringLiteral("end"), isoUtc(startOfDateUtc(lastDate.addDays(1)))},
+      {QStringLiteral("start"), isoUtc(startOfDateUtc(m_rangeStart))},
+      {QStringLiteral("end"), isoUtc(startOfDateUtc(m_rangeEnd.addDays(1)))},
+      {QStringLiteral("offset"), offset},
+      {QStringLiteral("limit"), limit},
   };
   send(
       QStringLiteral("events.list"), params,
-      [this](const QJsonValue& value) {
-        m_events = variantList(value, QStringLiteral("events"));
+      [this, generation, offset, limit](const QJsonValue& value) {
+        if (generation != m_rangeGeneration) {
+          return;
+        }
+        const QJsonObject page = value.toObject();
+        m_rangePages.append(variantList(value, QStringLiteral("events")));
+        const int nextOffset = page.value(QStringLiteral("nextOffset")).toInt(-1);
+        // The daemon caps each page, so keep reading until it reports the
+        // range complete. A next offset that does not advance would loop
+        // forever; treat it as the end of the range.
+        if (page.value(QStringLiteral("hasMore")).toBool() && nextOffset > offset) {
+          requestRangePage(generation, nextOffset, limit);
+          return;
+        }
+        m_events = std::exchange(m_rangePages, {});
         applyDisplayTimes(&m_events);
         m_eventsModel.replace(m_events);
         setStatus(tr("Calendar is up to date locally"));
         emit eventsChanged();
       },
-      false);
+      false,
+      [this, generation, offset, limit](const QJsonObject& error) {
+        if (generation != m_rangeGeneration) {
+          return true;
+        }
+        // Events with long descriptions or many attendees can push a page
+        // past the IPC frame limit. Retry the same offset with smaller pages.
+        if (error.value(QStringLiteral("code")).toString() ==
+                QStringLiteral("response_too_large") &&
+            limit > 1) {
+          requestRangePage(generation, offset, limit / 2);
+          return true;
+        }
+        return false;
+      });
 }
 
 void AppController::createEvent(const QVariantMap& values) { saveEvent(values, {}); }

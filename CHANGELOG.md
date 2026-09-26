@@ -6,6 +6,17 @@ Versioning once public releases begin.
 
 ## [Unreleased]
 
+### Fixed
+
+- The desktop app reads every page of a date range from the calendar
+  service. Previously it showed only the first 500 events, so a busy year
+  view or a month with several shared calendars silently lost the rest. A
+  page that arrives for a range the user has already navigated away from is
+  now discarded instead of overwriting the current view.
+- The year view counts an event on every day it covers, matching the month
+  and agenda views, instead of only on its start date, so multi-day events
+  and overnight events no longer leave their later days looking empty.
+
 ## [1.1.1] - 2026-09-22
 
 ### Fixed

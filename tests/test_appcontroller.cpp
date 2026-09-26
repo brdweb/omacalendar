@@ -1,5 +1,9 @@
 #include <QFileInfo>
 #include <QJSEngine>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QLocalServer>
+#include <QLocalSocket>
 #include <QProcess>
 #include <QScopeGuard>
 #include <QSignalSpy>
@@ -14,8 +18,116 @@
 #include "app/applicationinstance.h"
 #include "app/startuprequest.h"
 #include "core/paths.h"
+#include "ipc/ipcprotocol.h"
 
 using namespace omacalendar;
+
+namespace {
+
+// Answers the desktop controller like omacalendard does, with events.list
+// capped at the daemon's default page size so multi-page ranges are
+// exercised. Every other method succeeds with an empty result.
+class FakeDaemon final : public QObject {
+ public:
+  static constexpr int kPageCap = 500;
+
+  // Pages holding more than maxEventsPerResponse events fail the way
+  // omacalendard does when a response exceeds the IPC frame limit.
+  explicit FakeDaemon(const int eventsPerRange,
+                      const int maxEventsPerResponse = kPageCap)
+      : m_eventsPerRange(eventsPerRange), m_maxEventsPerResponse(maxEventsPerResponse) {
+    connect(&m_server, &QLocalServer::newConnection, this, [this]() {
+      while (QLocalSocket* socket = m_server.nextPendingConnection()) {
+        connect(socket, &QLocalSocket::readyRead, this,
+                [this, socket]() { read(socket); });
+      }
+    });
+  }
+
+  bool listen() {
+    const QString path = paths::socketFile();
+    QDir().mkpath(QFileInfo(path).absolutePath());
+    QLocalServer::removeServer(path);
+    return m_server.listen(path);
+  }
+
+  [[nodiscard]] QList<QJsonObject> eventListRequests() const {
+    return m_eventListRequests;
+  }
+
+ private:
+  void read(QLocalSocket* socket) {
+    QByteArray& buffer = m_buffers[socket];
+    buffer.append(socket->readAll());
+    qsizetype newline = -1;
+    while ((newline = buffer.indexOf('\n')) >= 0) {
+      const QJsonObject request =
+          QJsonDocument::fromJson(buffer.left(newline)).object();
+      buffer.remove(0, newline + 1);
+      const QJsonObject params = request.value(QStringLiteral("params")).toObject();
+      QJsonObject response{{QStringLiteral("id"), request.value("id")},
+                           {QStringLiteral("result"), QJsonObject()}};
+      if (request.value(QStringLiteral("method")).toString() ==
+          QStringLiteral("events.list")) {
+        m_eventListRequests.append(params);
+        const QJsonObject page = eventPage(params);
+        if (page.value(QStringLiteral("events")).toArray().size() >
+            m_maxEventsPerResponse) {
+          response.remove(QStringLiteral("result"));
+          response.insert(
+              QStringLiteral("error"),
+              QJsonObject{
+                  {QStringLiteral("code"), QStringLiteral("response_too_large")},
+                  {QStringLiteral("message"),
+                   QStringLiteral("Response must be requested in smaller pages")},
+                  {QStringLiteral("retryable"), false}});
+        } else {
+          response.insert(QStringLiteral("result"), page);
+        }
+      }
+      socket->write(ipc::frame(response));
+    }
+  }
+
+  QJsonObject eventPage(const QJsonObject& params) const {
+    // Event ids carry the requested range start so a test can tell which
+    // range produced them.
+    const QString rangeStart = params.value(QStringLiteral("start")).toString();
+    const int offset =
+        qBound(0, params.value(QStringLiteral("offset")).toInt(), m_eventsPerRange);
+    const int limit =
+        qMin(params.value(QStringLiteral("limit")).toInt(kPageCap), kPageCap);
+    const int count = qMin(limit, m_eventsPerRange - offset);
+    QJsonArray events;
+    for (int index = offset; index < offset + count; ++index) {
+      events.append(QJsonObject{
+          {QStringLiteral("id"), QStringLiteral("%1/%2").arg(rangeStart).arg(index)},
+          {QStringLiteral("calendarId"), QStringLiteral("local-default")},
+          {QStringLiteral("summary"), QStringLiteral("Event %1").arg(index)},
+          {QStringLiteral("allDay"), false},
+          {QStringLiteral("timeKind"), QStringLiteral("zoned")},
+          {QStringLiteral("startTimeZone"), QStringLiteral("UTC")},
+          {QStringLiteral("startUtc"), rangeStart},
+          {QStringLiteral("endUtc"), rangeStart},
+      });
+    }
+    const int next = offset + count;
+    return {{QStringLiteral("events"), events},
+            {QStringLiteral("offset"), offset},
+            {QStringLiteral("limit"), limit},
+            {QStringLiteral("total"), m_eventsPerRange},
+            {QStringLiteral("hasMore"), next < m_eventsPerRange},
+            {QStringLiteral("nextOffset"), next}};
+  }
+
+  QLocalServer m_server;
+  QHash<QLocalSocket*, QByteArray> m_buffers;
+  QList<QJsonObject> m_eventListRequests;
+  int m_eventsPerRange = 0;
+  int m_maxEventsPerResponse = kPageCap;
+};
+
+}  // namespace
 
 class AppControllerTest final : public QObject {
   Q_OBJECT
@@ -41,6 +153,9 @@ class AppControllerTest final : public QObject {
   void applicationInstanceRoutesActivation();
   void nativeAndFlatpakInstancesAreIndependent();
   void flatpakActivationRecoversAfterKilledPrimary();
+  void rangeLoadingFollowsEveryEventPage();
+  void staleRangePagesAreDiscarded();
+  void oversizedRangePagesAreRequestedInSmallerPages();
 
  private:
   QTemporaryDir m_xdgRoot;
@@ -394,6 +509,102 @@ int main(int argc, char* argv[]) {
   }
   AppControllerTest test;
   return QTest::qExec(&test, argc, argv);
+}
+
+void AppControllerTest::rangeLoadingFollowsEveryEventPage() {
+  // More events than one daemon page holds: the controller must keep reading
+  // instead of showing only the first page.
+  constexpr int kEvents = 2 * FakeDaemon::kPageCap + 3;
+  FakeDaemon daemon(kEvents);
+  QVERIFY(daemon.listen());
+  AppController controller;
+  QTRY_VERIFY(controller.connected());
+
+  controller.loadRange(QDate(2026, 1, 1), QDate(2026, 12, 31));
+  const QString prefix = QStringLiteral("2026-01-01");
+  QTRY_COMPARE(controller.eventsModel()->rowCount(), kEvents);
+  const QVariantList events = controller.events();
+  QCOMPARE(events.size(), kEvents);
+  QSet<QString> ids;
+  for (const QVariant& event : events) {
+    const QString id = event.toMap().value(QStringLiteral("id")).toString();
+    QVERIFY2(id.startsWith(prefix), qPrintable(id));
+    ids.insert(id);
+  }
+  QCOMPARE(ids.size(), kEvents);
+
+  QList<int> offsets;
+  for (const QJsonObject& request : daemon.eventListRequests()) {
+    if (request.value(QStringLiteral("start")).toString().startsWith(prefix)) {
+      offsets.append(request.value(QStringLiteral("offset")).toInt());
+      QVERIFY(request.value(QStringLiteral("limit")).toInt() >= FakeDaemon::kPageCap);
+    }
+  }
+  QCOMPARE(offsets, (QList<int>{0, FakeDaemon::kPageCap, 2 * FakeDaemon::kPageCap}));
+}
+
+void AppControllerTest::staleRangePagesAreDiscarded() {
+  constexpr int kEvents = FakeDaemon::kPageCap + 10;
+  FakeDaemon daemon(kEvents);
+  QVERIFY(daemon.listen());
+  AppController controller;
+  QTRY_VERIFY(controller.connected());
+
+  // The first range is superseded before its first page arrives. Neither its
+  // pages nor its follow-up requests may reach the model.
+  controller.loadRange(QDate(2026, 3, 1), QDate(2026, 3, 31));
+  controller.loadRange(QDate(2026, 5, 1), QDate(2026, 5, 31));
+  const QString current = QStringLiteral("2026-05-01");
+  QTRY_COMPARE(controller.eventsModel()->rowCount(), kEvents);
+  for (const QVariant& event : controller.events()) {
+    const QString id = event.toMap().value(QStringLiteral("id")).toString();
+    QVERIFY2(id.startsWith(current), qPrintable(id));
+  }
+  int supersededPages = 0;
+  for (const QJsonObject& request : daemon.eventListRequests()) {
+    if (request.value(QStringLiteral("start"))
+            .toString()
+            .startsWith(QStringLiteral("2026-03-01"))) {
+      ++supersededPages;
+    }
+  }
+  QCOMPARE(supersededPages, 1);
+}
+
+void AppControllerTest::oversizedRangePagesAreRequestedInSmallerPages() {
+  // Large events can make a full page exceed the IPC frame limit. The
+  // controller must shrink its pages instead of abandoning the range.
+  constexpr int kEvents = 2 * FakeDaemon::kPageCap + 3;
+  constexpr int kMaxEventsPerResponse = 120;
+  FakeDaemon daemon(kEvents, kMaxEventsPerResponse);
+  QVERIFY(daemon.listen());
+  AppController controller;
+  QTRY_VERIFY(controller.connected());
+
+  controller.loadRange(QDate(2026, 1, 1), QDate(2026, 12, 31));
+  const QString prefix = QStringLiteral("2026-01-01");
+  QTRY_COMPARE(controller.eventsModel()->rowCount(), kEvents);
+  QSet<QString> ids;
+  for (const QVariant& event : controller.events()) {
+    const QString id = event.toMap().value(QStringLiteral("id")).toString();
+    QVERIFY2(id.startsWith(prefix), qPrintable(id));
+    ids.insert(id);
+  }
+  QCOMPARE(ids.size(), kEvents);
+  QVERIFY2(controller.lastError().isEmpty(), qPrintable(controller.lastError()));
+
+  QList<int> limits;
+  for (const QJsonObject& request : daemon.eventListRequests()) {
+    if (request.value(QStringLiteral("start")).toString().startsWith(prefix)) {
+      limits.append(request.value(QStringLiteral("limit")).toInt());
+    }
+  }
+  // 500 → 250 → 125 are rejected; 62-event pages then cover the range.
+  QCOMPARE(limits.mid(0, 4), (QList<int>{500, 250, 125, 62}));
+  QVERIFY(limits.size() > 4);
+  for (int index = 3; index < limits.size(); ++index) {
+    QCOMPARE(limits.at(index), 62);
+  }
 }
 
 #include "test_appcontroller.moc"
