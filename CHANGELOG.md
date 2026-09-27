@@ -21,7 +21,7 @@ Versioning once public releases begin.
 
 ### Added
 
-- IPC 2.2 adds `settings.getMany` for reading several settings in one request
+- The `settings.getMany` IPC method reads several settings in one request
   (see docs/IPC.md).
 - A report-only desktop view benchmark (see docs/PERFORMANCE.md).
 

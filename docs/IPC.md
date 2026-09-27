@@ -1,4 +1,4 @@
-# Local IPC protocol 2.2
+# Local IPC protocol 2.1
 
 ## Transport and trust boundary
 
@@ -24,7 +24,7 @@ Every request carries `protocolMajor: 2`. `protocolMinor` is optional request
 metadata and does not participate in routing: requests that omit it, send `0`,
 or send an unknown value remain compatible when the major is `2`. A different
 major is rejected with `incompatible_protocol`. The daemon advertises
-`protocolMinor: 2` through `system.info`; clients discover additive fields and
+`protocolMinor: 1` through `system.info`; clients discover additive fields and
 methods from that response rather than requiring an exact minor match.
 
 ```json
@@ -92,12 +92,13 @@ replaces the connection's prior list and may contain `*`, a family such as
   `calendarSets.activate`
 - `settings.get`, `settings.set`, `settings.getMany`
 
-IPC 2.2 additively introduces `settings.getMany`, which reads several settings
-in one request. It takes `keys`, an array of 1 to 64 setting names, and an
-optional `fallbacks` object mapping a key to the value returned when that key
-is unset. The result is `{"values": {...}}` with one entry per requested key,
-resolved exactly as `settings.get` resolves it. Clients talking to an IPC 2.1
-daemon receive `method_not_found` and fall back to `settings.get`.
+`settings.getMany` is an additive, not yet released method that reads several
+settings in one request; the protocol minor advances when it first ships. It
+takes `keys`, an array of 1 to 64 setting names, and an optional `fallbacks`
+object mapping a key to the value returned when that key is unset. The result is `{"values": {...}}` with one entry per requested key,
+resolved exactly as `settings.get` resolves it. Clients find it in
+`system.info` `methods`; a daemon without it answers `method_not_found`, and
+clients fall back to `settings.get`.
 
 `calendars.probeThisAndFuture` creates a temporary test resource on the selected
 server, checks that `RANGE=THISANDFUTURE` survives a write and readback, and
