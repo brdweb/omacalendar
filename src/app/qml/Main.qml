@@ -403,90 +403,117 @@ ApplicationWindow {
                         currentIndex: Math.max(0, window.currentViewIndex)
                         onCurrentIndexChanged: viewSwitchFade.restart()
 
-                        AgendaView {
-                            currentDate: App.selectedDate
-                            events: window.visibleEvents
-                            selectedEventReference: window.selectedEventReference
-                            timeFormat: String(window.preferences.timeFormat || "system")
-                            onEventActivated: value => window.openEvent(value)
-                            onCreateRequested: dateValue => editor.openNew(dateValue, 540)
-                            onDateSelected: dateValue => window.selectDate(dateValue)
-                        }
-
-                        DayView {
-                            currentDate: App.selectedDate
-                            events: window.visibleEvents
-                            selectedEventReference: window.selectedEventReference
-                            workDayStart: Number(window.preferences.workDayStart || 8)
-                            workDayEnd: Number(window.preferences.workDayEnd || 18)
-                            defaultDurationMinutes:
-                                Number(window.preferences.defaultDuration || 60)
-                            timeFormat: String(window.preferences.timeFormat || "system")
-                            onEventActivated: value => window.openEvent(value)
-                            onCreateRequested: (dateValue, startMinute,
-                                                durationMinutes) =>
-                                                   editor.openNew(dateValue, startMinute,
-                                                                  durationMinutes)
-                            onEventTimeChanged: (value, dateValue, startMinute, durationMinutes) =>
-                                                    window.rescheduleEvent(value, dateValue,
-                                                                           startMinute,
-                                                                           durationMinutes)
-                            onEventDateChanged: (value, dateValue) =>
-                                                    window.moveEventToDate(value,
-                                                                           dateValue)
-                        }
-
-                        WeekView {
-                            currentDate: App.selectedDate
-                            events: window.visibleEvents
-                            selectedEventReference: window.selectedEventReference
-                            firstDayOfWeek: window.firstDayOfWeek
-                            workDayStart: Number(window.preferences.workDayStart || 8)
-                            workDayEnd: Number(window.preferences.workDayEnd || 18)
-                            defaultDurationMinutes:
-                                Number(window.preferences.defaultDuration || 60)
-                            timeFormat: String(window.preferences.timeFormat || "system")
-                            onEventActivated: value => window.openEvent(value)
-                            onDateSelected: dateValue => {
-                                window.selectDate(dateValue)
-                                window.setView("day")
+                        Loader {
+                            // Only the visible view exists, so an events change reaches one
+                            // view instead of all five.
+                            active: viewStack.currentIndex === 0
+                            sourceComponent: Component {
+                                AgendaView {
+                                    currentDate: App.selectedDate
+                                    events: window.visibleEvents
+                                    selectedEventReference: window.selectedEventReference
+                                    timeFormat: String(window.preferences.timeFormat || "system")
+                                    onEventActivated: value => window.openEvent(value)
+                                    onCreateRequested: dateValue => editor.openNew(dateValue, 540)
+                                    onDateSelected: dateValue => window.selectDate(dateValue)
+                                }
                             }
-                            onCreateRequested: (dateValue, startMinute,
-                                                durationMinutes) =>
-                                                   editor.openNew(dateValue, startMinute,
-                                                                  durationMinutes)
-                            onEventTimeChanged: (value, dateValue, startMinute, durationMinutes) =>
-                                                    window.rescheduleEvent(value, dateValue,
-                                                                           startMinute,
-                                                                           durationMinutes)
-                            onEventDateChanged: (value, dateValue) =>
-                                                    window.moveEventToDate(value,
-                                                                           dateValue)
                         }
 
-                        MonthView {
-                            currentDate: App.selectedDate
-                            events: window.visibleEvents
-                            selectedEventReference: window.selectedEventReference
-                            firstDayOfWeek: window.firstDayOfWeek
-                            timeFormat: String(window.preferences.timeFormat || "system")
-                            onEventActivated: value => window.openEvent(value)
-                            onDateSelected: dateValue => window.selectDate(dateValue)
-                            onCreateRequested: dateValue => editor.openNew(dateValue, 540)
-                            onEventDateChanged: (value, dateValue) =>
-                                                    window.moveEventToDate(value, dateValue)
-                        }
-
-                        YearView {
-                            currentDate: App.selectedDate
-                            events: window.visibleEvents
-                            onDateSelected: dateValue => {
-                                window.selectDate(dateValue)
-                                window.setView("day")
+                        Loader {
+                            active: viewStack.currentIndex === 1
+                            sourceComponent: Component {
+                                DayView {
+                                    currentDate: App.selectedDate
+                                    events: window.visibleEvents
+                                    selectedEventReference: window.selectedEventReference
+                                    workDayStart: Number(window.preferences.workDayStart || 8)
+                                    workDayEnd: Number(window.preferences.workDayEnd || 18)
+                                    defaultDurationMinutes:
+                                        Number(window.preferences.defaultDuration || 60)
+                                    timeFormat: String(window.preferences.timeFormat || "system")
+                                    onEventActivated: value => window.openEvent(value)
+                                    onCreateRequested: (dateValue, startMinute,
+                                                        durationMinutes) =>
+                                                           editor.openNew(dateValue, startMinute,
+                                                                          durationMinutes)
+                                    onEventTimeChanged: (value, dateValue, startMinute, durationMinutes) =>
+                                                            window.rescheduleEvent(value, dateValue,
+                                                                                   startMinute,
+                                                                                   durationMinutes)
+                                    onEventDateChanged: (value, dateValue) =>
+                                                            window.moveEventToDate(value,
+                                                                                   dateValue)
+                                }
                             }
-                            onMonthSelected: dateValue => {
-                                window.selectDate(dateValue)
-                                window.setView("month")
+                        }
+
+                        Loader {
+                            active: viewStack.currentIndex === 2
+                            sourceComponent: Component {
+                                WeekView {
+                                    currentDate: App.selectedDate
+                                    events: window.visibleEvents
+                                    selectedEventReference: window.selectedEventReference
+                                    firstDayOfWeek: window.firstDayOfWeek
+                                    workDayStart: Number(window.preferences.workDayStart || 8)
+                                    workDayEnd: Number(window.preferences.workDayEnd || 18)
+                                    defaultDurationMinutes:
+                                        Number(window.preferences.defaultDuration || 60)
+                                    timeFormat: String(window.preferences.timeFormat || "system")
+                                    onEventActivated: value => window.openEvent(value)
+                                    onDateSelected: dateValue => {
+                                        window.selectDate(dateValue)
+                                        window.setView("day")
+                                    }
+                                    onCreateRequested: (dateValue, startMinute,
+                                                        durationMinutes) =>
+                                                           editor.openNew(dateValue, startMinute,
+                                                                          durationMinutes)
+                                    onEventTimeChanged: (value, dateValue, startMinute, durationMinutes) =>
+                                                            window.rescheduleEvent(value, dateValue,
+                                                                                   startMinute,
+                                                                                   durationMinutes)
+                                    onEventDateChanged: (value, dateValue) =>
+                                                            window.moveEventToDate(value,
+                                                                                   dateValue)
+                                }
+                            }
+                        }
+
+                        Loader {
+                            active: viewStack.currentIndex === 3
+                            sourceComponent: Component {
+                                MonthView {
+                                    currentDate: App.selectedDate
+                                    events: window.visibleEvents
+                                    selectedEventReference: window.selectedEventReference
+                                    firstDayOfWeek: window.firstDayOfWeek
+                                    timeFormat: String(window.preferences.timeFormat || "system")
+                                    onEventActivated: value => window.openEvent(value)
+                                    onDateSelected: dateValue => window.selectDate(dateValue)
+                                    onCreateRequested: dateValue => editor.openNew(dateValue, 540)
+                                    onEventDateChanged: (value, dateValue) =>
+                                                            window.moveEventToDate(value, dateValue)
+                                }
+                            }
+                        }
+
+                        Loader {
+                            active: viewStack.currentIndex === 4
+                            sourceComponent: Component {
+                                YearView {
+                                    currentDate: App.selectedDate
+                                    events: window.visibleEvents
+                                    onDateSelected: dateValue => {
+                                        window.selectDate(dateValue)
+                                        window.setView("day")
+                                    }
+                                    onMonthSelected: dateValue => {
+                                        window.selectDate(dateValue)
+                                        window.setView("month")
+                                    }
+                                }
                             }
                         }
                     }
