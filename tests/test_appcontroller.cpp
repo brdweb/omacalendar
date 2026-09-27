@@ -697,7 +697,8 @@ void AppControllerTest::notificationsReloadOnlyWhatChanged() {
   daemon.clearMethods();
   daemon.broadcast(QStringLiteral("calendars.changed"));
   QCOMPARE(settledMethods(daemon),
-           (QStringList{QStringLiteral("calendars.list"), QStringLiteral("events.list"),
+           (QStringList{QStringLiteral("calendarSets.list"),
+                        QStringLiteral("calendars.list"), QStringLiteral("events.list"),
                         QStringLiteral("invitations.list"),
                         QStringLiteral("settings.getMany")}));
 

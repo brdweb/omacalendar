@@ -349,14 +349,17 @@ int AppController::refreshPartsForNotification(const QString& event) {
   if (event == QStringLiteral("calendarSets.changed")) {
     return RefreshCalendarSets;
   }
-  // Calendar changes can hide or remove events and invalidate the default
-  // calendar; account changes can do the same through their calendars.
+  // Calendar changes can hide or remove events, invalidate the default
+  // calendar, and change calendar-set membership: new calendars join the
+  // built-in set and removed ones leave every set. Account changes can do
+  // all of that through their calendars.
   if (event == QStringLiteral("calendars.changed")) {
-    return RefreshCalendars | RefreshEvents | RefreshInvitations | RefreshPreferences;
+    return RefreshCalendars | RefreshCalendarSets | RefreshEvents | RefreshInvitations |
+           RefreshPreferences;
   }
   if (event == QStringLiteral("accounts.changed")) {
-    return RefreshAccounts | RefreshCalendars | RefreshEvents | RefreshInvitations |
-           RefreshPreferences;
+    return RefreshAccounts | RefreshCalendars | RefreshCalendarSets | RefreshEvents |
+           RefreshInvitations | RefreshPreferences;
   }
   return 0;
 }

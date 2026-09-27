@@ -57,11 +57,18 @@ TestCase {
         compare(EventIndex.countForDate(index, new Date(2026, 7, 18)), 0)
     }
 
-    function test_very_long_events_are_bounded() {
-        const index = EventIndex.build([allDay("decade", "2020-01-01", "2030-01-01")])
+    function test_long_events_cover_their_whole_span() {
+        const index = EventIndex.build([
+            allDay("decade", "2020-01-01", "2030-01-01"),
+            timed("meeting", "2029-06-01T09:00:00", "2029-06-01T10:00:00")
+        ])
+        compare(EventIndex.countForDate(index, new Date(2019, 11, 31)), 0)
         compare(EventIndex.countForDate(index, new Date(2020, 0, 1)), 1)
-        compare(EventIndex.countForDate(index, new Date(2021, 0, 1)), 1)
-        compare(EventIndex.countForDate(index, new Date(2025, 0, 1)), 0)
+        compare(EventIndex.countForDate(index, new Date(2025, 5, 15)), 1)
+        compare(ids(EventIndex.eventsForDate(index, new Date(2029, 5, 1))),
+                ["decade", "meeting"])
+        compare(EventIndex.countForDate(index, new Date(2029, 11, 31)), 1)
+        compare(EventIndex.countForDate(index, new Date(2030, 0, 1)), 0)
     }
 
     function test_empty_input() {
