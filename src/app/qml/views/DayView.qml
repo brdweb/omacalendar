@@ -6,12 +6,15 @@ import QtQuick.Controls
 import QtQuick.Layouts
 import OmaCalendar
 import "../components"
+import "../EventIndex.js" as EventIndex
 
 Item {
     id: root
 
     property date currentDate: new Date()
     property var events: []
+    // Built once per events change; day cells look their events up here.
+    readonly property var eventIndex: EventIndex.build(events)
     property string selectedEventReference: ""
     property int firstHour: 0
     property int lastHour: 24
@@ -302,14 +305,11 @@ Item {
     }
 
     function filterEvents(allDayValue) {
-        const start = new Date(currentDate.getFullYear(), currentDate.getMonth(),
-                               currentDate.getDate())
-        const end = new Date(start.getFullYear(), start.getMonth(), start.getDate() + 1)
+        const entries = EventIndex.entriesForDate(eventIndex, currentDate)
         const matches = []
-        for (let index = 0; index < events.length; ++index) {
-            const value = events[index]
-            if (value.allDay === allDayValue && eventStart(value) < end
-                    && eventEnd(value) > start
+        for (let index = 0; index < entries.length; ++index) {
+            const value = entries[index].event
+            if (value.allDay === allDayValue
                     && (allDayValue || !spansCalendarDays(value)))
                 matches.push(value)
         }
@@ -317,16 +317,12 @@ Item {
     }
 
     function filterSpanningEvents() {
-        const start = new Date(currentDate.getFullYear(), currentDate.getMonth(),
-                               currentDate.getDate())
-        const end = addDays(start, 1)
+        const entries = EventIndex.entriesForDate(eventIndex, currentDate)
         const matches = []
-        for (let index = 0; index < events.length; ++index) {
-            const value = events[index]
-            if (!value.allDay && spansCalendarDays(value)
-                    && eventStart(value) < end && eventEnd(value) > start) {
+        for (let index = 0; index < entries.length; ++index) {
+            const value = entries[index].event
+            if (!value.allDay && spansCalendarDays(value))
                 matches.push(value)
-            }
         }
         return matches
     }

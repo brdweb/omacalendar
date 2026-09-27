@@ -4,17 +4,16 @@ import QtQuick.Controls
 import QtQuick.Layouts
 import OmaCalendar
 import "../components"
+import "../EventIndex.js" as EventIndex
 
 ScrollView {
     id: root
 
     property date currentDate: new Date()
     property var events: []
-    // Per-day counts are built once per events change. Each cell then does a
-    // lookup instead of scanning every event, and a multi-day event counts on
-    // every day it covers, matching the month and agenda views.
-    readonly property var dayCounts: countEventsByDay(events,
-                                                      currentDate.getFullYear())
+    // Built once per events change; each cell looks its count up, and a
+    // multi-day event counts on every day it covers, as in the month view.
+    readonly property var eventIndex: EventIndex.build(events)
     signal dateSelected(date dateValue)
     signal monthSelected(date dateValue)
 
@@ -103,52 +102,8 @@ ScrollView {
         }
     }
 
-    function eventStart(value) {
-        return value.allDay ? new Date(value.startDate + "T00:00:00")
-                            : new Date(value.displayStartLocal || value.startUtc)
-    }
-
-    function eventEnd(value) {
-        return value.allDay ? new Date(value.endDate + "T00:00:00")
-                            : new Date(value.displayEndLocal || value.endUtc)
-    }
-
-    function dayKey(dateValue) {
-        return dateValue.getFullYear() * 10000 + (dateValue.getMonth() + 1) * 100
-                + dateValue.getDate()
-    }
-
-    function countEventsByDay(values, year) {
-        const counts = ({})
-        // Month grids show a few days of the neighbouring months, so count a
-        // margin around the year while bounding very long events.
-        const windowStart = new Date(year - 1, 11, 1)
-        const windowEnd = new Date(year + 1, 1, 1)
-        for (let index = 0; index < values.length; ++index) {
-            const start = eventStart(values[index])
-            let end = eventEnd(values[index])
-            if (isNaN(start.getTime()) || isNaN(end.getTime()))
-                continue
-            // End boundaries are exclusive; a zero-length event still marks
-            // the day it starts on.
-            if (end <= start)
-                end = new Date(start.getTime() + 1)
-            if (end <= windowStart || start >= windowEnd)
-                continue
-            const first = start > windowStart ? start : windowStart
-            const last = end < windowEnd ? end : windowEnd
-            let day = new Date(first.getFullYear(), first.getMonth(), first.getDate())
-            while (day < last) {
-                const key = dayKey(day)
-                counts[key] = (counts[key] || 0) + 1
-                day = new Date(day.getFullYear(), day.getMonth(), day.getDate() + 1)
-            }
-        }
-        return counts
-    }
-
     function eventCount(dateValue) {
-        return dayCounts[dayKey(dateValue)] || 0
+        return EventIndex.countForDate(eventIndex, dateValue)
     }
 
     function sameDate(first, second) {
