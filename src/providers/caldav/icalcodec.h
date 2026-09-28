@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QByteArray>
+#include <QJsonArray>
 #include <QList>
 #include <QString>
 
@@ -64,6 +65,13 @@ class ICalendarCodec final {
       const QString& productId = QStringLiteral("-//OmaCalendar//OmaCalendar 0.1//EN"));
   [[nodiscard]] static ICalendarSerializeResult stampClientMutationId(
       const QByteArray& payload, const QString& clientMutationId);
+  // Lists the URI attachments (ATTACH) of the VEVENT with this UID and
+  // recurrence id, falling back to the series master, as {title, url,
+  // mimeType} objects. Inline binary attachments and non-HTTP(S) URIs are
+  // skipped.
+  [[nodiscard]] static QJsonArray attachments(const QByteArray& payload,
+                                              const QString& uid,
+                                              const QString& recurrenceId = {});
   [[nodiscard]] static bool hasClientMutationId(const QByteArray& payload,
                                                 const QString& clientMutationId);
 };

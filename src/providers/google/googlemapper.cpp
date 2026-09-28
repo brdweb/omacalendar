@@ -579,6 +579,24 @@ QJsonObject eventToGoogleJson(const Event& event) {
 
   result.insert(QStringLiteral("attendees"), sanitizedAttendees(event.attendees));
 
+  // A requested conference replaces nothing: it is only sent while the event
+  // has no conference of its own, so an existing meeting is never swapped.
+  if (!event.conferenceRequestId.isEmpty() && event.conferenceUrl.isEmpty() &&
+      raw.value(QStringLiteral("conferenceData"))
+          .toObject()
+          .value(QStringLiteral("entryPoints"))
+          .toArray()
+          .isEmpty()) {
+    result.insert(
+        QStringLiteral("conferenceData"),
+        QJsonObject{
+            {QStringLiteral("createRequest"),
+             QJsonObject{{QStringLiteral("requestId"), event.conferenceRequestId},
+                         {QStringLiteral("conferenceSolutionKey"),
+                          QJsonObject{{QStringLiteral("type"),
+                                       QStringLiteral("hangoutsMeet")}}}}}});
+  }
+
   const QJsonArray reminders = sanitizedReminderOverrides(event.reminders);
   QJsonObject reminderBody;
   const QJsonObject rawReminders = raw.value(QStringLiteral("reminders")).toObject();
@@ -607,6 +625,28 @@ QJsonObject eventToGoogleJson(const Event& event) {
   }
   result.insert(QStringLiteral("reminders"), reminderBody);
 
+  return result;
+}
+
+QJsonArray attachmentsFromGoogleJson(const QJsonObject& resource) {
+  QJsonArray result;
+  for (const QJsonValue& value :
+       resource.value(QStringLiteral("attachments")).toArray()) {
+    const QJsonObject attachment = value.toObject();
+    const QString url = safeWebUrl(stringValue(attachment, "fileUrl"), true);
+    if (url.isEmpty()) {
+      continue;
+    }
+    QString title = stringValue(attachment, "title").trimmed();
+    if (title.isEmpty()) {
+      title = QUrl(url).fileName();
+    }
+    result.append(QJsonObject{
+        {QStringLiteral("title"), title.isEmpty() ? url : title},
+        {QStringLiteral("url"), url},
+        {QStringLiteral("mimeType"), stringValue(attachment, "mimeType")},
+    });
+  }
   return result;
 }
 

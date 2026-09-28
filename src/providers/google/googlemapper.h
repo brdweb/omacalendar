@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QDateTime>
+#include <QJsonArray>
 #include <QJsonObject>
 #include <QString>
 
@@ -38,6 +39,10 @@ namespace omacalendar::google {
 // RSVP-only edit of the provider snapshot. An empty result means the normal
 // full editable-field patch must be used.
 [[nodiscard]] QJsonObject rsvpPatchForGoogleEvent(const Event& event);
+
+// Lists an Events resource's attachments as {title, url, mimeType} objects.
+// Only HTTPS links are kept, so the result is safe to offer for opening.
+[[nodiscard]] QJsonArray attachmentsFromGoogleJson(const QJsonObject& resource);
 
 // Stable helpers used by the sync layer and mapper tests.
 [[nodiscard]] QString rfc3339(const QDateTime& dateTime, const QString& timeZone = {});

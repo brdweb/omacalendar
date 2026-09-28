@@ -11,6 +11,7 @@
 #include <QVariantList>
 #include <QVariantMap>
 #include <functional>
+#include <memory>
 
 #include "ipc/ipcclient.h"
 #include "presentationlistmodel.h"
@@ -28,6 +29,8 @@ class AppController final : public QObject {
   // (email -> [{start, end}]), pending (emails), unavailable ([{email,
   // reason}])}. Remote answers arrive after the request and merge in.
   Q_PROPERTY(QVariantMap freeBusy READ freeBusy NOTIFY freeBusyChanged)
+  Q_PROPERTY(
+      QVariantMap eventAttachments READ eventAttachments NOTIFY eventAttachmentsChanged)
   Q_PROPERTY(bool canUndo READ canUndo NOTIFY historyChanged)
   Q_PROPERTY(bool canRedo READ canRedo NOTIFY historyChanged)
   // Account id -> {state, message, errorCode, lastSyncAt} for provider-backed
@@ -79,6 +82,7 @@ class AppController final : public QObject {
   [[nodiscard]] QString lastError() const;
   [[nodiscard]] QVariantList accounts() const;
   [[nodiscard]] QVariantMap freeBusy() const;
+  [[nodiscard]] QVariantMap eventAttachments() const;
   [[nodiscard]] bool canUndo() const;
   [[nodiscard]] bool canRedo() const;
   [[nodiscard]] QVariantMap accountSyncStates() const;
@@ -144,6 +148,11 @@ class AppController final : public QObject {
                                    const QString& destinationCalendarId,
                                    const QString& duplicatePolicy);
   Q_INVOKABLE void exportIcs(const QVariantMap& scope, const QUrl& destination);
+  // Saves the events of a date range as a print-ready PDF. options holds
+  // firstDate and lastDate (yyyy-MM-dd), layout ("list" or "month"),
+  // includeDetails, visibleOnly (only the calendars shown now), title,
+  // timePattern (a QTime format) and firstDayOfWeek (1 = Monday … 7).
+  Q_INVOKABLE void exportPdf(const QVariantMap& options, const QUrl& destination);
   Q_INVOKABLE void connectGoogle(const QString& displayName = {});
   Q_INVOKABLE void connectGoogleConfigured(const QString& displayName = {});
   Q_INVOKABLE void connectGoogleWithClientId(const QString& clientId,
@@ -185,6 +194,10 @@ class AppController final : public QObject {
       const QVariantList& busy, const QString& earliest, int durationMinutes,
       int workDayStartHour, int workDayEndHour, const QString& horizon,
       const QString& timeZoneId = {}) const;
+  // Fetches one event's attachments into eventAttachments as {eventId,
+  // recurrenceId, attachments: [{title, url, mimeType}]}.
+  Q_INVOKABLE void loadEventAttachments(const QString& eventId,
+                                        const QString& recurrenceId = {});
   Q_INVOKABLE void undo();
   Q_INVOKABLE void redo();
   Q_INVOKABLE void undoLastMutation();
@@ -235,6 +248,7 @@ class AppController final : public QObject {
   void eventSaved();
   void historyChanged();
   void freeBusyChanged();
+  void eventAttachmentsChanged();
   // After an interactive change the user may want to take back, for the
   // undo toast; undoable says whether undo() would reverse it.
   void mutationCompleted(const QString& message, bool undoable);
@@ -243,6 +257,7 @@ class AppController final : public QObject {
   void icsImportPreviewReady(const QVariantMap& preview);
   void icsImportCompleted(const QVariantMap& result);
   void icsExportCompleted(const QVariantMap& result);
+  void pdfExportCompleted(const QString& path, int pages);
   void openEventRequested(const QVariantMap& event);
   void createEventRequested(const QVariantMap& draft);
   void openIcsImportRequested(const QUrl& file);
@@ -374,6 +389,10 @@ class AppController final : public QObject {
   QUrl m_pendingDeepLink;
   bool m_interactive = false;
   QVariantMap m_freeBusy;
+  QVariantMap m_eventAttachments;
+  struct PdfExportJob;
+  void requestPdfPage(const std::shared_ptr<PdfExportJob>& job, int offset, int limit);
+  void finishPdfExport(const std::shared_ptr<PdfExportJob>& job);
   [[nodiscard]] QTimeZone displayTimeZone() const;
   QTimer m_interactiveRenewal;
   void sendInteractive();

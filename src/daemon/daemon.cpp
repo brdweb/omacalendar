@@ -19,6 +19,7 @@
 #include "core/widgeteventquery.h"
 #include "daemon/invitationclassification.h"
 #include "providers/caldav/icalcodec.h"
+#include "providers/google/googlemapper.h"
 
 namespace {
 
@@ -98,6 +99,57 @@ QString recurrenceReference(const QJsonObject& params) {
   const QJsonObject reference = params.value(QStringLiteral("eventRef")).toObject();
   return reference.value(QStringLiteral("recurrenceId"))
       .toString(reference.value(QStringLiteral("occurrenceId")).toString());
+}
+
+// Attachments are read from the provider payload on demand rather than
+// stored, so events.list stays lean and nothing new is persisted.
+QJsonArray eventAttachments(const omacalendar::Event& source,
+                            const QString& recurrenceId) {
+  if (source.rawPayload.isEmpty()) {
+    return {};
+  }
+  if (source.rawFormat == QStringLiteral("google-json")) {
+    return omacalendar::google::attachmentsFromGoogleJson(
+        QJsonDocument::fromJson(source.rawPayload.toUtf8()).object());
+  }
+  if (source.rawFormat == QStringLiteral("text/calendar")) {
+    return omacalendar::caldav::ICalendarCodec::attachments(source.rawPayload.toUtf8(),
+                                                            source.uid, recurrenceId);
+  }
+  return {};
+}
+
+// Google calendars list the conference types they accept; only those that
+// accept Google Meet can have one created.
+bool calendarAcceptsGoogleMeet(const omacalendar::Calendar& calendar) {
+  return calendar.capabilities.value(QStringLiteral("provider")).toString() ==
+             QStringLiteral("google") &&
+         calendar.capabilities.value(QStringLiteral("conferenceProperties"))
+             .toObject()
+             .value(QStringLiteral("allowedConferenceSolutionTypes"))
+             .toArray()
+             .contains(QStringLiteral("hangoutsMeet"));
+}
+
+// Turns a client's addConference flag into a provider conference request.
+// Clients can never supply the request id themselves.
+bool applyConferenceRequest(const QJsonObject& payload,
+                            const omacalendar::Calendar& calendar,
+                            omacalendar::Event* event, omacalendar::ipc::Error* error) {
+  event->conferenceRequestId.clear();
+  if (!payload.value(QStringLiteral("addConference")).toBool(false) ||
+      !event->conferenceUrl.isEmpty()) {
+    return true;
+  }
+  if (!calendarAcceptsGoogleMeet(calendar)) {
+    if (error != nullptr) {
+      *error = {QStringLiteral("conference_unsupported"),
+                QStringLiteral("This calendar cannot create Google Meet links"), false};
+    }
+    return false;
+  }
+  event->conferenceRequestId = omacalendar::newUuid();
+  return true;
 }
 
 QString normalizedRecurrenceScope(QString scope) {
@@ -1664,6 +1716,13 @@ QJsonValue Daemon::onEventsGet(const QJsonObject& params, ipc::Error* error) {
     }
     return {};
   }
+  const auto detailed = [&event](const Event& value) {
+    QJsonObject result = toJson(value);
+    const Event& source = value.rawPayload.isEmpty() ? event : value;
+    result.insert(QStringLiteral("attachments"),
+                  eventAttachments(source, value.recurrenceId));
+    return result;
+  };
   QString requestedRecurrenceId =
       params.value(QStringLiteral("recurrenceId")).toString().trimmed();
   if (requestedRecurrenceId.isEmpty()) {
@@ -1708,7 +1767,7 @@ QJsonValue Daemon::onEventsGet(const QJsonObject& params, ipc::Error* error) {
           }
           return {};
         }
-        return toJson(candidate);
+        return detailed(candidate);
       }
     }
 
@@ -1733,7 +1792,7 @@ QJsonValue Daemon::onEventsGet(const QJsonObject& params, ipc::Error* error) {
         RecurrenceExpander::expand(series, anchor.addDays(-2), anchor.addDays(2), 1000);
     for (const Event& occurrence : expanded.occurrences) {
       if (matchesReference(occurrence)) {
-        return toJson(occurrence);
+        return detailed(occurrence);
       }
     }
     if (error != nullptr) {
@@ -1742,7 +1801,7 @@ QJsonValue Daemon::onEventsGet(const QJsonObject& params, ipc::Error* error) {
     }
     return {};
   }
-  return toJson(event);
+  return detailed(event);
 }
 
 QJsonValue Daemon::onEventsCreate(const QJsonObject& params, ipc::Error* error) {
@@ -1782,6 +1841,9 @@ QJsonValue Daemon::onEventsCreate(const QJsonObject& params, ipc::Error* error) 
       *error = {QStringLiteral("calendar_read_only"),
                 QStringLiteral("This calendar is read-only"), false};
     }
+    return {};
+  }
+  if (!applyConferenceRequest(eventPayload, targetCalendar, &event, error)) {
     return {};
   }
   const QString timeError = validateEventTimes(event);
@@ -2064,6 +2126,9 @@ QJsonValue Daemon::onEventsUpdate(const QJsonObject& params, ipc::Error* error) 
       *error = {QStringLiteral("calendar_read_only"),
                 QStringLiteral("This calendar is read-only"), false};
     }
+    return {};
+  }
+  if (!applyConferenceRequest(eventPayload, targetCalendar, &event, error)) {
     return {};
   }
   const QString timeError = validateEventTimes(event);

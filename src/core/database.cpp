@@ -3242,7 +3242,7 @@ bool Database::saveLocalEvent(Event* event, const OutboxOperation operation,
 
   QSqlQuery pendingQuery(m_database);
   pendingQuery.prepare(QStringLiteral(R"SQL(
-    SELECT id, operation FROM outbox
+    SELECT id, operation, payload_json FROM outbox
     WHERE event_id=? AND state IN ('pending','retry_wait')
     ORDER BY id DESC LIMIT 1
   )SQL"));
@@ -3277,6 +3277,15 @@ bool Database::saveLocalEvent(Event* event, const OutboxOperation operation,
     }
     const OutboxOperation effectiveOperation =
         previous == OutboxOperation::Create ? OutboxOperation::Create : operation;
+    if (event->conferenceRequestId.isEmpty()) {
+      // A conference asked for by a still-queued write must survive later
+      // edits that are folded into the same outbox item.
+      event->conferenceRequestId =
+          QJsonDocument::fromJson(pendingQuery.value(2).toString().toUtf8())
+              .object()
+              .value(QStringLiteral("conferenceRequestId"))
+              .toString();
+    }
     QSqlQuery updateQuery(m_database);
     updateQuery.prepare(QStringLiteral(R"SQL(
       UPDATE outbox SET operation=?, state='pending', expected_revision=?,

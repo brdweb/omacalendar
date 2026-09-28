@@ -472,6 +472,9 @@ QJsonObject toStorageJson(const Event& event) {
   result.insert(QStringLiteral("etag"), event.etag);
   result.insert(QStringLiteral("rawPayload"), event.rawPayload);
   result.insert(QStringLiteral("rawFormat"), event.rawFormat);
+  if (!event.conferenceRequestId.isEmpty()) {
+    result.insert(QStringLiteral("conferenceRequestId"), event.conferenceRequestId);
+  }
   return result;
 }
 
@@ -629,6 +632,7 @@ Event eventFromJson(const QJsonObject& object) {
   event.reminders = object.value(QStringLiteral("reminders")).toArray();
   event.rawPayload = jsonString(object, "rawPayload");
   event.rawFormat = jsonString(object, "rawFormat");
+  event.conferenceRequestId = jsonString(object, "conferenceRequestId");
   event.dirty = object.value(QStringLiteral("dirty")).toBool();
   event.deleted = object.value(QStringLiteral("deleted")).toBool();
   event.localRevision = object.value(QStringLiteral("localRevision")).toInteger();

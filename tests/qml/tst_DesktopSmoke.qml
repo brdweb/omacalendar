@@ -33,6 +33,7 @@ Item {
     Component { id: conflictMergeFactory; Components.ConflictMergeDialog {} }
     Component { id: icsImportFactory; Components.IcsImportDialog {} }
     Component { id: icsExportFactory; Components.IcsExportDialog {} }
+    Component { id: pdfExportFactory; Components.PdfExportDialog {} }
     // Dialogs hand focus back through the window's content item, so the
     // focus test runs in an ApplicationWindow like the app's.
     Component {
@@ -717,6 +718,75 @@ Item {
             compare(findChild(content, "eventStartTime").text, "11:00")
             compare(findChild(content, "eventEndTime").text, "12:00", "the length is kept")
             App.freeBusy = ({})
+        }
+
+        function test_editor_offers_meet_and_lists_attachments() {
+            const editor = createTemporaryObject(editorFactory, scene)
+            const saveSpy = createTemporaryObject(signalSpyFactory, testCase, {
+                "target": editor, "signalName": "saveRequested"})
+            const content = scene.Window.window.contentItem
+            editor.openExisting(Object.assign({}, representativeEvents()[0],
+                                              {"calendarId": "calendar-google",
+                                               "attendees": []}))
+            tryCompare(editor, "opened", true)
+            compare(App.lastAttachmentLookup.eventId, "event-timed",
+                    "opening an event asks for its attachments")
+            const meet = findChild(content, "addMeetCheckBox")
+            verify(meet.visible, "a Google calendar that accepts Meet offers it")
+            App.eventAttachments = {"eventId": "event-timed", "recurrenceId": "",
+                "attachments": [{"title": "Agenda.pdf",
+                                 "url": "https://files.example.com/agenda.pdf"}]}
+            compare(editor.attachments.length, 1)
+            meet.checked = true
+            editor.submit()
+            compare(editor.validationError, "")
+            compare(saveSpy.count, 1)
+            compare(saveSpy.signalArguments[0][0].addConference, true)
+
+            editor.openExisting(Object.assign({}, representativeEvents()[0], {
+                "calendarId": "calendar-google",
+                "conferenceUrl": "https://meet.google.com/abc-defg-hij"}))
+            tryCompare(editor, "opened", true)
+            verify(!meet.visible, "an event with a conference is not offered another")
+            verify(findChild(content, "joinConferenceButton").visible)
+
+            editor.openExisting(Object.assign({}, representativeEvents()[0],
+                                              {"attendees": []}))
+            tryCompare(editor, "opened", true)
+            verify(!meet.visible, "a local calendar cannot create Meet links")
+            compare(editor.attachments.length, 0,
+                    "an answer for a different lookup is not shown")
+            editor.submit()
+            verify(!("addConference" in saveSpy.signalArguments[1][0]))
+            editor.close()
+        }
+
+        function test_pdf_dialog_checks_the_range() {
+            const dialog = createTemporaryObject(pdfExportFactory, scene)
+            const chosen = createTemporaryObject(signalSpyFactory, testCase, {
+                "target": dialog, "signalName": "optionsChosen"})
+            dialog.openFor({"first": new Date(2026, 8, 1), "last": new Date(2026, 8, 30)},
+                           "month")
+            tryCompare(dialog, "opened", true)
+            const content = scene.Window.window.contentItem
+            compare(findChild(content, "pdfFirstDate").text, "2026-09-01")
+            compare(findChild(content, "pdfLayout").currentIndex, 1)
+            verify(!findChild(content, "pdfIncludeDetails").enabled,
+                   "a month grid has no room for details")
+            findChild(content, "pdfChooseDestination").clicked()
+            compare(chosen.count, 1)
+            const options = chosen.signalArguments[0][0]
+            compare(options.layout, "month")
+            compare(options.lastDate, "2026-09-30")
+            compare(options.visibleOnly, true)
+
+            findChild(content, "pdfLastDate").text = "2026-08-01"
+            findChild(content, "pdfChooseDestination").clicked()
+            compare(chosen.count, 1, "a backwards range is refused")
+            verify(dialog.validationError.length > 0)
+            findChild(content, "pdfLastDate").text = "2027-12-31"
+            verify(dialog.chosenOptions() === null, "more than a year is refused")
+            dialog.close()
         }
 
         function test_undo_toast_offers_undo_only_when_possible() {

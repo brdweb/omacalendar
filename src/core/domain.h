@@ -105,6 +105,9 @@ struct Event {
   QJsonArray reminders;
   QString rawPayload;
   QString rawFormat;
+  // Set by the daemon when the user asks for a new conference (Google Meet).
+  // It travels only in outbox payloads and is never stored on the event row.
+  QString conferenceRequestId;
   bool dirty = false;
   bool deleted = false;
   qint64 localRevision = 0;

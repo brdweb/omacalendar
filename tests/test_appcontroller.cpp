@@ -352,6 +352,7 @@ class AppControllerTest final : public QObject {
   void failedUndoStaysAvailable();
   void guestOnlySearchReachesTheDaemon();
   void freeBusyAnswersMergeAndFindASlot();
+  void pdfExportValidatesItsRequest();
 
  private:
   QTemporaryDir m_xdgRoot;
@@ -555,6 +556,34 @@ void AppControllerTest::freshPreferencesDefaultToGenericNotifications() {
   QCOMPARE(
       controller.preferences().value(QStringLiteral("notificationPrivacy")).toString(),
       QStringLiteral("generic"));
+}
+
+void AppControllerTest::pdfExportValidatesItsRequest() {
+  AppController controller;
+  const QVariantMap options{{QStringLiteral("firstDate"), QStringLiteral("2026-09-28")},
+                            {QStringLiteral("lastDate"), QStringLiteral("2026-10-04")}};
+  controller.exportPdf(options, QUrl());
+  QCOMPARE(controller.lastError(),
+           QStringLiteral("Choose a local destination for the PDF"));
+  const QUrl destination =
+      QUrl::fromLocalFile(m_xdgRoot.filePath(QStringLiteral("print.pdf")));
+  QVariantMap backwards = options;
+  backwards.insert(QStringLiteral("lastDate"), QStringLiteral("2026-09-01"));
+  controller.exportPdf(backwards, destination);
+  QCOMPARE(controller.lastError(),
+           QStringLiteral("Choose a valid date range to print"));
+  QVariantMap tooLong = options;
+  tooLong.insert(QStringLiteral("firstDate"), QStringLiteral("2025-01-01"));
+  controller.exportPdf(tooLong, destination);
+  QCOMPARE(controller.lastError(), QStringLiteral("Print at most one year at a time"));
+  // A whole-year month grid is allowed: it widens to whole months first.
+  QVariantMap year{{QStringLiteral("firstDate"), QStringLiteral("2026-01-15")},
+                   {QStringLiteral("lastDate"), QStringLiteral("2026-12-10")},
+                   {QStringLiteral("layout"), QStringLiteral("month")}};
+  controller.exportPdf(year, destination);
+  QCOMPARE(controller.lastError(),
+           QStringLiteral("Connect to the calendar service to print"));
+  QVERIFY(!QFile::exists(destination.toLocalFile()));
 }
 
 void AppControllerTest::browserGoogleFlowRejectsEmptyClientId() {

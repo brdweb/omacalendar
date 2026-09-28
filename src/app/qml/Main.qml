@@ -62,6 +62,7 @@ ApplicationWindow {
     property var pendingMoveEvent: ({})
     property var pendingMoveOptions: ({})
     property var pendingExportScope: ({})
+    property var pendingPdfOptions: ({})
     property string pendingGoogleDisplayName: ""
     // Timeline scroll positions survive switching away from a view; negative
     // lets the view choose (the current time today, else the work day).
@@ -287,6 +288,14 @@ ApplicationWindow {
             StatusBadge {
                 text: App.connected ? (App.busy ? qsTr("Syncing") : qsTr("Connected")) : qsTr("Offline")
                 tone: App.connected ? (App.busy ? "info" : "success") : "danger"
+            }
+
+            AppButton {
+                objectName: "printButton"
+                text: qsTr("Print")
+                quiet: true
+                toolTipText: qsTr("Save this period as a PDF  Ctrl+P")
+                onClicked: window.openPrint()
             }
 
             AppButton {
@@ -864,6 +873,33 @@ ApplicationWindow {
         }
     }
 
+    PdfExportDialog {
+        id: pdfExportDialog
+        onOptionsChosen: options => {
+            const title = window.printTitle()
+            window.pendingPdfOptions = Object.assign({}, options, {
+                "title": title,
+                "timePattern": Theme.timePattern(String(window.preferences.timeFormat
+                                                        || "system")),
+                "firstDayOfWeek": window.firstDayOfWeek === 0 ? 7 : window.firstDayOfWeek
+            })
+            pdfExportDialog.close()
+            exportPdfFileDialog.open()
+        }
+    }
+
+    FileDialog {
+        id: exportPdfFileDialog
+        title: qsTr("Save PDF")
+        fileMode: FileDialog.SaveFile
+        defaultSuffix: "pdf"
+        nameFilters: [qsTr("PDF files (*.pdf)")]
+        onAccepted: {
+            if (!window.callApp("exportPdf", [window.pendingPdfOptions, selectedFile]))
+                window.announce(qsTr("Saving as PDF needs a newer OmaCalendar"))
+        }
+    }
+
     FileDialog {
         id: exportIcsFileDialog
         title: qsTr("Save iCalendar export")
@@ -886,6 +922,11 @@ ApplicationWindow {
         }
     }
 
+    Shortcut {
+        sequence: "Ctrl+P"
+        context: Qt.ApplicationShortcut
+        onActivated: window.openPrint()
+    }
     Shortcut {
         sequence: "Ctrl+N"
         context: Qt.ApplicationShortcut
@@ -1410,6 +1451,42 @@ ApplicationWindow {
         const requestedRange = DateRange.includeMonthGrid(
                                  start, end, visibleMonth, firstDayOfWeek)
         App.loadRange(requestedRange.start, requestedRange.end)
+    }
+
+    // The days the current view shows, and the layout that prints it best.
+    function printRange() {
+        const anchor = App.selectedDate
+        if (currentView === "day")
+            return {"first": anchor, "last": anchor, "layout": "list"}
+        if (currentView === "week") {
+            const first = startOfWeek(anchor)
+            return {"first": first,
+                    "last": new Date(first.getFullYear(), first.getMonth(),
+                                     first.getDate() + 6),
+                    "layout": "list"}
+        }
+        if (currentView === "agenda")
+            return {"first": anchor,
+                    "last": new Date(anchor.getFullYear(), anchor.getMonth(),
+                                     anchor.getDate() + Math.min(agendaDayCount, 366) - 1),
+                    "layout": "list"}
+        if (currentView === "year")
+            return {"first": new Date(anchor.getFullYear(), 0, 1),
+                    "last": new Date(anchor.getFullYear(), 11, 31), "layout": "month"}
+        return {"first": new Date(visibleMonth.getFullYear(), visibleMonth.getMonth(), 1),
+                "last": new Date(visibleMonth.getFullYear(), visibleMonth.getMonth() + 1, 0),
+                "layout": "month"}
+    }
+
+    function openPrint() {
+        const range = printRange()
+        pdfExportDialog.openFor(range, range.layout)
+    }
+
+    function printTitle() {
+        const setIndex = calendarSetIndex(activeCalendarSetId)
+        const calendarSet = setIndex >= 0 ? calendarSets[setIndex] : null
+        return calendarSet && calendarSet.name ? String(calendarSet.name) : "OmaCalendar"
     }
 
     function startOfWeek(dateValue) {

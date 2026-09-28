@@ -26,6 +26,11 @@ is started on demand by its systemd socket.
   **Accounts & settings**.
 - Search from the toolbar. Invitation actions and provider synchronization are
   processed in the background.
+- On a Google calendar, tick **Add Google Meet video conferencing** in the
+  event editor to create a video call. Attachments on an event are listed under
+  its notes and open in the browser.
+- **Print** (Ctrl+P) saves the current day, week, agenda or month as a PDF,
+  either as a list of events by day or as month grids.
 
 The optional Omarchy widget is installed separately from the
 [`omacalendar-widget`](https://github.com/brdweb/omacalendar-widget) repository.
