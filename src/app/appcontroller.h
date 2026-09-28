@@ -23,6 +23,8 @@ class AppController final : public QObject {
   Q_PROPERTY(QString statusText READ statusText NOTIFY statusTextChanged)
   Q_PROPERTY(QString lastError READ lastError NOTIFY lastErrorChanged)
   Q_PROPERTY(QVariantList accounts READ accounts NOTIFY accountsChanged)
+  Q_PROPERTY(bool canUndo READ canUndo NOTIFY historyChanged)
+  Q_PROPERTY(bool canRedo READ canRedo NOTIFY historyChanged)
   // Account id -> {state, message, errorCode, lastSyncAt} for provider-backed
   // accounts, from sync.statusChanged and sync.status.
   Q_PROPERTY(QVariantMap accountSyncStates READ accountSyncStates NOTIFY
@@ -71,6 +73,8 @@ class AppController final : public QObject {
   [[nodiscard]] QString statusText() const;
   [[nodiscard]] QString lastError() const;
   [[nodiscard]] QVariantList accounts() const;
+  [[nodiscard]] bool canUndo() const;
+  [[nodiscard]] bool canRedo() const;
   [[nodiscard]] QVariantMap accountSyncStates() const;
   [[nodiscard]] QVariantList calendars() const;
   [[nodiscard]] QVariantList events() const;
@@ -158,6 +162,13 @@ class AppController final : public QObject {
   Q_INVOKABLE void removeCalendarSet(const QString& calendarSetId);
   Q_INVOKABLE void activateCalendarSet(const QString& setId);
   Q_INVOKABLE void setCurrentView(const QString& view);
+  // Undo and redo walk a bounded history of event edits, creates and
+  // deletes. undoLastMutation is kept for older callers.
+  // While the window is active the daemon polls providers more often; the
+  // controller renews that before the daemon's lease runs out.
+  Q_INVOKABLE void setInteractive(bool interactive);
+  Q_INVOKABLE void undo();
+  Q_INVOKABLE void redo();
   Q_INVOKABLE void undoLastMutation();
   Q_INVOKABLE bool canOpenExternalEventUrl(const QString& value) const;
   Q_INVOKABLE void openExternalEventUrl(const QString& value);
@@ -166,6 +177,11 @@ class AppController final : public QObject {
   Q_INVOKABLE void previewDiagnostics();
   Q_INVOKABLE void handleDeepLink(const QUrl& url);
   Q_INVOKABLE void handleIcsImportFile(const QUrl& file);
+  // For a secondary time-zone gutter: each display-zone hour 0..24 of
+  // dateText as {minute, dayOffset} in zoneId, plus a short label and UTC
+  // offset for that day. Empty when either value is invalid.
+  Q_INVOKABLE [[nodiscard]] QVariantMap secondaryTimeLabels(
+      const QString& dateText, const QString& zoneId) const;
   Q_INVOKABLE QString wallTimeToUtc(const QString& dateText, const QString& timeText,
                                     const QString& timeZoneId) const;
   Q_INVOKABLE QString utcToWallTime(const QString& utcText,
@@ -199,6 +215,10 @@ class AppController final : public QObject {
   void selectedDateChanged();
   void googleOAuthConfiguredChanged();
   void eventSaved();
+  void historyChanged();
+  // After an interactive change the user may want to take back, for the
+  // undo toast; undoable says whether undo() would reverse it.
+  void mutationCompleted(const QString& message, bool undoable);
   void contactSuggestionsReady(const QString& prefix, const QVariantList& contacts);
   void accountSetupStarted();
   void icsImportPreviewReady(const QVariantMap& preview);
@@ -212,6 +232,23 @@ class AppController final : public QObject {
 
  private:
   using ResultHandler = std::function<void(const QJsonValue&)>;
+  // Where a mutation came from decides where its inverse is recorded.
+  enum class HistoryMode { Record, Undo, Redo };
+  // One reversible step: restore saves event with options, remove deletes
+  // event, and undelete replays a delete's undo token before it expires.
+  struct HistoryEntry {
+    enum class Kind { Restore, Remove, Undelete };
+    Kind kind = Kind::Restore;
+    QVariantMap event;
+    // For restore, the state being replaced, so the inverse does not depend
+    // on the cached events having refreshed.
+    QVariantMap previous;
+    QVariantMap options;
+    QString undoToken;
+    QDateTime expiresAt;
+    quint64 serial = 0;
+  };
+  static constexpr int kHistoryLimit = 20;
   // Returns true when it handled the error, which suppresses the generic
   // user-visible error message.
   using ErrorHandler = std::function<bool(const QJsonObject&)>;
@@ -234,6 +271,20 @@ class AppController final : public QObject {
   void scheduleRefresh(int parts);
   [[nodiscard]] static int refreshPartsForNotification(const QString& event);
   void loadPreferences();
+  void saveEventWithHistory(const QVariantMap& values,
+                            const QVariantMap& mutationOptions, HistoryMode mode,
+                            const QVariantMap& knownPrior = {});
+  void deleteEventWithHistory(const QString& eventId,
+                              const QVariantMap& mutationOptions, HistoryMode mode);
+  void undeleteWithHistory(const HistoryEntry& entry, HistoryMode mode);
+  void recordInverse(HistoryMode mode, const HistoryEntry& inverse);
+  void startHistoryStep(HistoryMode mode);
+  // The step in flight succeeded: drop its entry. Failure leaves the entry
+  // in place so the same undo or redo can be tried again.
+  void finishHistoryStep(HistoryMode mode);
+  void dropHistoryStep(HistoryMode mode);
+  [[nodiscard]] ErrorHandler historyFailureHandler(HistoryMode mode);
+  void applyHistoryEntry(const HistoryEntry& entry, HistoryMode mode);
   void setAccountSyncState(const QString& accountId, const QJsonObject& status);
   void refreshAccountSyncStates(bool icsOnly);
   void loadPreferencesIndividually();
@@ -302,11 +353,14 @@ class AppController final : public QObject {
   bool m_googleOAuthConfigured = false;
   QString m_activeCalendarSetId = QStringLiteral("all-calendars");
   QUrl m_pendingDeepLink;
-  QString m_lastMutationId;
-  QString m_lastUndoToken;
-  QString m_lastUndoKind;
-  QVariantMap m_lastUndoEvent;
-  QVariantMap m_lastUndoOptions;
+  bool m_interactive = false;
+  QTimer m_interactiveRenewal;
+  void sendInteractive();
+  quint64 m_historySerial = 0;
+  // The serial of the entry an undo or redo request is applying, or 0.
+  quint64 m_historyInFlight = 0;
+  QList<HistoryEntry> m_undoHistory;
+  QList<HistoryEntry> m_redoHistory;
 };
 
 }  // namespace omacalendar

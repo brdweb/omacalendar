@@ -871,6 +871,13 @@ bool CalDavSync::probeThisAndFuture(const QString& calendarId, QString* errorMes
   return true;
 }
 
+void CalDavSync::setPollInterval(const int intervalMs) {
+  // Changing the interval restarts the countdown, so only do it on a change.
+  if (intervalMs > 0 && intervalMs != m_pollTimer.interval()) {
+    m_pollTimer.setInterval(intervalMs);
+  }
+}
+
 void CalDavSync::syncAll() {
   QString error;
   const QList<Account> accounts = m_database->accounts(&error);

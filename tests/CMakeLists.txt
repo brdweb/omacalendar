@@ -69,6 +69,17 @@ target_link_libraries(omacalendar-providers-test
 )
 add_test(NAME providers_test COMMAND omacalendar-providers-test)
 
+add_executable(omacalendar-sync-activity-test
+  test_syncactivity.cpp
+)
+target_link_libraries(omacalendar-sync-activity-test
+  PRIVATE
+    Qt6::Test
+    Qt6::Core
+    omacalendar_sync
+)
+add_test(NAME sync_activity_test COMMAND omacalendar-sync-activity-test)
+
 add_executable(omacalendar-sync-coordinator-test
   test_synccoordinator.cpp
 )

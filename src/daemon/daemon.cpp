@@ -335,6 +335,7 @@ Daemon::Daemon(QObject* parent)
       m_caldav(&m_database, this),
       m_ics(&m_database, this),
       m_sync(&m_database, &m_google, &m_caldav, &m_ics, this),
+      m_activity({}, this),
       m_reminders(&m_database, this) {
   registerHandlers();
   connect(&m_google, &google::GoogleSync::authorizationUrlReady, this,
@@ -422,6 +423,13 @@ bool Daemon::start(QString* errorMessage, const qintptr socketDescriptor) {
   }
   m_reminders.start();
   m_sync.start();
+  connect(&m_activity, &SyncActivity::pollIntervalChanged, this,
+          [this](const int intervalMs) { m_sync.setPollInterval(intervalMs); });
+  connect(&m_activity, &SyncActivity::syncRequested, this, [this]() {
+    m_sync.syncAll();
+    m_ics.refreshAll(true);
+  });
+  m_activity.connectSystemSignals();
   return true;
 }
 
@@ -679,6 +687,10 @@ void Daemon::registerHandlers() {
   m_router.registerHandler(QStringLiteral("sync.status"),
                            [this](const QJsonObject& params, ipc::Error* error) {
                              return onSyncStatus(params, error);
+                           });
+  m_router.registerHandler(QStringLiteral("sync.setInteractive"),
+                           [this](const QJsonObject& params, ipc::Error* error) {
+                             return onSyncSetInteractive(params, error);
                            });
   m_router.registerHandler(QStringLiteral("sync.calendar"),
                            [this](const QJsonObject& params, ipc::Error* error) {
@@ -2296,10 +2308,20 @@ QJsonValue Daemon::onEventsUndo(const QJsonObject& params, ipc::Error* error) {
 
 QJsonValue Daemon::onEventsSearch(const QJsonObject& params, ipc::Error* error) {
   const QString query = params.value(QStringLiteral("query")).toString().trimmed();
-  if (query.isEmpty()) {
+  const QString attendee =
+      params.value(QStringLiteral("attendee")).toString().trimmed();
+  if (attendee.size() > 200) {
     if (error != nullptr) {
       *error = {QStringLiteral("invalid_params"),
-                QStringLiteral("A non-empty search query is required"), false};
+                QStringLiteral("attendee must be at most 200 characters"), false};
+    }
+    return {};
+  }
+  if (query.isEmpty() && attendee.isEmpty()) {
+    if (error != nullptr) {
+      *error = {QStringLiteral("invalid_params"),
+                QStringLiteral("A non-empty search query or attendee is required"),
+                false};
     }
     return {};
   }
@@ -2334,6 +2356,7 @@ QJsonValue Daemon::onEventsSearch(const QJsonObject& params, ipc::Error* error) 
   search.accountId = params.value(QStringLiteral("accountId")).toString().trimmed();
   search.invitationState =
       params.value(QStringLiteral("invitationState")).toString().trimmed();
+  search.attendee = attendee;
   search.limit = limit;
   search.offset = offset;
   QString dbError;
@@ -3495,6 +3518,21 @@ QJsonValue Daemon::onSyncStatus(const QJsonObject& params, ipc::Error*) const {
   QJsonObject result = m_sync.status();
   result.insert(QStringLiteral("ics"), m_ics.status());
   return result;
+}
+
+QJsonValue Daemon::onSyncSetInteractive(const QJsonObject& params, ipc::Error* error) {
+  if (!params.value(QStringLiteral("interactive")).isBool()) {
+    if (error != nullptr) {
+      *error = {QStringLiteral("invalid_params"),
+                QStringLiteral("interactive must be a boolean"), false};
+    }
+    return {};
+  }
+  m_activity.setInteractive(params.value(QStringLiteral("interactive")).toBool());
+  return QJsonObject{
+      {QStringLiteral("interactive"), m_activity.interactive()},
+      {QStringLiteral("pollIntervalSeconds"), m_activity.pollIntervalMs() / 1000},
+      {QStringLiteral("leaseSeconds"), SyncActivity::kInteractiveLeaseSeconds}};
 }
 
 QJsonValue Daemon::onSyncCalendar(const QJsonObject& params, ipc::Error* error) {

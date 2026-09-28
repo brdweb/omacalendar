@@ -1989,6 +1989,42 @@ class DatabaseTest final : public QObject {
     QCOMPARE(second.total, 2);
     QCOMPARE(second.events.size(), 1);
     QCOMPARE(second.events.front().id, QStringLiteral("search-older-valid"));
+
+    // Guests and organizers filter by address or name, with or without text,
+    // and LIKE wildcards in the filter are literal.
+    Event withGuest = makeRemoteEvent(calendar.id, QStringLiteral("search-guest"), 0);
+    withGuest.summary = QStringLiteral("Filtered needle planning");
+    withGuest.attendees = QJsonArray{
+        QJsonObject{{QStringLiteral("email"), QStringLiteral("sam_lee@example.com")},
+                    {QStringLiteral("displayName"), QStringLiteral("Sam Lee")}}};
+    withGuest.organizer =
+        QJsonObject{{QStringLiteral("email"), QStringLiteral("boss@corp.example")}};
+    QVERIFY2(db.applyRemoteEvent(withGuest, &error), qPrintable(error));
+    const auto guestSearch = [&db, &error](const QString& text,
+                                           const QString& attendee) {
+      EventSearchQuery query;
+      query.text = text;
+      query.attendee = attendee;
+      const EventSearchPage page = db.searchEvents(query, &error);
+      QStringList ids;
+      for (const Event& event : page.events) {
+        ids.append(event.id);
+      }
+      return ids;
+    };
+    QCOMPARE(guestSearch({}, QStringLiteral("SAM LEE")),
+             QStringList{QStringLiteral("search-guest")});
+    QVERIFY2(error.isEmpty(), qPrintable(error));
+    QCOMPARE(guestSearch({}, QStringLiteral("sam_")),
+             QStringList{QStringLiteral("search-guest")});
+    QVERIFY(guestSearch({}, QStringLiteral("sa_l")).isEmpty());
+    QVERIFY(guestSearch({}, QStringLiteral("%")).isEmpty());
+    QCOMPARE(guestSearch({}, QStringLiteral("boss@corp")),
+             QStringList{QStringLiteral("search-guest")});
+    QCOMPARE(guestSearch(QStringLiteral("Filtered needle"), QStringLiteral("sam")),
+             QStringList{QStringLiteral("search-guest")});
+    QVERIFY(guestSearch(QStringLiteral("unrelated"), QStringLiteral("sam")).isEmpty());
+    QVERIFY(guestSearch({}, {}).isEmpty());
   }
 
   void sameAccountMoveIsAtomicDurableAndRecoverable() {

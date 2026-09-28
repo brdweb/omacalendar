@@ -27,6 +27,8 @@ Item {
     property real pixelsPerHour: 62
     readonly property real rightGutter: 16
     property string timeFormat: "system"
+    // From App.secondaryTimeLabels: a second zone's time beside each hour.
+    property var secondaryTime: ({})
     property bool headerDragActive: false
     // A remembered vertical position from an earlier visit; negative opens at
     // the current time when today is shown, otherwise before the work day.
@@ -311,6 +313,35 @@ Item {
                 interactive: true
             }
 
+            // The second zone's name stays in view above the gutter.
+            Rectangle {
+                parent: weekFlick
+                visible: Boolean(root.secondaryTime.label)
+                x: 0
+                y: 0
+                z: 30
+                width: 58
+                height: secondaryCaption.implicitHeight + 6
+                color: Theme.background
+                Text {
+                    id: secondaryCaption
+                    objectName: "secondaryZoneCaption"
+                    anchors.centerIn: parent
+                    width: parent.width - 4
+                    textFormat: Text.PlainText
+                    text: String(root.secondaryTime.label || "")
+                    color: Theme.mutedText
+                    horizontalAlignment: Text.AlignHCenter
+                    elide: Text.ElideRight
+                    font.pixelSize: Theme.microFontSize - 1
+                    font.weight: Font.DemiBold
+                    HoverHandler { id: captionHover }
+                    ToolTip.visible: captionHover.hovered
+                    ToolTip.text: String(root.secondaryTime.label || "") + " ("
+                                  + String(root.secondaryTime.offsetLabel || "") + ")"
+                }
+            }
+
             WheelHandler {
                 acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
                 onWheel: event => {
@@ -341,6 +372,7 @@ Item {
                         width: weekTimeline.width
                         height: 1
                         Text {
+                            id: primaryHourLabel
                             textFormat: Text.PlainText
                             width: 50
                             anchors.right: hourRule.left
@@ -354,6 +386,19 @@ Item {
                             color: Theme.mutedText
                             horizontalAlignment: Text.AlignRight
                             font.pixelSize: Theme.microFontSize
+                        }
+                        Text {
+                            objectName: "secondaryHourLabel-" + hourMarker.index
+                            visible: text.length > 0
+                            textFormat: Text.PlainText
+                            width: 50
+                            anchors.right: primaryHourLabel.right
+                            anchors.top: primaryHourLabel.bottom
+                            text: hourMarker.index === 0 ? ""
+                                                       : root.secondaryHourText(root.firstHour + hourMarker.index)
+                            color: Theme.alpha(Theme.mutedText, 0.72)
+                            horizontalAlignment: Text.AlignRight
+                            font.pixelSize: Theme.microFontSize - 1
                         }
                         Rectangle {
                             id: hourRule
@@ -693,6 +738,29 @@ Item {
                 && operationState !== "pending" && operationState !== "sending"
                 && operationState !== "blocked" && operationState !== "retry_wait"
                 && operationState !== "failed" && operationState !== "error"
+    }
+
+    // The second zone's time at display-zone hour, with +1 or -1 when it
+    // falls on another day there.
+    function secondaryHourText(hour) {
+        const hours = secondaryTime.hours
+        if (!hours || !hours[hour])
+            return ""
+        const value = hours[hour]
+        // Compact enough for the gutter: no seconds, and "5:30am" not
+        // "5:30 AM".
+        const pattern = Theme.timePattern(timeFormat).replace(/:ss/, "")
+                .replace(/\s*(AP|ap|A|a)$/, "ap")
+        const text = Qt.formatTime(new Date(2000, 0, 1, Math.floor(value.minute / 60),
+                                            value.minute % 60), pattern)
+        return value.dayOffset > 0 ? text + " +1"
+                                   : value.dayOffset < 0 ? text + " −1" : text
+    }
+
+    // Scrolls so minute (of the display-zone day) sits an hour below the top.
+    function revealMinute(minute) {
+        weekFlick.contentY = Math.max(0, Math.min(weekFlick.contentHeight - weekFlick.height,
+                                                (minute / 60 - 1 - firstHour) * pixelsPerHour))
     }
 
     function hourPattern() {

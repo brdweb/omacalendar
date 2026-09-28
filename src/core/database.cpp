@@ -5130,6 +5130,33 @@ bool Database::snoozeReminderAt(const qint64 id, const int minutes,
   return bumpChangeRevision(errorMessage);
 }
 
+bool Database::snoozeReminderUntil(const qint64 id, const QDateTime& until,
+                                   const QDateTime& now, QString* errorMessage) {
+  if (!until.isValid() || until <= now || until > now.addDays(1)) {
+    if (errorMessage != nullptr) {
+      *errorMessage = QStringLiteral("Snooze must end within the next day");
+    }
+    return false;
+  }
+  QSqlQuery query(m_database);
+  query.prepare(QStringLiteral(R"SQL(
+    UPDATE reminder_jobs SET state='snoozed',snoozed_until=?,claimed_at='',
+      claim_token='',lease_expires_at='',delivered_at=''
+    WHERE id=? AND state<>'dismissed'
+  )SQL"));
+  query.addBindValue(isoUtc(until));
+  query.addBindValue(id);
+  if (!query.exec() || query.numRowsAffected() == 0) {
+    if (errorMessage != nullptr) {
+      *errorMessage = query.lastError().isValid()
+                          ? sqlError(query, QStringLiteral("snooze reminder"))
+                          : QStringLiteral("Reminder not found");
+    }
+    return false;
+  }
+  return bumpChangeRevision(errorMessage);
+}
+
 bool Database::dismissReminder(const qint64 id, QString* errorMessage) {
   QSqlQuery query(m_database);
   query.prepare(QStringLiteral(R"SQL(
@@ -5486,20 +5513,30 @@ EventSearchPage Database::searchEvents(const EventSearchQuery& search,
                                        QString* errorMessage) const {
   EventSearchPage result;
   const QString trimmed = search.text.trimmed();
-  if (trimmed.isEmpty()) {
+  const QString attendee = search.attendee.trimmed();
+  if (trimmed.isEmpty() && attendee.isEmpty()) {
     return result;
   }
-  QString match = trimmed;
-  match.replace(QLatin1Char('"'), QStringLiteral("\"\""));
-  match = QStringLiteral("\"") + match + QStringLiteral("\"");
-
-  QString filteredRows = QStringLiteral(R"SQL(
-    FROM events e
-    JOIN events_fts ON events_fts.event_id=e.id
-    JOIN calendars c ON c.id=e.calendar_id
-    WHERE e.deleted=0 AND events_fts MATCH ?
-  )SQL");
-  QVariantList bindings{match};
+  QString filteredRows;
+  QVariantList bindings;
+  if (trimmed.isEmpty()) {
+    filteredRows = QStringLiteral(R"SQL(
+      FROM events e
+      JOIN calendars c ON c.id=e.calendar_id
+      WHERE e.deleted=0
+    )SQL");
+  } else {
+    QString match = trimmed;
+    match.replace(QLatin1Char('"'), QStringLiteral("\"\""));
+    match = QStringLiteral("\"") + match + QStringLiteral("\"");
+    filteredRows = QStringLiteral(R"SQL(
+      FROM events e
+      JOIN events_fts ON events_fts.event_id=e.id
+      JOIN calendars c ON c.id=e.calendar_id
+      WHERE e.deleted=0 AND events_fts MATCH ?
+    )SQL");
+    bindings.append(match);
+  }
   if (!search.calendarIds.isEmpty()) {
     QStringList placeholders;
     placeholders.fill(QStringLiteral("?"), search.calendarIds.size());
@@ -5544,6 +5581,28 @@ EventSearchPage Database::searchEvents(const EventSearchQuery& search,
     normalizedState.remove(QLatin1Char('-'));
     normalizedState.remove(QLatin1Char('_'));
     bindings.append(normalizedState);
+  }
+  if (!attendee.isEmpty()) {
+    QString pattern = attendee;
+    pattern.replace(QLatin1Char('\\'), QStringLiteral("\\\\"));
+    pattern.replace(QLatin1Char('%'), QStringLiteral("\\%"));
+    pattern.replace(QLatin1Char('_'), QStringLiteral("\\_"));
+    pattern = QLatin1Char('%') + pattern + QLatin1Char('%');
+    filteredRows += QStringLiteral(R"SQL(
+      AND (EXISTS (
+             SELECT 1
+             FROM json_each(CASE WHEN json_valid(e.attendees_json)
+                                 THEN e.attendees_json ELSE '[]' END) guest
+             WHERE COALESCE(json_extract(guest.value,'$.email'),'') LIKE ? ESCAPE '\'
+                OR COALESCE(json_extract(guest.value,'$.displayName'),'') LIKE ? ESCAPE '\')
+           OR (json_valid(e.organizer_json) AND (
+             COALESCE(json_extract(e.organizer_json,'$.email'),'') LIKE ? ESCAPE '\'
+             OR COALESCE(json_extract(e.organizer_json,'$.displayName'),'')
+                LIKE ? ESCAPE '\')))
+    )SQL");
+    for (int index = 0; index < 4; ++index) {
+      bindings.append(pattern);
+    }
   }
 
   const auto bindFilters = [&bindings](QSqlQuery* query) {

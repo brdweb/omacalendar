@@ -153,6 +153,29 @@ Drawer {
         return result
     }
 
+    readonly property var secondaryTimeZoneOptions:
+        [{"text": qsTr("No second time zone"), "value": ""}].concat(timeZoneOptions.slice(1))
+
+    function secondaryTimeZoneIndex() {
+        const selected = String(preferences.secondaryTimeZone || "")
+        for (let index = 0; index < secondaryTimeZoneOptions.length; ++index) {
+            if (String(secondaryTimeZoneOptions[index].value) === selected)
+                return index
+        }
+        return 0
+    }
+
+    // Makes the second zone the display zone and the display zone (or the
+    // system zone it follows) the second one.
+    function swapTimeZones() {
+        const secondary = String(preferences.secondaryTimeZone || "")
+        if (secondary.length === 0)
+            return
+        const display = String(preferences.displayTimeZone || systemTimeZoneId)
+        preferenceChanged("displayTimeZone", secondary)
+        preferenceChanged("secondaryTimeZone", display)
+    }
+
     function displayTimeZoneIndex() {
         const selected = String(preferences.displayTimeZone || "")
         for (let index = 0; index < timeZoneOptions.length; ++index) {

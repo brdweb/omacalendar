@@ -46,6 +46,7 @@ class GoogleSync final : public Provider {
       QString* errorMessage = nullptr);
 
   [[nodiscard]] ProviderCapabilities capabilities() const override;
+  void setPollInterval(int intervalMs) override;
   void syncAll() override;
   void syncAccount(const QString& accountId) override;
   bool syncRange(const RangeSyncRequest& request,

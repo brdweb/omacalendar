@@ -1505,6 +1505,61 @@ def run_contacts_suggest_contract(harness: DaemonHarness) -> None:
         assert_ipc_error(harness.call_error("contacts.suggest", params), "invalid_params", context)
 
 
+def run_search_attendee_contract(harness: DaemonHarness) -> None:
+    harness.call(
+        "events.create",
+        {
+            "clientMutationId": "contract-search-attendee",
+            "recurrenceScope": "series",
+            "guestNotificationPolicy": "none",
+            "event": {
+                "calendarId": "local-default",
+                "summary": "Attendee filter check",
+                "startUtc": "2026-09-10T12:00:00Z",
+                "endUtc": "2026-09-10T13:00:00Z",
+                "startTimeZone": "UTC",
+                "endTimeZone": "UTC",
+                "allDay": False,
+                "timeKind": "zoned",
+                "attendees": [{"email": "guest.filter@example.com",
+                               "displayName": "Guest Filter"}],
+            },
+        },
+    )
+    result = harness.call("events.search", {"attendee": "guest.filter"})
+    summaries = [event.get("summary") for event in result.get("events", [])]
+    require(summaries == ["Attendee filter check"],
+            f"events.search by attendee alone returned {summaries}")
+    result = harness.call("events.search",
+                          {"query": "Attendee filter", "attendee": "someone.else"})
+    require(result.get("events") == [],
+            "events.search ignored the attendee filter alongside a query")
+    for params, context in (
+        ({}, "events.search without a query or attendee"),
+        ({"query": " ", "attendee": " "}, "events.search with blank query and attendee"),
+        ({"attendee": "x" * 201}, "events.search with an overlong attendee"),
+    ):
+        assert_ipc_error(harness.call_error("events.search", params), "invalid_params", context)
+
+
+def run_sync_set_interactive_contract(harness: DaemonHarness) -> None:
+    result = harness.call("sync.setInteractive", {"interactive": True})
+    require(result.get("interactive") is True, f"sync.setInteractive did not apply: {result}")
+    require(result.get("pollIntervalSeconds") == 120,
+            f"sync.setInteractive did not shorten polling: {result}")
+    require(isinstance(result.get("leaseSeconds"), int) and result["leaseSeconds"] > 0,
+            "sync.setInteractive did not report its lease")
+    result = harness.call("sync.setInteractive", {"interactive": False})
+    require(result.get("interactive") is False and result.get("pollIntervalSeconds") >= 300,
+            f"sync.setInteractive did not restore polling: {result}")
+    for params, context in (
+        ({}, "sync.setInteractive without a value"),
+        ({"interactive": "yes"}, "sync.setInteractive with a non-boolean"),
+    ):
+        assert_ipc_error(harness.call_error("sync.setInteractive", params), "invalid_params",
+                         context)
+
+
 def run_settings_get_many_contract(harness: DaemonHarness) -> None:
     harness.call("settings.set", {"key": "workDayStart", "value": 7})
     keys = ["workDayStart", "timeFormat", "defaultCalendarId"]
@@ -1701,6 +1756,8 @@ def run_contract(harness: DaemonHarness) -> None:
     require(database_revision == initial_revision, "database/API revision mismatch")
     run_settings_get_many_contract(harness)
     run_contacts_suggest_contract(harness)
+    run_search_attendee_contract(harness)
+    run_sync_set_interactive_contract(harness)
     for owned_directory in (
         harness.root / "data" / "omacalendar",
         harness.root / "config" / "omacalendar",

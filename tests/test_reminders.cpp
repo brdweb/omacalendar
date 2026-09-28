@@ -337,6 +337,68 @@ class ReminderSchedulerTest final : public QObject {
     QVERIFY(opened.isEmpty());
   }
 
+  void joinAndSnoozeUntilStartActions() {
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    Database database;
+    QString error;
+    QVERIFY2(database.open(directory.filePath(QStringLiteral("store.sqlite")), &error),
+             qPrintable(error));
+    QDateTime current(QDate(2027, 2, 3), QTime(9, 0), QTimeZone::UTC);
+    FakeNotificationBackend backend;
+    QList<QUrl> opened;
+    ReminderScheduler scheduler(
+        &database, &backend, [&current]() { return current; },
+        [&opened](const QUrl& url) {
+          opened.append(url);
+          return true;
+        });
+
+    const QDateTime start = current.addSecs(10 * 60);
+    Event meeting = reminderEvent(QStringLiteral("Standup"), start, QJsonArray{10});
+    meeting.conferenceUrl = QStringLiteral("https://meet.example.com/abc-defg");
+    QVERIFY2(database.saveLocalEvent(&meeting, OutboxOperation::Create, &error),
+             qPrintable(error));
+    scheduler.checkNow();
+    QCOMPARE(backend.sent.size(), 1);
+    const QStringList actions = backend.sent.constLast().actions;
+    QVERIFY(actions.contains(QStringLiteral("join")));
+    QVERIFY(actions.contains(QStringLiteral("snoozeStart")));
+    QCOMPARE(actions.size() % 2, 0);
+
+    backend.invoke(backend.ids.constLast(), QStringLiteral("join"));
+    QCOMPARE(opened, QList<QUrl>{QUrl(meeting.conferenceUrl)});
+
+    // A second notification for the same reminder, then "Remind at start".
+    current = current.addSecs(60);
+    QVERIFY2(database.snoozeReminderAt(reminderForEvent(&database, meeting.id).id, 5,
+                                       current.addSecs(-5 * 60), &error),
+             qPrintable(error));
+    scheduler.checkNow();
+    QCOMPARE(backend.sent.size(), 2);
+    backend.invoke(backend.ids.constLast(), QStringLiteral("snoozeStart"));
+    const ReminderJob snoozed = reminderForEvent(&database, meeting.id);
+    QCOMPARE(snoozed.state, QStringLiteral("snoozed"));
+    QCOMPARE(snoozed.snoozedUntil, start);
+
+    // No Join for a link that is not http(s), and no "at start" once the
+    // start is under a minute away.
+    Event unsafe = reminderEvent(QStringLiteral("Unsafe link"), current.addSecs(30),
+                                 QJsonArray{5});
+    unsafe.conferenceUrl = QStringLiteral("javascript:alert(1)");
+    QVERIFY2(database.saveLocalEvent(&unsafe, OutboxOperation::Create, &error),
+             qPrintable(error));
+    scheduler.checkNow();
+    const QStringList unsafeActions = backend.sent.constLast().actions;
+    QCOMPARE(backend.sent.constLast().summary, QStringLiteral("Calendar reminder"));
+    QVERIFY(!unsafeActions.contains(QStringLiteral("join")));
+    QVERIFY(!unsafeActions.contains(QStringLiteral("snoozeStart")));
+    QVERIFY(unsafeActions.contains(QStringLiteral("snooze5")));
+
+    QVERIFY(!database.snoozeReminderUntil(snoozed.id, current.addSecs(-1), current));
+    QVERIFY(!database.snoozeReminderUntil(snoozed.id, current.addDays(2), current));
+  }
+
   void snoozeIntervalsDismissAndOpenDeepLink() {
     QTemporaryDir directory;
     QVERIFY(directory.isValid());

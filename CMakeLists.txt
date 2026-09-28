@@ -161,6 +161,8 @@ add_library(omacalendar_sync STATIC
   src/sync/localprovider.h
   src/sync/retrypolicy.cpp
   src/sync/retrypolicy.h
+  src/sync/syncactivity.cpp
+  src/sync/syncactivity.h
   src/sync/synccoordinator.cpp
   src/sync/synccoordinator.h
   src/providers/caldav/caldavclient.cpp
@@ -188,6 +190,7 @@ target_link_libraries(omacalendar_sync
   PUBLIC
     omacalendar_core
     Qt6::Core
+    Qt6::DBus
     Qt6::Network
     Qt6::NetworkAuth
   PRIVATE

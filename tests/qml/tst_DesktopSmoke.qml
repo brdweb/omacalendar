@@ -27,6 +27,8 @@ Item {
     Component { id: activityFactory; Components.ActivityPanel {} }
     Component { id: sidebarFactory; Components.CalendarSidebar {} }
     Component { id: quickAddFactory; Components.QuickAddDialog {} }
+    Component { id: undoToastFactory; Components.UndoToast {} }
+    Component { id: eventRowFactory; Components.EventRow {} }
     Component { id: conflictMergeFactory; Components.ConflictMergeDialog {} }
     Component { id: icsImportFactory; Components.IcsImportDialog {} }
     Component { id: icsExportFactory; Components.IcsExportDialog {} }
@@ -556,6 +558,102 @@ Item {
                 tryVerify(function() { return anchor.activeFocus }, 1000,
                           "dialog " + index + " returns focus")
             }
+        }
+
+        function test_timelines_show_a_second_time_zone() {
+            const hours = []
+            for (let hour = 0; hour <= 24; ++hour)
+                hours.push({"minute": ((hour * 60 + 570) % 1440),
+                            "dayOffset": hour * 60 + 570 >= 1440 ? 1 : 0})
+            const secondary = {"label": "Kolkata", "offsetLabel": "UTC+5:30", "hours": hours}
+            const factories = [dayFactory, weekFactory]
+            for (let index = 0; index < factories.length; ++index) {
+                const view = createTemporaryObject(factories[index], scene, {
+                    "width": 900, "height": 700, "currentDate": scene.referenceDate,
+                    "events": [], "timeFormat": "24h", "visible": true})
+                wait(0)
+                const nine = findChild(view, "secondaryHourLabel-9")
+                verify(nine !== null)
+                verify(!nine.visible, "no second zone by default")
+                verify(!findChild(view, "secondaryZoneCaption").parent.visible)
+                view.secondaryTime = secondary
+                compare(nine.text, "18:30")
+                compare(findChild(view, "secondaryHourLabel-20").text, "05:30 +1")
+                verify(findChild(view, "secondaryZoneCaption").parent.visible)
+                compare(findChild(view, "secondaryZoneCaption").text, "Kolkata")
+            }
+        }
+
+        function test_search_results_highlight_and_jump() {
+            const event = Object.assign({}, representativeEvents()[0],
+                                        {"summary": "<b>Design</b> review & Needle"})
+            const row = createTemporaryObject(eventRowFactory, scene, {
+                "eventData": event, "width": 400, "highlight": "needle design",
+                "jumpOnClick": true})
+            const title = findChild(row, "eventRowTitle")
+            compare(title.textFormat, Text.StyledText)
+            verify(title.text.indexOf("&lt;b&gt;") >= 0, "provider markup stays literal")
+            verify(title.text.indexOf("&amp;") >= 0)
+            verify(title.text.indexOf("<b>Design</b>") >= 0, "matches keep their case")
+            verify(title.text.indexOf("<b>Needle</b>") >= 0)
+
+            const jumpSpy = createTemporaryObject(signalSpyFactory, testCase, {
+                "target": row, "signalName": "jumpRequested"})
+            const editSpy = createTemporaryObject(signalSpyFactory, testCase, {
+                "target": row, "signalName": "editRequested"})
+            row.clicked()
+            compare(jumpSpy.count, 0, "the jump waits to rule out a double-click")
+            tryCompare(jumpSpy, "count", 1, 2000, "a single click jumps to the result")
+            compare(editSpy.count, 0)
+            // A double-click's first click must not jump.
+            row.clicked()
+            row.doubleClicked()
+            compare(editSpy.count, 1, "a double-click edits it")
+            wait(Qt.styleHints.mouseDoubleClickInterval + 100)
+            compare(jumpSpy.count, 1, "and does not jump")
+
+            row.highlight = ""
+            compare(title.textFormat, Text.PlainText)
+            compare(title.text, "<b>Design</b> review & Needle")
+        }
+
+        function test_search_filters_cover_time_and_guests() {
+            const panel = createTemporaryObject(activityFactory, scene, {"connected": true})
+            panel.open()
+            tryCompare(panel, "opened", true)
+            const requests = createTemporaryObject(signalSpyFactory, testCase, {
+                "target": panel, "signalName": "searchRequested"})
+            findChild(panel, "searchGuestFilter").text = "sam@example.com"
+            const when = findChild(panel, "searchWhenFilter")
+            when.currentIndex = 1
+            panel.submitSearch()
+            let filters = requests.signalArguments[requests.count - 1][1]
+            compare(filters.attendee, "sam@example.com")
+            verify(filters.start !== undefined && filters.end === undefined, "upcoming")
+            when.currentIndex = 2
+            panel.submitSearch()
+            filters = requests.signalArguments[requests.count - 1][1]
+            verify(filters.end !== undefined && filters.start === undefined, "past")
+            verify(!findChild(panel, "offlineSearchNote").visible)
+            panel.connected = false
+            verify(findChild(panel, "offlineSearchNote").visible)
+        }
+
+        function test_undo_toast_offers_undo_only_when_possible() {
+            const toast = createTemporaryObject(undoToastFactory, scene)
+            verify(!toast.visible)
+            const undoSpy = createTemporaryObject(signalSpyFactory, testCase, {
+                "target": toast, "signalName": "undoRequested"})
+            toast.show("Event deleted", true)
+            verify(toast.visible)
+            compare(findChild(toast, "undoToastMessage").text, "Event deleted")
+            const action = findChild(toast, "undoToastAction")
+            verify(action.visible)
+            action.clicked()
+            compare(undoSpy.count, 1)
+            verify(!toast.shown, "undoing dismisses the toast")
+            toast.show("Event moved", false)
+            verify(!action.visible, "a change that cannot be undone offers no Undo")
         }
 
         function test_editor_keeps_recurrence_rules() {

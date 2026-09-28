@@ -57,6 +57,7 @@ qt_add_qml_module(omacalendar
     qml/components/StatusBadge.qml
     qml/components/TimelineCanvas.qml
     qml/components/TimelineEvent.qml
+    qml/components/UndoToast.qml
     qml/views/AgendaView.qml
     qml/views/DayView.qml
     qml/views/MonthView.qml

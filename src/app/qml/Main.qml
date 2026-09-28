@@ -104,10 +104,21 @@ ApplicationWindow {
     // Stored settings round-trip as JSON, so accept a boolean or its text.
     readonly property bool showWeekNumbers: preferences.showWeekNumbers === true
                                             || preferences.showWeekNumbers === "true"
+    // Recomputed per selected date and on any preference change (including
+    // the display zone), so offsets follow DST in both zones.
+    readonly property var secondaryTime: {
+        const zone = String(preferences.secondaryTimeZone || "")
+        if (zone.length === 0 || typeof App.secondaryTimeLabels !== "function")
+            return ({})
+        return App.secondaryTimeLabels(Qt.formatDate(App.selectedDate, "yyyy-MM-dd"), zone)
+    }
     readonly property int currentViewIndex: viewIndex(currentView)
     readonly property var latestSyncDate: latestCalendarSync()
 
     onWidthChanged: updateSidebarForWidth()
+    // Tells the daemon to poll providers more often while this window is in
+    // use.
+    onActiveChanged: window.callApp("setInteractive", [window.active])
 
     Timer {
         interval: 60000
@@ -446,6 +457,7 @@ ApplicationWindow {
                         }
 
                         Loader {
+                            id: dayLoader
                             active: viewStack.currentIndex === 1
                             sourceComponent: Component {
                                 DayView {
@@ -455,6 +467,7 @@ ApplicationWindow {
                                     events: window.visibleEvents
                                     selectedEventReference: window.selectedEventReference
                                     workDayStart: Number(window.preferences.workDayStart || 8)
+                                    secondaryTime: window.secondaryTime
                                     workDayEnd: Number(window.preferences.workDayEnd || 18)
                                     defaultDurationMinutes:
                                         Number(window.preferences.defaultDuration || 60)
@@ -476,6 +489,7 @@ ApplicationWindow {
                         }
 
                         Loader {
+                            id: weekLoader
                             active: viewStack.currentIndex === 2
                             sourceComponent: Component {
                                 WeekView {
@@ -487,6 +501,7 @@ ApplicationWindow {
                                     firstDayOfWeek: window.firstDayOfWeek
                                     showWeekNumbers: window.showWeekNumbers
                                     workDayStart: Number(window.preferences.workDayStart || 8)
+                                    secondaryTime: window.secondaryTime
                                     workDayEnd: Number(window.preferences.workDayEnd || 18)
                                     defaultDurationMinutes:
                                         Number(window.preferences.defaultDuration || 60)
@@ -571,6 +586,15 @@ ApplicationWindow {
                             anchors.centerIn: parent
                             running: true
                         }
+                    }
+
+                    UndoToast {
+                        id: undoToast
+                        anchors.horizontalCenter: parent.horizontalCenter
+                        anchors.bottom: parent.bottom
+                        anchors.bottomMargin: Theme.spacingLG
+                        z: 50
+                        onUndoRequested: window.callApp("undo", [])
                     }
                 }
 
@@ -700,6 +724,7 @@ ApplicationWindow {
         timeFormat: String(window.preferences.timeFormat || "system")
         onSearchRequested: (query, filters) => window.search(query, filters)
         onEventActivated: value => window.openEvent(value)
+        onResultJumpRequested: value => window.jumpToEvent(value)
         onInvitationResponseRequested: (invitationId, recurrenceId,
                                         expectedLocalRevision, response,
                                         recurrenceScope) =>
@@ -1018,8 +1043,30 @@ ApplicationWindow {
     }
     Shortcut {
         sequence: "Ctrl+Z"
+        enabled: !editor.opened
         context: Qt.ApplicationShortcut
-        onActivated: window.callApp("undoLastMutation", [])
+        onActivated: {
+            undoToast.dismiss()
+            window.callApp("undo", [])
+        }
+    }
+    Shortcut {
+        sequences: ["Ctrl+Shift+Z", "Ctrl+Y"]
+        enabled: !editor.opened
+        context: Qt.ApplicationShortcut
+        onActivated: {
+            undoToast.dismiss()
+            window.callApp("redo", [])
+        }
+    }
+    Connections {
+        target: App
+        ignoreUnknownSignals: true
+        function onMutationCompleted(message, undoable) {
+            undoToast.show(message, undoable)
+            window.announce(undoable ? qsTr("%1. Press Control Z to undo.").arg(message)
+                                     : message)
+        }
     }
 
     Connections {
@@ -1673,16 +1720,50 @@ ApplicationWindow {
                                  String(preferences.displayTimeZone || ""))
     }
 
+    // Shows a search result in the calendar: its day, selected, and on a
+    // timeline scrolled to it. The year view has no events, so it opens the day.
+    function jumpToEvent(value) {
+        const start = eventStart(value)
+        if (isNaN(start.getTime())) {
+            openEvent(value)
+            return
+        }
+        if (currentView === "year")
+            setView("day")
+        selectDate(start)
+        selectedEvent = value
+        activityPanel.close()
+        if (!value.allDay) {
+            const minute = start.getHours() * 60 + start.getMinutes()
+            const dayView = currentView === "day" ? dayLoader.item as DayView : null
+            const weekView = currentView === "week" ? weekLoader.item as WeekView : null
+            if (dayView)
+                dayView.revealMinute(minute)
+            else if (weekView)
+                weekView.revealMinute(minute)
+        }
+        announce(qsTr("Showing %1, %2").arg(value.summary || qsTr("Untitled event"))
+                 .arg(Qt.formatDate(start, "dddd, MMMM d")))
+    }
+
+    // The daemon searches every cached event; without it, only the events
+    // loaded for the current views can be searched here.
     function search(query, filters) {
         const normalized = String(query || "").trim().toLowerCase()
-        if (normalized.length === 0) {
+        const requestedFilters = filters || ({})
+        const attendee = String(requestedFilters.attendee || "").trim().toLowerCase()
+        if (normalized.length === 0 && attendee.length === 0) {
             localSearchResults = []
             activeSearchFilters = ({})
             return
         }
-        const result = []
-        const requestedFilters = filters || ({})
         activeSearchFilters = requestedFilters
+        if (App.connected) {
+            localSearchResults = []
+            callApp("searchEvents", [query, requestedFilters])
+            return
+        }
+        const result = []
         const calendarIds = requestedFilters.calendarIds || []
         const rangeStart = requestedFilters.start
                 ? new Date(requestedFilters.start) : null
@@ -1723,13 +1804,22 @@ ApplicationWindow {
             let haystack = String(value.summary || "") + "\n"
                     + String(value.description || "") + "\n"
                     + String(value.location || "")
-            for (let attendeeIndex = 0; attendeeIndex < attendees.length; ++attendeeIndex)
-                haystack += "\n" + String(attendees[attendeeIndex].email || "")
-            if (haystack.toLowerCase().indexOf(normalized) >= 0)
-                result.push(value)
+            let people = ""
+            for (let attendeeIndex = 0; attendeeIndex < attendees.length; ++attendeeIndex) {
+                people += "\n" + String(attendees[attendeeIndex].email || "")
+                        + "\n" + String(attendees[attendeeIndex].displayName || "")
+            }
+            if (value.organizer)
+                people += "\n" + String(value.organizer.email || "")
+                        + "\n" + String(value.organizer.displayName || "")
+            haystack += people
+            if (normalized.length > 0 && haystack.toLowerCase().indexOf(normalized) < 0)
+                continue
+            if (attendee.length > 0 && people.toLowerCase().indexOf(attendee) < 0)
+                continue
+            result.push(value)
         }
         localSearchResults = result
-        callApp("searchEvents", [query, filters || {}])
     }
 
     function openActivity(modeName) {

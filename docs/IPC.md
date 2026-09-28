@@ -198,6 +198,11 @@ and `limit`; `total` is the size of that filtered result. `events.search`
 similarly applies its text, date, calendar, account, and invitation-state
 filters before pagination.
 
+`events.search` additively accepts `attendee` (not yet released; the protocol
+minor remains 2.1): a case-insensitive substring, at most 200 characters, of a
+guest's or the organizer's address or display name. When `attendee` is given
+the `query` may be empty; a request with neither returns `invalid_params`.
+
 A same-account move preserves the canonical event identity. A cross-account or
 cross-provider move durably creates the destination first; deletion of the
 source depends on destination acknowledgment, so a destination failure cannot
@@ -219,10 +224,21 @@ deletion recreates the event with a new provider identity.
 
 ### Synchronization and ICS
 
-- `sync.all`, `sync.account`, `sync.calendar`, `sync.status`
+- `sync.all`, `sync.account`, `sync.calendar`, `sync.status`,
+  `sync.setInteractive`
 - `ics.refresh`, `ics.status`
 - `import.preview`, `import.commit`
 - `export.create`, `export.run`
+
+`sync.setInteractive` is additive and not yet released (the protocol minor
+remains 2.1). A desktop client sends `{"interactive": true}` while its window
+is active and `false` when it is not; it returns `interactive`,
+`pollIntervalSeconds` and `leaseSeconds`. Google and CalDAV poll every 2
+minutes while a client is interactive, every 5 minutes otherwise and every 10
+on battery power. "Interactive" lapses after `leaseSeconds` unless renewed, so
+a client that exits without saying so cannot keep polling fast. Independently,
+the daemon syncs right away (at most once a minute) after resuming from sleep
+or when NetworkManager reports full connectivity again.
 
 Import accepts bounded inline content, base64 content, or an absolute regular
 local path. Duplicate policies are `skip`, `copy`, and `replace`. Export scope

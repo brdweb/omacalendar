@@ -64,6 +64,13 @@ class FakeDaemon final : public QObject {
   void setConflicts(const QJsonArray& conflicts) { m_conflicts = conflicts; }
   void setContacts(const QJsonArray& contacts) { m_contacts = contacts; }
   void setAccounts(const QJsonArray& accounts) { m_accounts = accounts; }
+  // Answer this method with a revision conflict until cleared.
+  void setFailingMethod(const QString& method) { m_failingMethod = method; }
+  // Event mutations and sync.setInteractive requests received, oldest first,
+  // as {method, params}.
+  [[nodiscard]] QList<QPair<QString, QJsonObject>> mutations() const {
+    return m_mutations;
+  }
   void setSyncStatus(const QString& accountId, const QJsonObject& status) {
     m_syncStatuses.insert(accountId, status);
   }
@@ -154,6 +161,46 @@ class FakeDaemon final : public QObject {
         response.insert(QStringLiteral("result"),
                         QJsonObject{{QStringLiteral("items"), m_operations},
                                     {QStringLiteral("count"), m_operations.size()}});
+      } else if (!m_failingMethod.isEmpty() && method == m_failingMethod) {
+        m_mutations.append({method, params});
+        response.remove(QStringLiteral("result"));
+        response.insert(
+            QStringLiteral("error"),
+            QJsonObject{
+                {QStringLiteral("code"), QStringLiteral("conflict")},
+                {QStringLiteral("message"), QStringLiteral("The event changed")},
+                {QStringLiteral("retryable"), false}});
+      } else if (method == QStringLiteral("events.search")) {
+        m_mutations.append({method, params});
+        response.insert(QStringLiteral("result"),
+                        QJsonObject{{QStringLiteral("events"), QJsonArray{}}});
+      } else if (method == QStringLiteral("events.update") ||
+                 method == QStringLiteral("events.create")) {
+        m_mutations.append({method, params});
+        QJsonObject event = params.value(QStringLiteral("event")).toObject();
+        if (method == QStringLiteral("events.create")) {
+          event.insert(QStringLiteral("id"),
+                       QStringLiteral("created-%1").arg(m_mutations.size()));
+        }
+        event.insert(QStringLiteral("localRevision"), ++m_revision);
+        response.insert(QStringLiteral("result"),
+                        QJsonObject{{QStringLiteral("event"), event}});
+      } else if (method == QStringLiteral("events.remove")) {
+        m_mutations.append({method, params});
+        response.insert(
+            QStringLiteral("result"),
+            QJsonObject{{QStringLiteral("undoToken"),
+                         QStringLiteral("token-%1").arg(m_mutations.size())}});
+      } else if (method == QStringLiteral("sync.setInteractive")) {
+        m_mutations.append({method, params});
+      } else if (method == QStringLiteral("events.undo")) {
+        m_mutations.append({method, params});
+        response.insert(
+            QStringLiteral("result"),
+            QJsonObject{{QStringLiteral("undone"), true},
+                        {QStringLiteral("event"),
+                         QJsonObject{{QStringLiteral("id"), QStringLiteral("restored")},
+                                     {QStringLiteral("localRevision"), 70}}}});
       } else if (method == QStringLiteral("accounts.list")) {
         response.insert(QStringLiteral("result"),
                         QJsonObject{{QStringLiteral("accounts"), m_accounts}});
@@ -232,6 +279,9 @@ class FakeDaemon final : public QObject {
   QJsonArray m_conflicts;
   QJsonArray m_contacts;
   QJsonArray m_accounts;
+  QList<QPair<QString, QJsonObject>> m_mutations;
+  QString m_failingMethod;
+  int m_revision = 10;
   QHash<QString, QJsonObject> m_syncStatuses;
   QJsonArray m_calendars{
       QJsonObject{{QStringLiteral("id"), QStringLiteral("local-default")},
@@ -280,6 +330,11 @@ class AppControllerTest final : public QObject {
   void contactSuggestionsAreRelayed();
   void quickAddTextBecomesAnEditorDraft();
   void accountSyncStatesFollowTheDaemon();
+  void undoAndRedoWalkTheHistory();
+  void secondaryTimeLabelsFollowBothZones();
+  void windowActivityReachesTheDaemon();
+  void failedUndoStaysAvailable();
+  void guestOnlySearchReachesTheDaemon();
 
  private:
   QTemporaryDir m_xdgRoot;
@@ -912,8 +967,8 @@ void AppControllerTest::preferencesFallBackWithoutGetMany() {
   QTRY_VERIFY(controller.preferencesLoaded());
   QStringList methods = settledMethods(daemon);
   QCOMPARE(methods.count(QStringLiteral("settings.getMany")), 1);
-  // One fallback read per preference key, including showWeekNumbers.
-  QCOMPARE(methods.count(QStringLiteral("settings.get")), 11);
+  // One fallback read per preference key.
+  QCOMPARE(methods.count(QStringLiteral("settings.get")), 12);
   QCOMPARE(controller.preferences().value(QStringLiteral("timeFormat")).toString(),
            QStringLiteral("24h"));
   QVERIFY2(controller.lastError().isEmpty(), qPrintable(controller.lastError()));
@@ -923,7 +978,7 @@ void AppControllerTest::preferencesFallBackWithoutGetMany() {
   daemon.broadcast(QStringLiteral("calendars.changed"));
   methods = settledMethods(daemon);
   QCOMPARE(methods.count(QStringLiteral("settings.getMany")), 0);
-  QCOMPARE(methods.count(QStringLiteral("settings.get")), 11);
+  QCOMPARE(methods.count(QStringLiteral("settings.get")), 12);
 }
 
 void AppControllerTest::contactSuggestionsAreRelayed() {
@@ -1021,6 +1076,184 @@ void AppControllerTest::accountSyncStatesFollowTheDaemon() {
                .toString(),
            QStringLiteral("reauthorization_required"));
   QVERIFY(controller.statusText() != QStringLiteral("Calendar is up to date locally"));
+}
+
+void AppControllerTest::undoAndRedoWalkTheHistory() {
+  FakeDaemon daemon(1);
+  QVERIFY(daemon.listen());
+  AppController controller;
+  controller.loadRange(QDate(2026, 9, 1), QDate(2026, 10, 1));
+  QTRY_COMPARE(controller.events().size(), 1);
+  QVERIFY(!controller.canUndo());
+  QSignalSpy completed(&controller, &AppController::mutationCompleted);
+  const auto last = [&daemon]() { return daemon.mutations().last(); };
+  const auto mutationCount = [&daemon]() { return daemon.mutations().size(); };
+
+  // An edit is undone by saving the prior state over the new revision and
+  // redone by saving the edit again.
+  QVariantMap edited = controller.events().first().toMap();
+  const QString eventId = edited.value(QStringLiteral("id")).toString();
+  const QString original = edited.value(QStringLiteral("summary")).toString();
+  edited.insert(QStringLiteral("summary"), QStringLiteral("Renamed"));
+  edited.insert(QStringLiteral("localRevision"), 3);
+  controller.saveEvent(edited, {});
+  QTRY_VERIFY(controller.canUndo());
+  QCOMPARE(completed.count(), 1);
+  QCOMPARE(completed.first().at(1).toBool(), true);
+
+  controller.undo();
+  QTRY_COMPARE(mutationCount(), 2);
+  QCOMPARE(last().first, QStringLiteral("events.update"));
+  QCOMPARE(last().second.value("event").toObject().value("summary").toString(),
+           original);
+  QCOMPARE(last().second.value("expectedLocalRevision").toInt(), 11);
+  QTRY_VERIFY(controller.canRedo());
+  QVERIFY(!controller.canUndo());
+  QCOMPARE(completed.count(), 1);
+
+  controller.redo();
+  QTRY_COMPARE(mutationCount(), 3);
+  QCOMPARE(last().second.value("event").toObject().value("summary").toString(),
+           QStringLiteral("Renamed"));
+  QCOMPARE(last().second.value("expectedLocalRevision").toInt(), 12);
+  QTRY_VERIFY(controller.canUndo());
+  QVERIFY(!controller.canRedo());
+
+  // A delete is undone with the daemon's token and redone by deleting the
+  // restored event.
+  controller.requestDeleteEvent(eventId, {});
+  QTRY_COMPARE(mutationCount(), 4);
+  QTRY_COMPARE(completed.count(), 2);
+  QCOMPARE(completed.last().at(0).toString(), QStringLiteral("Event deleted"));
+  controller.undo();
+  QTRY_COMPARE(mutationCount(), 5);
+  QCOMPARE(last().first, QStringLiteral("events.undo"));
+  QCOMPARE(last().second.value("undoToken").toString(), QStringLiteral("token-4"));
+  QTRY_VERIFY(controller.canRedo());
+  controller.redo();
+  QTRY_COMPARE(mutationCount(), 6);
+  QCOMPARE(last().first, QStringLiteral("events.remove"));
+  QCOMPARE(last().second.value("eventRef").toObject().value("eventId").toString(),
+           QStringLiteral("restored"));
+  QCOMPARE(last().second.value("expectedLocalRevision").toInt(), 70);
+  // One step at a time: the next undo waits for this redo to finish.
+  QTRY_VERIFY(!controller.canRedo());
+
+  // A new change drops the redo steps; undoing a create deletes it.
+  controller.undo();
+  QTRY_COMPARE(mutationCount(), 7);
+  QTRY_VERIFY(controller.canRedo());
+  controller.saveEvent({{QStringLiteral("calendarId"), QStringLiteral("local-default")},
+                        {QStringLiteral("summary"), QStringLiteral("New")}},
+                       {});
+  QTRY_COMPARE(mutationCount(), 8);
+  QTRY_VERIFY(!controller.canRedo());
+  controller.undo();
+  QTRY_COMPARE(mutationCount(), 9);
+  QCOMPARE(last().first, QStringLiteral("events.remove"));
+  QCOMPARE(last().second.value("eventRef").toObject().value("eventId").toString(),
+           QStringLiteral("created-8"));
+}
+
+void AppControllerTest::secondaryTimeLabelsFollowBothZones() {
+  FakeDaemon daemon(0);
+  daemon.setStoredSetting(QStringLiteral("displayTimeZone"),
+                          QStringLiteral("America/New_York"));
+  QVERIFY(daemon.listen());
+  AppController controller;
+  QTRY_VERIFY(controller.preferencesLoaded());
+  const auto hour = [](const QVariantMap& labels, const int index) {
+    return labels.value(QStringLiteral("hours")).toList().at(index).toMap();
+  };
+
+  // New York moves its clocks on March 8, 2026 and London on March 29, so
+  // 09:00 in New York is 14:00 in London before the 8th and 13:00 after.
+  const QVariantMap winter = controller.secondaryTimeLabels(
+      QStringLiteral("2026-03-02"), QStringLiteral("Europe/London"));
+  QCOMPARE(hour(winter, 9).value(QStringLiteral("minute")).toInt(), 14 * 60);
+  const QVariantMap between = controller.secondaryTimeLabels(
+      QStringLiteral("2026-03-09"), QStringLiteral("Europe/London"));
+  QCOMPARE(hour(between, 9).value(QStringLiteral("minute")).toInt(), 13 * 60);
+  QCOMPARE(between.value(QStringLiteral("label")).toString(), QStringLiteral("London"));
+
+  // Half-hour offsets keep their minutes, and late hours fall on the next
+  // day there.
+  const QVariantMap kolkata = controller.secondaryTimeLabels(
+      QStringLiteral("2026-09-28"), QStringLiteral("Asia/Kolkata"));
+  QCOMPARE(kolkata.value(QStringLiteral("hours")).toList().size(), 25);
+  QCOMPARE(hour(kolkata, 9).value(QStringLiteral("minute")).toInt(), 18 * 60 + 30);
+  QCOMPARE(hour(kolkata, 9).value(QStringLiteral("dayOffset")).toInt(), 0);
+  QCOMPARE(hour(kolkata, 20).value(QStringLiteral("minute")).toInt(), 5 * 60 + 30);
+  QCOMPARE(hour(kolkata, 20).value(QStringLiteral("dayOffset")).toInt(), 1);
+  QCOMPARE(kolkata.value(QStringLiteral("offsetLabel")).toString(),
+           QStringLiteral("UTC+5:30"));
+
+  QVERIFY(controller
+              .secondaryTimeLabels(QStringLiteral("2026-09-28"),
+                                   QStringLiteral("Not/AZone"))
+              .isEmpty());
+}
+
+void AppControllerTest::windowActivityReachesTheDaemon() {
+  FakeDaemon daemon(0);
+  QVERIFY(daemon.listen());
+  AppController controller;
+  QTRY_VERIFY(controller.connected());
+  const auto interactiveRequests = [&daemon]() {
+    QList<bool> values;
+    for (const auto& request : daemon.mutations()) {
+      if (request.first == QStringLiteral("sync.setInteractive")) {
+        values.append(request.second.value(QStringLiteral("interactive")).toBool());
+      }
+    }
+    return values;
+  };
+  controller.setInteractive(true);
+  QTRY_COMPARE(interactiveRequests(), QList<bool>{true});
+  // Only changes are sent; the renewal timer repeats "true" later.
+  controller.setInteractive(true);
+  controller.setInteractive(false);
+  QTRY_COMPARE(interactiveRequests(), (QList<bool>{true, false}));
+}
+
+void AppControllerTest::failedUndoStaysAvailable() {
+  FakeDaemon daemon(1);
+  QVERIFY(daemon.listen());
+  AppController controller;
+  controller.loadRange(QDate(2026, 9, 1), QDate(2026, 10, 1));
+  QTRY_COMPARE(controller.events().size(), 1);
+  QVariantMap edited = controller.events().first().toMap();
+  edited.insert(QStringLiteral("summary"), QStringLiteral("Renamed"));
+  edited.insert(QStringLiteral("localRevision"), 3);
+  controller.saveEvent(edited, {});
+  QTRY_VERIFY(controller.canUndo());
+
+  // A rejected undo leaves the step in place to try again.
+  daemon.setFailingMethod(QStringLiteral("events.update"));
+  controller.undo();
+  QTRY_COMPARE(daemon.mutations().size(), 2);
+  QTRY_VERIFY(!controller.lastError().isEmpty());
+  QVERIFY(controller.canUndo());
+  QVERIFY(!controller.canRedo());
+
+  daemon.setFailingMethod({});
+  controller.undo();
+  QTRY_COMPARE(daemon.mutations().size(), 3);
+  QTRY_VERIFY(controller.canRedo());
+  QVERIFY(!controller.canUndo());
+}
+
+void AppControllerTest::guestOnlySearchReachesTheDaemon() {
+  FakeDaemon daemon(0);
+  QVERIFY(daemon.listen());
+  AppController controller;
+  QTRY_VERIFY(controller.connected());
+  controller.searchEvents(QString(),
+                          {{QStringLiteral("attendee"), QStringLiteral("sam")}});
+  QTRY_COMPARE(daemon.mutations().size(), 1);
+  QCOMPARE(daemon.mutations().first().first, QStringLiteral("events.search"));
+  QCOMPARE(daemon.mutations().first().second.value("attendee").toString(),
+           QStringLiteral("sam"));
 }
 
 #include "test_appcontroller.moc"

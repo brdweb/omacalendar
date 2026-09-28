@@ -34,6 +34,8 @@ Drawer {
 
     signal searchRequested(string query, var filters)
     signal eventActivated(var eventData)
+    // A search result was chosen: show it in the calendar.
+    signal resultJumpRequested(var eventData)
     signal invitationResponseRequested(string invitationId, string recurrenceId,
                                         var expectedLocalRevision, string response,
                                         string recurrenceScope)
@@ -141,6 +143,7 @@ Drawer {
 
                     AppTextField {
                         id: searchField
+                        objectName: "searchField"
                         Layout.fillWidth: true
                         placeholderText: qsTr("Search events, people, notes, locations…")
                         accessibleName: qsTr("Search all events")
@@ -194,6 +197,34 @@ Drawer {
                     }
                     RowLayout {
                         Layout.fillWidth: true
+                        AppComboBox {
+                            id: searchWhenFilter
+                            objectName: "searchWhenFilter"
+                            Layout.fillWidth: true
+                            model: [
+                                {"text": qsTr("Any time"), "value": ""},
+                                {"text": qsTr("Upcoming"), "value": "upcoming"},
+                                {"text": qsTr("Past"), "value": "past"},
+                                {"text": qsTr("Date range"), "value": "range"}
+                            ]
+                            textRole: "text"
+                            valueRole: "value"
+                            Accessible.name: qsTr("Search time filter")
+                            onActivated: root.submitSearch()
+                        }
+                        AppTextField {
+                            id: searchGuestFilter
+                            objectName: "searchGuestFilter"
+                            Layout.fillWidth: true
+                            placeholderText: qsTr("Guest or organizer")
+                            accessibleName: qsTr("Search by guest or organizer")
+                            onTextEdited: searchDelay.restart()
+                            onAccepted: root.submitSearch()
+                        }
+                    }
+                    RowLayout {
+                        Layout.fillWidth: true
+                        visible: searchWhenFilter.currentValue === "range"
                         AppTextField {
                             id: searchStartDate
                             Layout.fillWidth: true
@@ -208,6 +239,16 @@ Drawer {
                             accessibleName: qsTr("Search end date")
                             onAccepted: root.submitSearch()
                         }
+                    }
+                    Text {
+                        objectName: "offlineSearchNote"
+                        visible: !root.connected
+                        Layout.fillWidth: true
+                        textFormat: Text.PlainText
+                        text: qsTr("Offline: searching only the events already loaded.")
+                        color: Theme.warning
+                        font.pixelSize: Theme.microFontSize
+                        wrapMode: Text.Wrap
                     }
 
                     ListView {
@@ -225,6 +266,12 @@ Drawer {
                             eventData: modelData
                             showDate: true
                             timeFormat: root.timeFormat
+                            highlight: searchField.text
+                            jumpOnClick: true
+                            ToolTip.visible: hovered && !generatedInstance
+                            ToolTip.delay: 600
+                            ToolTip.text: qsTr("Click to show in the calendar, double-click to edit")
+                            onJumpRequested: value => root.resultJumpRequested(value)
                             onEditRequested: value => root.eventActivated(value)
                         }
                         EmptyState {
@@ -233,9 +280,11 @@ Drawer {
                             width: Math.min(300, parent.width - 24)
                             iconText: "⌕"
                             title: searchField.text.trim().length === 0
+                                   && searchGuestFilter.text.trim().length === 0
                                    ? qsTr("Search every calendar")
                                    : qsTr("No matching events")
                             description: searchField.text.trim().length === 0
+                                         && searchGuestFilter.text.trim().length === 0
                                          ? qsTr("Results include titles, people, notes, and locations.")
                                          : qsTr("Try fewer words or a different spelling.")
                         }
@@ -778,13 +827,22 @@ Drawer {
             result.accountId = String(searchAccountFilter.currentValue)
         if (searchInvitationFilter.currentValue)
             result.invitationState = String(searchInvitationFilter.currentValue)
-        const start = new Date(searchStartDate.text.trim() + "T00:00:00")
-        if (searchStartDate.text.trim() && !isNaN(start.getTime()))
-            result.start = start.toISOString()
-        const end = new Date(searchEndDate.text.trim() + "T00:00:00")
-        if (searchEndDate.text.trim() && !isNaN(end.getTime())) {
-            end.setDate(end.getDate() + 1)
-            result.end = end.toISOString()
+        if (searchGuestFilter.text.trim().length > 0)
+            result.attendee = searchGuestFilter.text.trim()
+        const when = searchWhenFilter.currentValue
+        if (when === "upcoming") {
+            result.start = new Date().toISOString()
+        } else if (when === "past") {
+            result.end = new Date().toISOString()
+        } else if (when === "range") {
+            const start = new Date(searchStartDate.text.trim() + "T00:00:00")
+            if (searchStartDate.text.trim() && !isNaN(start.getTime()))
+                result.start = start.toISOString()
+            const end = new Date(searchEndDate.text.trim() + "T00:00:00")
+            if (searchEndDate.text.trim() && !isNaN(end.getTime())) {
+                end.setDate(end.getDate() + 1)
+                result.end = end.toISOString()
+            }
         }
         return result
     }

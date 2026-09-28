@@ -57,6 +57,9 @@ struct EventSearchQuery {
   QDateTime endUtc;
   QString accountId;
   QString invitationState;
+  // Case-insensitive substring of a guest's or the organizer's address or
+  // name. With it set, text may be empty.
+  QString attendee;
   int limit = 100;
   int offset = 0;
 };
@@ -275,6 +278,10 @@ class Database final {
   bool snoozeReminder(qint64 id, int minutes, QString* errorMessage = nullptr);
   bool snoozeReminderAt(qint64 id, int minutes, const QDateTime& now,
                         QString* errorMessage = nullptr);
+  // Snoozes until an absolute time, such as the event's start: later than
+  // now and at most a day away.
+  bool snoozeReminderUntil(qint64 id, const QDateTime& until, const QDateTime& now,
+                           QString* errorMessage = nullptr);
   bool dismissReminder(qint64 id, QString* errorMessage = nullptr);
   // Dismisses due pending jobs on muted calendars and long-overdue jobs whose
   // occurrences have started or passed. Jobs for still-upcoming occurrences
