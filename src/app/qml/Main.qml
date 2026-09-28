@@ -63,6 +63,12 @@ ApplicationWindow {
     property var pendingMoveOptions: ({})
     property var pendingExportScope: ({})
     property string pendingGoogleDisplayName: ""
+    // Timeline scroll positions survive switching away from a view; negative
+    // lets the view choose (the current time today, else the work day).
+    property real dayScrollY: -1
+    property real weekScrollY: -1
+    // Days the agenda lists; it grows as the user scrolls past the end.
+    property int agendaDayCount: 31
 
     readonly property var decoratedEvents: decorateEvents(App.events)
     readonly property var visibleEvents: filterVisibleEvents(decoratedEvents)
@@ -411,6 +417,8 @@ ApplicationWindow {
                             sourceComponent: Component {
                                 AgendaView {
                                     currentDate: App.selectedDate
+                                    dayCount: window.agendaDayCount
+                                    onMoreDaysRequested: window.extendAgenda()
                                     events: window.visibleEvents
                                     selectedEventReference: window.selectedEventReference
                                     timeFormat: String(window.preferences.timeFormat || "system")
@@ -426,6 +434,8 @@ ApplicationWindow {
                             sourceComponent: Component {
                                 DayView {
                                     currentDate: App.selectedDate
+                                    savedScrollY: window.dayScrollY
+                                    onScrollPositionChanged: contentY => window.dayScrollY = contentY
                                     events: window.visibleEvents
                                     selectedEventReference: window.selectedEventReference
                                     workDayStart: Number(window.preferences.workDayStart || 8)
@@ -454,6 +464,8 @@ ApplicationWindow {
                             sourceComponent: Component {
                                 WeekView {
                                     currentDate: App.selectedDate
+                                    savedScrollY: window.weekScrollY
+                                    onScrollPositionChanged: contentY => window.weekScrollY = contentY
                                     events: window.visibleEvents
                                     selectedEventReference: window.selectedEventReference
                                     firstDayOfWeek: window.firstDayOfWeek
@@ -1199,11 +1211,20 @@ ApplicationWindow {
         loadRangeFor(dateValue, currentView)
     }
 
+    function extendAgenda() {
+        // Bounded so a runaway scroll cannot request an unbounded range.
+        if (agendaDayCount >= 366)
+            return
+        agendaDayCount += 31
+        loadRangeFor(App.selectedDate, "agenda")
+    }
+
     function setView(viewName) {
         currentView = viewName
         let anchorDate = App.selectedDate
         if (viewName === "agenda") {
             anchorDate = new Date()
+            agendaDayCount = 31
             App.setSelectedDate(anchorDate)
             visibleMonth = new Date(anchorDate.getFullYear(),
                                     anchorDate.getMonth(), 1)
@@ -1228,7 +1249,7 @@ ApplicationWindow {
             start = new Date(anchorDate.getFullYear(), anchorDate.getMonth(),
                              anchorDate.getDate() - 7)
             end = new Date(anchorDate.getFullYear(), anchorDate.getMonth(),
-                           anchorDate.getDate() + 45)
+                           anchorDate.getDate() + agendaDayCount + 14)
         } else if (viewName === "year") {
             start = new Date(anchorDate.getFullYear(), 0, 1)
             end = new Date(anchorDate.getFullYear(), 11, 31)

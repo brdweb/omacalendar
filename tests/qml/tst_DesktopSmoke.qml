@@ -25,6 +25,11 @@ Item {
     Component { id: activityFactory; Components.ActivityPanel {} }
     Component { id: settingsFactory; Components.AccountSettingsDrawer {} }
 
+    Component {
+        id: signalSpyFactory
+        SignalSpy {}
+    }
+
     SignalSpy {
         id: activationSpy
         signalName: "activated"
@@ -303,6 +308,37 @@ Item {
                     wait(0)
                 }
             }
+        }
+
+        function test_agenda_grows_and_timelines_restore_scroll() {
+            const profile = viewportProfiles()[0]
+            const agenda = createView(agendaFactory, profile, representativeEvents())
+            const list = findChild(agenda, "agendaList")
+            verify(list !== null, "agenda list exists")
+            compare(list.count, 31)
+            const moreSpy = createTemporaryObject(signalSpyFactory, testCase, {
+                "target": agenda, "signalName": "moreDaysRequested"})
+            list.positionViewAtEnd()
+            tryVerify(function() { return moreSpy.count > 0 },
+                      2000, "scrolling to the end asks for more days")
+
+            const day = createTemporaryObject(dayFactory, scene, {
+                "width": profile.width, "height": profile.height,
+                "currentDate": scene.referenceDate, "events": [],
+                "savedScrollY": 420, "visible": true})
+            wait(0)
+            compare(findChild(day, "dayTimelineFlick").contentY, 420)
+            const week = createTemporaryObject(weekFactory, scene, {
+                "width": profile.width, "height": profile.height,
+                "currentDate": scene.referenceDate, "events": [],
+                "savedScrollY": 300, "visible": true})
+            wait(0)
+            compare(findChild(week, "weekTimelineScroll").contentY, 300)
+            // Without a saved position, a day that is not today opens an hour
+            // before the work day.
+            const fresh = createView(dayFactory, profile, [])
+            compare(findChild(fresh, "dayTimelineFlick").contentY,
+                    (fresh.workDayStart - 1) * fresh.pixelsPerHour)
         }
 
         function test_provider_markup_remains_literal() {

@@ -26,6 +26,10 @@ Item {
     readonly property real rightGutter: 16
     property string timeFormat: "system"
     property bool headerDragActive: false
+    // A remembered vertical position from an earlier visit; negative opens at
+    // the current time when today is shown, otherwise before the work day.
+    property real savedScrollY: -1
+    signal scrollPositionChanged(real contentY)
     signal eventActivated(var eventData)
     signal dateSelected(date dateValue)
     signal createRequested(date dateValue, int startMinute, int durationMinutes)
@@ -34,6 +38,15 @@ Item {
     signal eventDateChanged(var eventData, date dateValue)
 
     readonly property date weekStart: startOfWeek(currentDate)
+
+    function initialScrollY() {
+        if (savedScrollY >= 0)
+            return savedScrollY
+        const now = new Date()
+        const shown = now >= weekStart && now < addDays(weekStart, 7)
+        const hour = shown ? Math.max(workDayStart, now.getHours()) : workDayStart
+        return Math.max(0, (hour - 1 - firstHour) * pixelsPerHour)
+    }
 
     Item {
         anchors.fill: parent
@@ -277,8 +290,8 @@ Item {
                 }
             }
 
-            Component.onCompleted: contentY = Math.max(0, (root.workDayStart - 1)
-                                                       * root.pixelsPerHour)
+            Component.onCompleted: contentY = root.initialScrollY()
+            onContentYChanged: root.scrollPositionChanged(contentY)
 
             Item {
                 id: weekTimeline
