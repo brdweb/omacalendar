@@ -228,6 +228,18 @@ target_include_directories(omacalendar-quickadd-test
 )
 add_test(NAME quickadd_test COMMAND omacalendar-quickadd-test)
 
+add_executable(omacalendar-freebusy-test test_freebusy.cpp)
+target_link_libraries(omacalendar-freebusy-test
+  PRIVATE
+    Qt6::Test
+    Qt6::Core
+    omacalendar_core
+)
+target_include_directories(omacalendar-freebusy-test
+  PRIVATE ${CMAKE_SOURCE_DIR}/src
+)
+add_test(NAME freebusy_test COMMAND omacalendar-freebusy-test)
+
 add_executable(omacalendar-themebridge-test
   test_themebridge.cpp
   ${CMAKE_SOURCE_DIR}/src/app/themebridge.cpp

@@ -8,6 +8,7 @@
 #include <functional>
 
 #include "core/database.h"
+#include "core/freebusy.h"
 #include "providers/google/googleauth.h"
 #include "providers/google/googleclient.h"
 #include "sync/provider.h"
@@ -20,6 +21,12 @@ namespace omacalendar::google {
 // so the destructive part of a rebuild can be contract-tested independently.
 [[nodiscard]] QStringList googleFullSyncPruneCandidates(
     const QList<Event>& cachedEvents, const QSet<QString>& retainedRemoteIds);
+
+// Splits a freeBusy.query response into busy intervals per requested email
+// and a reason for each email Google could not answer for.
+void parseFreeBusyResponse(const QJsonObject& body, const QStringList& emails,
+                           QHash<QString, QList<BusyInterval>>* busy,
+                           QHash<QString, QString>* unavailable);
 
 class GoogleSync final : public Provider {
   Q_OBJECT
@@ -44,6 +51,16 @@ class GoogleSync final : public Provider {
       const Calendar& calendar,
       std::function<void(bool, const QString&, const QString&)> callback,
       QString* errorMessage = nullptr);
+
+  // Busy times for people through Google's free/busy service. Results reach
+  // callback as email -> busy intervals, plus email -> reason for the people
+  // Google could not answer for.
+  using FreeBusyCallback =
+      std::function<void(const QHash<QString, QList<BusyInterval>>& busy,
+                         const QHash<QString, QString>& unavailable)>;
+  void queryFreeBusy(const QString& accountId, const QStringList& emails,
+                     const QDateTime& startUtc, const QDateTime& endUtc,
+                     FreeBusyCallback callback);
 
   [[nodiscard]] ProviderCapabilities capabilities() const override;
   void setPollInterval(int intervalMs) override;

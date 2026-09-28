@@ -22,7 +22,7 @@ namespace {
 
 constexpr auto kClientIdSetting = "google.oauth.clientId";
 constexpr auto kOAuthScopeVersionSetting = "google.oauth.scopeVersion";
-constexpr int kOAuthScopeVersion = 2;
+constexpr int kOAuthScopeVersion = 3;
 constexpr auto kCalendarListToken = "calendarList.syncToken";
 
 quint64 stableJitterKey(const QString& value) {
@@ -633,7 +633,7 @@ bool GoogleSync::restoreAccounts(QString* errorMessage) {
           statusObject(QStringLiteral("reauthorization_required"),
                        QStringLiteral("oauth_scope_upgrade"),
                        QStringLiteral("Reauthorize this Google account to grant "
-                                      "calendar-management access"));
+                                      "calendar-management and free/busy access"));
       m_status.insert(account.id, value);
       emit accountChanged(account.id);
       emit syncStatusChanged(account.id, value);
@@ -787,6 +787,63 @@ void GoogleSync::finishDisconnect(const QString& accountId, const bool secretRem
   }
   m_status.remove(accountId);
   emit accountChanged(accountId);
+}
+
+void parseFreeBusyResponse(const QJsonObject& body, const QStringList& emails,
+                           QHash<QString, QList<BusyInterval>>* busy,
+                           QHash<QString, QString>* unavailable) {
+  const QJsonObject calendars = body.value(QStringLiteral("calendars")).toObject();
+  for (const QString& email : emails) {
+    const QJsonObject entry = calendars.value(email).toObject();
+    const QJsonArray errors = entry.value(QStringLiteral("errors")).toArray();
+    if (entry.isEmpty() || !errors.isEmpty()) {
+      // Google answers "notFound" for people outside the organisation
+      // who do not share their calendar.
+      unavailable->insert(email, errors.isEmpty()
+                                     ? QStringLiteral("unavailable")
+                                     : errors.first()
+                                           .toObject()
+                                           .value(QStringLiteral("reason"))
+                                           .toString(QStringLiteral("unavailable")));
+      continue;
+    }
+    QList<BusyInterval> intervals;
+    for (const QJsonValue& value : entry.value(QStringLiteral("busy")).toArray()) {
+      const QJsonObject span = value.toObject();
+      intervals.append({QDateTime::fromString(
+                            span.value(QStringLiteral("start")).toString(), Qt::ISODate)
+                            .toUTC(),
+                        QDateTime::fromString(
+                            span.value(QStringLiteral("end")).toString(), Qt::ISODate)
+                            .toUTC()});
+    }
+    busy->insert(email, mergeBusyIntervals(intervals));
+  }
+}
+
+void GoogleSync::queryFreeBusy(const QString& accountId, const QStringList& emails,
+                               const QDateTime& startUtc, const QDateTime& endUtc,
+                               FreeBusyCallback callback) {
+  m_client.queryFreeBusy(
+      accountId, emails, startUtc, endUtc,
+      [emails, callback = std::move(callback)](const ApiResponse& response) {
+        QHash<QString, QList<BusyInterval>> busy;
+        QHash<QString, QString> unavailable;
+        if (!response.ok) {
+          // Google refuses free/busy when the granted scopes do not cover it.
+          const QString reason =
+              response.insufficientScope        ? QStringLiteral("permission")
+              : response.authenticationRequired ? QStringLiteral("authorization")
+                                                : QStringLiteral("unavailable");
+          for (const QString& email : emails) {
+            unavailable.insert(email, reason);
+          }
+          callback(busy, unavailable);
+          return;
+        }
+        parseFreeBusyResponse(response.body, emails, &busy, &unavailable);
+        callback(busy, unavailable);
+      });
 }
 
 void GoogleSync::setPollInterval(const int intervalMs) {

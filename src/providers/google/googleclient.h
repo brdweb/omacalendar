@@ -89,6 +89,10 @@ class GoogleClient final : public QObject {
   void moveEvent(const QString& accountId, const QString& sourceCalendarRemoteId,
                  const QString& eventRemoteId, const QString& targetCalendarRemoteId,
                  const QString& etag, const QString& sendUpdates, Callback callback);
+  // POST /freeBusy for up to 50 calendars or people over [timeMin, timeMax).
+  void queryFreeBusy(const QString& accountId, const QStringList& ids,
+                     const QDateTime& timeMinUtc, const QDateTime& timeMaxUtc,
+                     Callback callback);
   void respondToEvent(const QString& accountId, const QString& calendarRemoteId,
                       const QString& eventRemoteId, const QString& etag,
                       const QJsonObject& attendeePatch, const QString& sendUpdates,

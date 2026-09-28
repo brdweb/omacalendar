@@ -38,6 +38,46 @@ class ProviderTest final : public QObject {
   Q_OBJECT
 
  private slots:
+  void freeBusyResponseSplitsBusyAndUnavailable() {
+    const QJsonObject body{
+        {QStringLiteral("calendars"),
+         QJsonObject{
+             {QStringLiteral("sam@example.com"),
+              QJsonObject{
+                  {QStringLiteral("busy"),
+                   QJsonArray{
+                       QJsonObject{{QStringLiteral("start"),
+                                    QStringLiteral("2026-09-28T09:00:00Z")},
+                                   {QStringLiteral("end"),
+                                    QStringLiteral("2026-09-28T10:00:00Z")}},
+                       QJsonObject{{QStringLiteral("start"),
+                                    QStringLiteral("2026-09-28T11:00:00+01:00")},
+                                   {QStringLiteral("end"),
+                                    QStringLiteral("2026-09-28T11:30:00+01:00")}}}}}},
+             {QStringLiteral("outsider@example.org"),
+              QJsonObject{
+                  {QStringLiteral("errors"),
+                   QJsonArray{QJsonObject{
+                       {QStringLiteral("domain"), QStringLiteral("global")},
+                       {QStringLiteral("reason"), QStringLiteral("notFound")}}}}}}}}};
+    QHash<QString, QList<BusyInterval>> busy;
+    QHash<QString, QString> unavailable;
+    google::parseFreeBusyResponse(
+        body,
+        {QStringLiteral("sam@example.com"), QStringLiteral("outsider@example.org"),
+         QStringLiteral("missing@example.com")},
+        &busy, &unavailable);
+    // The two spans touch once the offset is applied, so they merge.
+    QCOMPARE(busy.value(QStringLiteral("sam@example.com")).size(), 1);
+    QCOMPARE(busy.value(QStringLiteral("sam@example.com")).first().end,
+             QDateTime(QDate(2026, 9, 28), QTime(10, 30), QTimeZone::UTC));
+    QCOMPARE(unavailable.value(QStringLiteral("outsider@example.org")),
+             QStringLiteral("notFound"));
+    QCOMPARE(unavailable.value(QStringLiteral("missing@example.com")),
+             QStringLiteral("unavailable"));
+    QVERIFY(!busy.contains(QStringLiteral("outsider@example.org")));
+  }
+
   void googleCalendarMapping();
   void googleEventMappingAndWriteSanitization();
   void googleAllDayAndCancellationMapping();
@@ -191,7 +231,7 @@ void ProviderTest::googleOAuthLoopbackConfiguration() {
   QVERIFY(sync.isConfigured());
   QCOMPARE(database.account(existing.id).authStatus,
            QStringLiteral("reauthorization_required"));
-  QCOMPARE(database.setting(QStringLiteral("google.oauth.scopeVersion")).toInt(), 2);
+  QCOMPARE(database.setting(QStringLiteral("google.oauth.scopeVersion")).toInt(), 3);
   QSignalSpy authorizationUrl(&sync, &google::GoogleSync::authorizationUrlReady);
 
   const auto googleAccountCount = [&database]() {
@@ -244,6 +284,8 @@ void ProviderTest::googleOAuthLoopbackConfiguration() {
       QStringLiteral("https://www.googleapis.com/auth/calendar.calendars")));
   QVERIFY(scopes.contains(QStringLiteral(
       "https://www.googleapis.com/auth/calendar.calendarlist.readonly")));
+  QVERIFY(scopes.contains(
+      QStringLiteral("https://www.googleapis.com/auth/calendar.freebusy")));
 
   sync.cancelAuthorization(accountId);
   QVERIFY(database.account(accountId).id.isEmpty());

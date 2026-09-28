@@ -328,6 +328,7 @@ GoogleAuthManager::Session* GoogleAuthManager::createSession(const QString& acco
       QByteArrayLiteral("https://www.googleapis.com/auth/calendar.calendars"),
       QByteArrayLiteral(
           "https://www.googleapis.com/auth/calendar.calendarlist.readonly"),
+      QByteArrayLiteral("https://www.googleapis.com/auth/calendar.freebusy"),
   });
   session->flow->setState(newUuid());
   session->flow->setUserAgent(

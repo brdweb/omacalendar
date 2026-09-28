@@ -45,6 +45,24 @@ protection also depends on the operating-system account, keyring, filesystem,
 and device. Device encryption and a strong login password are recommended,
 especially on shared or portable computers.
 
+## Free/busy lookups
+
+While guests are added to an event, the editor asks the daemon who is busy
+around the event's time (at most eight days, at most twenty guests).
+
+- Your own busy time is computed on the device from the cached events of your
+  enabled, writable calendars. Events marked free, cancelled events and events
+  you declined are ignored, and nothing is sent anywhere.
+- For other guests the daemon asks Google's free/busy service through a
+  connected Google account, sending only the guests' addresses and the time
+  range. This uses Google's `calendar.freebusy` permission, which grants busy
+  intervals only. Google answers with busy intervals, never event details, and
+  only for people whose calendars it will share with that account. CalDAV
+  scheduling (RFC 6638) free/busy is not used yet; those guests show as "Can't
+  check".
+- Only busy intervals cross the local IPC socket. Remote answers are kept in
+  daemon memory for five minutes and never written to the database.
+
 ## Local disclosure controls
 
 - Diagnostics must be previewed before export and redact tokens, passwords,

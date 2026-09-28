@@ -8,10 +8,12 @@
 #include <QSet>
 #include <QString>
 #include <QTimeZone>
+#include <QUuid>
 #include <algorithm>
 #include <utility>
 
 #include "core/domain.h"
+#include "core/freebusy.h"
 #include "core/paths.h"
 #include "core/recurrenceexpander.h"
 #include "core/widgeteventquery.h"
@@ -687,6 +689,10 @@ void Daemon::registerHandlers() {
   m_router.registerHandler(QStringLiteral("sync.status"),
                            [this](const QJsonObject& params, ipc::Error* error) {
                              return onSyncStatus(params, error);
+                           });
+  m_router.registerHandler(QStringLiteral("freebusy.query"),
+                           [this](const QJsonObject& params, ipc::Error* error) {
+                             return onFreeBusyQuery(params, error);
                            });
   m_router.registerHandler(QStringLiteral("sync.setInteractive"),
                            [this](const QJsonObject& params, ipc::Error* error) {
@@ -3518,6 +3524,176 @@ QJsonValue Daemon::onSyncStatus(const QJsonObject& params, ipc::Error*) const {
   QJsonObject result = m_sync.status();
   result.insert(QStringLiteral("ics"), m_ics.status());
   return result;
+}
+
+namespace {
+
+QJsonArray busyToJson(const QList<BusyInterval>& intervals) {
+  QJsonArray result;
+  for (const BusyInterval& interval : intervals) {
+    result.append(QJsonObject{{QStringLiteral("start"), isoUtc(interval.start)},
+                              {QStringLiteral("end"), isoUtc(interval.end)}});
+  }
+  return result;
+}
+
+}  // namespace
+
+QJsonValue Daemon::onFreeBusyQuery(const QJsonObject& params, ipc::Error* error) {
+  const auto invalid = [error](const QString& message) {
+    if (error != nullptr) {
+      *error = {QStringLiteral("invalid_params"), message, false};
+    }
+    return QJsonValue();
+  };
+  const QDateTime startUtc =
+      dateTimeFromIso(params.value(QStringLiteral("start")).toString()).toUTC();
+  const QDateTime endUtc =
+      dateTimeFromIso(params.value(QStringLiteral("end")).toString()).toUTC();
+  if (!startUtc.isValid() || !endUtc.isValid() || startUtc >= endUtc ||
+      startUtc.daysTo(endUtc) > 8) {
+    return invalid(
+        QStringLiteral("start and end must be ISO-8601 at most 8 days apart"));
+  }
+  const QJsonValue attendeesValue = params.value(QStringLiteral("attendees"));
+  if (!attendeesValue.isUndefined() && !attendeesValue.isArray()) {
+    return invalid(QStringLiteral("attendees must be an array of email addresses"));
+  }
+  QStringList emails;
+  for (const QJsonValue& value : attendeesValue.toArray()) {
+    const QString email = value.toString().trimmed().toLower();
+    if (!value.isString() || email.size() > 320 || !email.contains(QLatin1Char('@'))) {
+      return invalid(QStringLiteral("attendees must be email addresses"));
+    }
+    if (!emails.contains(email)) {
+      emails.append(email);
+    }
+  }
+  if (emails.size() > 20) {
+    return invalid(QStringLiteral("At most 20 attendees can be checked at once"));
+  }
+
+  QString dbError;
+  const QString zoneId =
+      m_database.setting(QStringLiteral("displayTimeZone"), {}, &dbError).toString();
+  QTimeZone zone =
+      zoneId.isEmpty() ? QTimeZone(QTimeZone::LocalTime) : QTimeZone(zoneId.toUtf8());
+  if (!zone.isValid()) {
+    zone = QTimeZone(QTimeZone::LocalTime);
+  }
+  // The user's own busy time: enabled calendars they can write, excluding
+  // subscriptions and other people's shared calendars.
+  QHash<QString, ProviderKind> providerByAccount;
+  QSet<QString> principals;
+  QString googleAccountId;
+  const QString preferredCalendarId =
+      params.value(QStringLiteral("calendarId")).toString();
+  for (const Account& account : m_database.accounts(&dbError)) {
+    providerByAccount.insert(account.id, account.provider);
+    if (!account.principal.trimmed().isEmpty()) {
+      principals.insert(account.principal.trimmed().toLower());
+    }
+    if (account.provider == ProviderKind::Google && account.enabled &&
+        account.authStatus == QStringLiteral("connected") &&
+        googleAccountId.isEmpty()) {
+      googleAccountId = account.id;
+    }
+  }
+  QStringList ownCalendarIds;
+  for (const Calendar& calendar : m_database.calendars({}, &dbError)) {
+    if (calendar.enabled && !calendar.readOnly &&
+        providerByAccount.value(calendar.accountId) != ProviderKind::Ics) {
+      ownCalendarIds.append(calendar.id);
+    }
+    // Prefer the account of the calendar the event is being saved to.
+    if (calendar.id == preferredCalendarId &&
+        providerByAccount.value(calendar.accountId) == ProviderKind::Google) {
+      googleAccountId = calendar.accountId;
+    }
+  }
+  // The event being edited does not make its own time busy.
+  const QString excludeId = params.value(QStringLiteral("excludeEventId")).toString();
+  const QString excludeRecurrenceId =
+      params.value(QStringLiteral("excludeRecurrenceId")).toString();
+  QList<BusyInterval> selfBusy;
+  if (!ownCalendarIds.isEmpty()) {
+    QList<Event> events =
+        m_database.eventsBetween(startUtc, endUtc, ownCalendarIds, &dbError);
+    if (!excludeId.isEmpty()) {
+      events.removeIf([&excludeId, &excludeRecurrenceId](const Event& event) {
+        return event.id == excludeId && (excludeRecurrenceId.isEmpty() ||
+                                         event.recurrenceId == excludeRecurrenceId);
+      });
+    }
+    selfBusy = busyIntervalsFromEvents(events, startUtc, endUtc, zone);
+  }
+  if (!dbError.isEmpty()) {
+    if (error != nullptr) {
+      *error = {QStringLiteral("database_error"), dbError, false};
+    }
+    return {};
+  }
+
+  const QDateTime now = QDateTime::currentDateTimeUtc();
+  // Free/busy visibility differs between accounts, so the account that asked
+  // is part of the cache key.
+  const QString rangeKey = QLatin1Char('|') + googleAccountId + QLatin1Char('|') +
+                           isoUtc(startUtc) + QLatin1Char('|') + isoUtc(endUtc);
+  QJsonObject known;
+  QStringList remote;
+  QJsonArray unavailable;
+  for (const QString& email : std::as_const(emails)) {
+    if (principals.contains(email)) {
+      known.insert(email, busyToJson(selfBusy));
+      continue;
+    }
+    const auto cached = m_freeBusyCache.constFind(email + rangeKey);
+    if (cached != m_freeBusyCache.cend() && cached->expiresAt > now) {
+      known.insert(email, busyToJson(cached->busy));
+    } else if (!googleAccountId.isEmpty()) {
+      remote.append(email);
+    } else {
+      // CalDAV scheduling (RFC 6638) free/busy is not implemented yet.
+      unavailable.append(
+          QJsonObject{{QStringLiteral("email"), email},
+                      {QStringLiteral("reason"), QStringLiteral("unsupported")}});
+    }
+  }
+  const QString requestId = QUuid::createUuid().toString(QUuid::WithoutBraces);
+  if (!remote.isEmpty()) {
+    m_google.queryFreeBusy(
+        googleAccountId, remote, startUtc, endUtc,
+        [this, requestId, rangeKey](const QHash<QString, QList<BusyInterval>>& busy,
+                                    const QHash<QString, QString>& missing) {
+          const QDateTime expiresAt = QDateTime::currentDateTimeUtc().addSecs(5 * 60);
+          QJsonObject attendees;
+          for (auto it = busy.cbegin(); it != busy.cend(); ++it) {
+            m_freeBusyCache.insert(it.key() + rangeKey, {it.value(), expiresAt});
+            attendees.insert(it.key(), busyToJson(it.value()));
+          }
+          QJsonArray missingJson;
+          for (auto it = missing.cbegin(); it != missing.cend(); ++it) {
+            missingJson.append(QJsonObject{{QStringLiteral("email"), it.key()},
+                                           {QStringLiteral("reason"), it.value()}});
+          }
+          // Drop expired answers so the cache stays small.
+          const QDateTime current = QDateTime::currentDateTimeUtc();
+          for (auto it = m_freeBusyCache.begin(); it != m_freeBusyCache.end();) {
+            it = it->expiresAt <= current ? m_freeBusyCache.erase(it) : std::next(it);
+          }
+          m_server.broadcast(QStringLiteral("events.freeBusy"),
+                             {{QStringLiteral("requestId"), requestId},
+                              {QStringLiteral("attendees"), attendees},
+                              {QStringLiteral("unavailable"), missingJson}});
+        });
+  }
+  return QJsonObject{{QStringLiteral("requestId"), requestId},
+                     {QStringLiteral("start"), isoUtc(startUtc)},
+                     {QStringLiteral("end"), isoUtc(endUtc)},
+                     {QStringLiteral("self"), busyToJson(selfBusy)},
+                     {QStringLiteral("attendees"), known},
+                     {QStringLiteral("pending"), QJsonArray::fromStringList(remote)},
+                     {QStringLiteral("unavailable"), unavailable}};
 }
 
 QJsonValue Daemon::onSyncSetInteractive(const QJsonObject& params, ipc::Error* error) {

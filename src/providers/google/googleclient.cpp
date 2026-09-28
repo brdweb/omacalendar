@@ -307,6 +307,22 @@ void GoogleClient::deleteCalendar(const QString& accountId,
           true);
 }
 
+void GoogleClient::queryFreeBusy(const QString& accountId, const QStringList& ids,
+                                 const QDateTime& timeMinUtc,
+                                 const QDateTime& timeMaxUtc, Callback callback) {
+  QJsonArray items;
+  for (const QString& id : ids) {
+    items.append(QJsonObject{{QStringLiteral("id"), id}});
+  }
+  const QJsonObject body{
+      {QStringLiteral("timeMin"), timeMinUtc.toUTC().toString(Qt::ISODate)},
+      {QStringLiteral("timeMax"), timeMaxUtc.toUTC().toString(Qt::ISODate)},
+      {QStringLiteral("items"), items}};
+  request(accountId, QByteArrayLiteral("POST"),
+          QUrl(QString::fromLatin1(kApiBase) + QStringLiteral("/freeBusy")), body, {},
+          std::move(callback));
+}
+
 void GoogleClient::createEvent(const QString& accountId,
                                const QString& calendarRemoteId,
                                const QJsonObject& event, const QString& sendUpdates,

@@ -110,6 +110,8 @@ add_library(omacalendar_core STATIC
   src/core/database.cpp
   src/core/database.h
   src/core/domain.cpp
+  src/core/freebusy.cpp
+  src/core/freebusy.h
   src/core/domain.h
   src/core/paths.cpp
   src/core/paths.h
