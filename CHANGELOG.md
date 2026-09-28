@@ -14,6 +14,8 @@ Versioning once public releases begin.
   events, applying one changed event drops from about 1.7 s to under 60 ms.
 - Change notifications reload only the lists they affect, and preferences
   load in one request. A delivered reminder no longer reloads anything.
+- The desktop app requests event pages only for calendars visible in the active
+  calendar set; hiding all calendars clears the view without an IPC query (#42).
 - The activity panel, settings and search lists update the rows that changed
   instead of rebuilding, so they keep their scroll position and focus.
 - The calendar database keeps temporary data in memory, uses a larger page

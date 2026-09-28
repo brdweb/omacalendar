@@ -107,6 +107,9 @@ AppController::AppController(QObject* parent) : QObject(parent) {
     emit connectedChanged();
     if (connected()) {
       m_daemonStartAttempted = false;
+      m_calendarsReady = false;
+      m_calendarSetsReady = false;
+      m_scopeRequestsInFlight = 0;
       // The daemon may have been upgraded while disconnected.
       m_settingsGetManySupported = true;
       setError({});
@@ -137,6 +140,7 @@ AppController::AppController(QObject* parent) : QObject(parent) {
       m_backgroundRequests.clear();
       m_refreshTimer.stop();
       m_pendingRefreshParts = 0;
+      m_scopeRequestsInFlight = 0;
       m_activeRequests = 0;
       setBusy(false);
       setStatus(tr("Reconnecting to calendar service…"));
@@ -399,27 +403,44 @@ void AppController::refreshParts(const int parts) {
       emit accountsChanged();
     });
   }
+  m_scopeRequestsInFlight += ((parts & RefreshCalendars) != 0) +
+                             ((parts & RefreshCalendarSets) != 0);
   if ((parts & RefreshCalendars) != 0) {
-    background(QStringLiteral("calendars.list"), {}, [this](const QJsonValue& value) {
-      m_calendars = variantList(value, QStringLiteral("calendars"));
-      m_calendarsModel.replace(m_calendars);
-      emit calendarsChanged();
-    });
+    send(
+        QStringLiteral("calendars.list"), {},
+        [this](const QJsonValue& value) {
+          m_calendars = variantList(value, QStringLiteral("calendars"));
+          m_calendarsModel.replace(m_calendars);
+          m_calendarsReady = true;
+          emit calendarsChanged();
+          finishScopeRequest();
+        },
+        false, [this](const QJsonObject&) {
+          finishScopeRequest();
+          return false;
+        });
   }
   if ((parts & RefreshCalendarSets) != 0) {
-    background(QStringLiteral("calendarSets.list"), {},
-               [this](const QJsonValue& value) {
-                 m_calendarSets = variantList(value, QStringLiteral("calendarSets"));
-                 m_calendarSetsModel.replace(m_calendarSets);
-                 const QString active = value.toObject()
-                                            .value(QStringLiteral("activeId"))
-                                            .toString(QStringLiteral("all-calendars"));
-                 if (active != m_activeCalendarSetId) {
-                   m_activeCalendarSetId = active;
-                   emit activeCalendarSetIdChanged();
-                 }
-                 emit calendarSetsChanged();
-               });
+    send(
+        QStringLiteral("calendarSets.list"), {},
+        [this](const QJsonValue& value) {
+          m_calendarSets = variantList(value, QStringLiteral("calendarSets"));
+          m_calendarSetsModel.replace(m_calendarSets);
+          const QString active = value.toObject()
+                                     .value(QStringLiteral("activeId"))
+                                     .toString(QStringLiteral("all-calendars"));
+          if (active != m_activeCalendarSetId) {
+            m_activeCalendarSetId = active;
+            emit activeCalendarSetIdChanged();
+          }
+          m_calendarSetsReady = true;
+          emit calendarSetsChanged();
+          finishScopeRequest();
+        },
+        false, [this](const QJsonObject&) {
+          finishScopeRequest();
+          return false;
+        });
   }
   if ((parts & RefreshInvitations) != 0) {
     background(QStringLiteral("invitations.list"), {}, [this](const QJsonValue& value) {
@@ -512,6 +533,44 @@ void AppController::loadPreferencesIndividually() {
   }
 }
 
+void AppController::finishScopeRequest() {
+  --m_scopeRequestsInFlight;
+  if (m_scopeRequestsInFlight == 0 && m_calendarsReady && m_calendarSetsReady &&
+      m_rangeStart.isValid() &&
+      (m_rangeNeedsReload || visibleCalendarIds() != m_visibleCalendarIds)) {
+    loadRange(m_rangeStart, m_rangeEnd);
+  }
+}
+
+QStringList AppController::visibleCalendarIds() const {
+  QSet<QString> activeIds;
+  if (m_activeCalendarSetId != QStringLiteral("all-calendars")) {
+    for (const QVariant& value : m_calendarSets) {
+      const QVariantMap calendarSet = value.toMap();
+      if (calendarSet.value(QStringLiteral("id")).toString() ==
+          m_activeCalendarSetId) {
+        const QVariantList ids =
+            calendarSet.value(QStringLiteral("calendarIds")).toList();
+        for (const QVariant& id : ids) {
+          activeIds.insert(id.toString());
+        }
+        break;
+      }
+    }
+  }
+  QStringList visible;
+  for (const QVariant& value : m_calendars) {
+    const QVariantMap calendar = value.toMap();
+    const QString id = calendar.value(QStringLiteral("id")).toString();
+    if (!id.isEmpty() && calendar.value(QStringLiteral("enabled"), true).toBool() &&
+        (m_activeCalendarSetId == QStringLiteral("all-calendars") ||
+         activeIds.contains(id))) {
+      visible.append(id);
+    }
+  }
+  return visible;
+}
+
 void AppController::loadRange(const QDate& firstDate, const QDate& lastDate) {
   if (!firstDate.isValid() || !lastDate.isValid() || firstDate > lastDate) {
     setError(tr("A valid date range is required"));
@@ -519,17 +578,35 @@ void AppController::loadRange(const QDate& firstDate, const QDate& lastDate) {
   }
   m_rangeStart = firstDate;
   m_rangeEnd = lastDate;
-  // A newer range supersedes any page still in flight for an older one.
+  // A newer range or visibility scope supersedes pages still in flight.
   ++m_rangeGeneration;
   m_rangePages.clear();
+  if (!m_calendarsReady || !m_calendarSetsReady ||
+      m_scopeRequestsInFlight != 0) {
+    m_rangeNeedsReload = true;
+    return;
+  }
+  m_rangeNeedsReload = false;
+  m_visibleCalendarIds = visibleCalendarIds();
+  if (m_visibleCalendarIds.isEmpty()) {
+    m_events.clear();
+    m_eventsModel.replace(m_events);
+    emit eventsChanged();
+    return;
+  }
   requestRangePage(m_rangeGeneration, 0, kEventPageLimit);
 }
 
 void AppController::requestRangePage(const quint64 generation, const int offset,
                                      const int limit) {
+  QJsonArray calendarIds;
+  for (const QString& id : std::as_const(m_visibleCalendarIds)) {
+    calendarIds.append(id);
+  }
   const QJsonObject params = {
       {QStringLiteral("start"), isoUtc(startOfDateUtc(m_rangeStart))},
       {QStringLiteral("end"), isoUtc(startOfDateUtc(m_rangeEnd.addDays(1)))},
+      {QStringLiteral("calendarIds"), calendarIds},
       {QStringLiteral("offset"), offset},
       {QStringLiteral("limit"), limit},
   };

@@ -114,6 +114,30 @@ class FakeDaemon final : public QObject {
                                      m_settings.contains(key)
                                          ? m_settings.value(key)
                                          : params.value(QStringLiteral("fallback"))}});
+      } else if (method == QStringLiteral("calendars.list")) {
+        response.insert(QStringLiteral("result"),
+                        QJsonObject{{QStringLiteral("calendars"), m_calendars}});
+      } else if (method == QStringLiteral("calendarSets.list")) {
+        response.insert(QStringLiteral("result"),
+                        QJsonObject{{QStringLiteral("calendarSets"),
+                                     QJsonArray{QJsonObject{
+                                         {QStringLiteral("id"), QStringLiteral("focus")},
+                                         {QStringLiteral("calendarIds"),
+                                          QJsonArray{QStringLiteral("local-default")}}}}},
+                                    {QStringLiteral("activeId"), m_activeSet}});
+      } else if (method == QStringLiteral("calendarSets.activate")) {
+        m_activeSet = params.value(QStringLiteral("calendarSetId")).toString();
+      } else if (method == QStringLiteral("calendars.updatePreferences")) {
+        for (int index = 0; index < m_calendars.size(); ++index) {
+          QJsonObject calendar = m_calendars.at(index).toObject();
+          if (calendar.value(QStringLiteral("id")) ==
+              params.value(QStringLiteral("calendarId"))) {
+            calendar.insert(QStringLiteral("enabled"),
+                            params.value(QStringLiteral("enabled")));
+            m_calendars.replace(index, calendar);
+            break;
+          }
+        }
       } else if (method == QStringLiteral("events.list")) {
         m_eventListRequests.append(params);
         const QJsonObject page = eventPage(params);
@@ -173,6 +197,12 @@ class FakeDaemon final : public QObject {
   QJsonObject m_settings;
   bool m_settingsGetManySupported = true;
   QList<QJsonObject> m_eventListRequests;
+  QJsonArray m_calendars{
+      QJsonObject{{QStringLiteral("id"), QStringLiteral("local-default")},
+                  {QStringLiteral("enabled"), true}},
+      QJsonObject{{QStringLiteral("id"), QStringLiteral("secondary")},
+                  {QStringLiteral("enabled"), true}}};
+  QString m_activeSet = QStringLiteral("all-calendars");
   int m_eventsPerRange = 0;
   int m_maxEventsPerResponse = kPageCap;
 };
@@ -206,6 +236,7 @@ class AppControllerTest final : public QObject {
   void rangeLoadingFollowsEveryEventPage();
   void staleRangePagesAreDiscarded();
   void oversizedRangePagesAreRequestedInSmallerPages();
+  void requestsOnlyVisibleCalendars();
   void notificationsReloadOnlyWhatChanged();
   void preferencesLoadInOneRequest();
   void preferencesFallBackWithoutGetMany();
@@ -602,6 +633,8 @@ void AppControllerTest::staleRangePagesAreDiscarded() {
   QVERIFY(daemon.listen());
   AppController controller;
   QTRY_VERIFY(controller.connected());
+  // Calendar scope must be known before an event request can be sent.
+  QTRY_VERIFY(!daemon.eventListRequests().isEmpty());
 
   // The first range is superseded before its first page arrives. Neither its
   // pages nor its follow-up requests may reach the model.
@@ -609,6 +642,9 @@ void AppControllerTest::staleRangePagesAreDiscarded() {
   controller.loadRange(QDate(2026, 5, 1), QDate(2026, 5, 31));
   const QString current = QStringLiteral("2026-05-01");
   QTRY_COMPARE(controller.eventsModel()->rowCount(), kEvents);
+  QTRY_VERIFY(!controller.events().isEmpty() &&
+              controller.events().constFirst().toMap().value(QStringLiteral("id"))
+                  .toString().startsWith(current));
   for (const QVariant& event : controller.events()) {
     const QString id = event.toMap().value(QStringLiteral("id")).toString();
     QVERIFY2(id.startsWith(current), qPrintable(id));
@@ -658,6 +694,47 @@ void AppControllerTest::oversizedRangePagesAreRequestedInSmallerPages() {
   for (int index = 3; index < limits.size(); ++index) {
     QCOMPARE(limits.at(index), 62);
   }
+}
+
+void AppControllerTest::requestsOnlyVisibleCalendars() {
+  FakeDaemon daemon(3);
+  QVERIFY(daemon.listen());
+  AppController controller;
+  QTRY_VERIFY(controller.connected());
+  QTRY_VERIFY(!daemon.eventListRequests().isEmpty());
+  QCOMPARE(daemon.eventListRequests().constLast().value(QStringLiteral("calendarIds"))
+               .toArray(),
+           (QJsonArray{QStringLiteral("local-default"),
+                       QStringLiteral("secondary")}));
+  const qsizetype beforeHide = daemon.eventListRequests().size();
+  controller.setCalendarVisibility(QStringLiteral("secondary"), false);
+  QTRY_VERIFY(daemon.eventListRequests().size() > beforeHide);
+  QCOMPARE(daemon.eventListRequests().constLast().value(QStringLiteral("calendarIds"))
+               .toArray(),
+           QJsonArray{QStringLiteral("local-default")});
+
+  controller.setCalendarVisibility(QStringLiteral("local-default"), false);
+  QTRY_COMPARE(controller.eventsModel()->rowCount(), 0);
+  const qsizetype beforeEmptyRange = daemon.eventListRequests().size();
+  controller.loadRange(QDate(2026, 5, 1), QDate(2026, 5, 31));
+  QCOMPARE(daemon.eventListRequests().size(), beforeEmptyRange);
+
+  controller.setCalendarVisibility(QStringLiteral("secondary"), true);
+  QTRY_VERIFY(daemon.eventListRequests().size() > beforeEmptyRange);
+  QCOMPARE(daemon.eventListRequests().constLast().value(QStringLiteral("calendarIds"))
+               .toArray(),
+           QJsonArray{QStringLiteral("secondary")});
+  QTRY_COMPARE(controller.eventsModel()->rowCount(), 3);
+  const qsizetype beforeActiveSet = daemon.eventListRequests().size();
+  controller.activateCalendarSet(QStringLiteral("focus"));
+  QTRY_COMPARE(controller.activeCalendarSetId(), QStringLiteral("focus"));
+  QTRY_COMPARE(controller.eventsModel()->rowCount(), 0);
+  QCOMPARE(daemon.eventListRequests().size(), beforeActiveSet);
+  controller.setCalendarVisibility(QStringLiteral("local-default"), true);
+  QTRY_VERIFY(daemon.eventListRequests().size() > beforeActiveSet);
+  QCOMPARE(daemon.eventListRequests().constLast().value(QStringLiteral("calendarIds"))
+               .toArray(),
+           QJsonArray{QStringLiteral("local-default")});
 }
 
 namespace {
