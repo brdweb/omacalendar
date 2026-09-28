@@ -104,6 +104,14 @@ ApplicationWindow {
     // Stored settings round-trip as JSON, so accept a boolean or its text.
     readonly property bool showWeekNumbers: preferences.showWeekNumbers === true
                                             || preferences.showWeekNumbers === "true"
+    // Recomputed per selected date and on any preference change (including
+    // the display zone), so offsets follow DST in both zones.
+    readonly property var secondaryTime: {
+        const zone = String(preferences.secondaryTimeZone || "")
+        if (zone.length === 0 || typeof App.secondaryTimeLabels !== "function")
+            return ({})
+        return App.secondaryTimeLabels(Qt.formatDate(App.selectedDate, "yyyy-MM-dd"), zone)
+    }
     readonly property int currentViewIndex: viewIndex(currentView)
     readonly property var latestSyncDate: latestCalendarSync()
 
@@ -455,6 +463,7 @@ ApplicationWindow {
                                     events: window.visibleEvents
                                     selectedEventReference: window.selectedEventReference
                                     workDayStart: Number(window.preferences.workDayStart || 8)
+                                    secondaryTime: window.secondaryTime
                                     workDayEnd: Number(window.preferences.workDayEnd || 18)
                                     defaultDurationMinutes:
                                         Number(window.preferences.defaultDuration || 60)
@@ -487,6 +496,7 @@ ApplicationWindow {
                                     firstDayOfWeek: window.firstDayOfWeek
                                     showWeekNumbers: window.showWeekNumbers
                                     workDayStart: Number(window.preferences.workDayStart || 8)
+                                    secondaryTime: window.secondaryTime
                                     workDayEnd: Number(window.preferences.workDayEnd || 18)
                                     defaultDurationMinutes:
                                         Number(window.preferences.defaultDuration || 60)

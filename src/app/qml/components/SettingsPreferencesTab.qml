@@ -68,6 +68,29 @@ ScrollView {
                     onActivated: tab.drawer.preferenceChanged("displayTimeZone",
                                                         currentValue)
                 }
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: Theme.spacingSM
+                    AppComboBox {
+                        id: secondaryTimeZoneBox
+                        objectName: "secondaryTimeZone"
+                        Layout.fillWidth: true
+                        model: tab.drawer.secondaryTimeZoneOptions
+                        textRole: "text"
+                        valueRole: "value"
+                        currentIndex: tab.drawer.secondaryTimeZoneIndex()
+                        Accessible.name: qsTr("Second time zone in day and week views")
+                        onActivated: tab.drawer.preferenceChanged("secondaryTimeZone",
+                                                                  currentValue)
+                    }
+                    AppButton {
+                        objectName: "swapTimeZones"
+                        enabled: String(tab.drawer.preferences.secondaryTimeZone || "").length > 0
+                        text: qsTr("Swap")
+                        toolTipText: qsTr("Make the second time zone the display time zone")
+                        onClicked: tab.drawer.swapTimeZones()
+                    }
+                }
                 AppComboBox {
                     Layout.fillWidth: true
                     model: [

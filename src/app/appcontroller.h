@@ -174,6 +174,11 @@ class AppController final : public QObject {
   Q_INVOKABLE void previewDiagnostics();
   Q_INVOKABLE void handleDeepLink(const QUrl& url);
   Q_INVOKABLE void handleIcsImportFile(const QUrl& file);
+  // For a secondary time-zone gutter: each display-zone hour 0..24 of
+  // dateText as {minute, dayOffset} in zoneId, plus a short label and UTC
+  // offset for that day. Empty when either value is invalid.
+  Q_INVOKABLE [[nodiscard]] QVariantMap secondaryTimeLabels(
+      const QString& dateText, const QString& zoneId) const;
   Q_INVOKABLE QString wallTimeToUtc(const QString& dateText, const QString& timeText,
                                     const QString& timeZoneId) const;
   Q_INVOKABLE QString utcToWallTime(const QString& utcText,

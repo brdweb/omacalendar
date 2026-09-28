@@ -312,6 +312,7 @@ class AppControllerTest final : public QObject {
   void quickAddTextBecomesAnEditorDraft();
   void accountSyncStatesFollowTheDaemon();
   void undoAndRedoWalkTheHistory();
+  void secondaryTimeLabelsFollowBothZones();
 
  private:
   QTemporaryDir m_xdgRoot;
@@ -944,8 +945,8 @@ void AppControllerTest::preferencesFallBackWithoutGetMany() {
   QTRY_VERIFY(controller.preferencesLoaded());
   QStringList methods = settledMethods(daemon);
   QCOMPARE(methods.count(QStringLiteral("settings.getMany")), 1);
-  // One fallback read per preference key, including showWeekNumbers.
-  QCOMPARE(methods.count(QStringLiteral("settings.get")), 11);
+  // One fallback read per preference key.
+  QCOMPARE(methods.count(QStringLiteral("settings.get")), 12);
   QCOMPARE(controller.preferences().value(QStringLiteral("timeFormat")).toString(),
            QStringLiteral("24h"));
   QVERIFY2(controller.lastError().isEmpty(), qPrintable(controller.lastError()));
@@ -955,7 +956,7 @@ void AppControllerTest::preferencesFallBackWithoutGetMany() {
   daemon.broadcast(QStringLiteral("calendars.changed"));
   methods = settledMethods(daemon);
   QCOMPARE(methods.count(QStringLiteral("settings.getMany")), 0);
-  QCOMPARE(methods.count(QStringLiteral("settings.get")), 11);
+  QCOMPARE(methods.count(QStringLiteral("settings.get")), 12);
 }
 
 void AppControllerTest::contactSuggestionsAreRelayed() {
@@ -1128,6 +1129,45 @@ void AppControllerTest::undoAndRedoWalkTheHistory() {
   QCOMPARE(last().first, QStringLiteral("events.remove"));
   QCOMPARE(last().second.value("eventRef").toObject().value("eventId").toString(),
            QStringLiteral("created-8"));
+}
+
+void AppControllerTest::secondaryTimeLabelsFollowBothZones() {
+  FakeDaemon daemon(0);
+  daemon.setStoredSetting(QStringLiteral("displayTimeZone"),
+                          QStringLiteral("America/New_York"));
+  QVERIFY(daemon.listen());
+  AppController controller;
+  QTRY_VERIFY(controller.preferencesLoaded());
+  const auto hour = [](const QVariantMap& labels, const int index) {
+    return labels.value(QStringLiteral("hours")).toList().at(index).toMap();
+  };
+
+  // New York moves its clocks on March 8, 2026 and London on March 29, so
+  // 09:00 in New York is 14:00 in London before the 8th and 13:00 after.
+  const QVariantMap winter = controller.secondaryTimeLabels(
+      QStringLiteral("2026-03-02"), QStringLiteral("Europe/London"));
+  QCOMPARE(hour(winter, 9).value(QStringLiteral("minute")).toInt(), 14 * 60);
+  const QVariantMap between = controller.secondaryTimeLabels(
+      QStringLiteral("2026-03-09"), QStringLiteral("Europe/London"));
+  QCOMPARE(hour(between, 9).value(QStringLiteral("minute")).toInt(), 13 * 60);
+  QCOMPARE(between.value(QStringLiteral("label")).toString(), QStringLiteral("London"));
+
+  // Half-hour offsets keep their minutes, and late hours fall on the next
+  // day there.
+  const QVariantMap kolkata = controller.secondaryTimeLabels(
+      QStringLiteral("2026-09-28"), QStringLiteral("Asia/Kolkata"));
+  QCOMPARE(kolkata.value(QStringLiteral("hours")).toList().size(), 25);
+  QCOMPARE(hour(kolkata, 9).value(QStringLiteral("minute")).toInt(), 18 * 60 + 30);
+  QCOMPARE(hour(kolkata, 9).value(QStringLiteral("dayOffset")).toInt(), 0);
+  QCOMPARE(hour(kolkata, 20).value(QStringLiteral("minute")).toInt(), 5 * 60 + 30);
+  QCOMPARE(hour(kolkata, 20).value(QStringLiteral("dayOffset")).toInt(), 1);
+  QCOMPARE(kolkata.value(QStringLiteral("offsetLabel")).toString(),
+           QStringLiteral("UTC+5:30"));
+
+  QVERIFY(controller
+              .secondaryTimeLabels(QStringLiteral("2026-09-28"),
+                                   QStringLiteral("Not/AZone"))
+              .isEmpty());
 }
 
 #include "test_appcontroller.moc"

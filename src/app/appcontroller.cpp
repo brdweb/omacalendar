@@ -103,7 +103,8 @@ AppController::AppController(QObject* parent) : QObject(parent) {
       {QStringLiteral("notificationPrivacy"), QStringLiteral("generic")},
       {QStringLiteral("currentView"), QStringLiteral("month")},
       {QStringLiteral("widgetConsentDecision"), QStringLiteral("")},
-      {QStringLiteral("showWeekNumbers"), false}};
+      {QStringLiteral("showWeekNumbers"), false},
+      {QStringLiteral("secondaryTimeZone"), QStringLiteral("")}};
   m_client.setAutoReconnect(true);
   connect(&m_client, &ipc::IpcClient::connectedChanged, this, [this]() {
     emit connectedChanged();
@@ -501,7 +502,7 @@ QStringList AppController::preferenceKeys() {
           QStringLiteral("displayTimeZone"),   QStringLiteral("defaultDuration"),
           QStringLiteral("defaultCalendarId"), QStringLiteral("notificationPrivacy"),
           QStringLiteral("currentView"),       QStringLiteral("widgetConsentDecision"),
-          QStringLiteral("showWeekNumbers")};
+          QStringLiteral("showWeekNumbers"),   QStringLiteral("secondaryTimeZone")};
 }
 
 void AppController::markPreferencesLoaded() {
@@ -1365,6 +1366,46 @@ void AppController::setPreference(const QString& key, const QVariant& value) {
            loadRange(m_rangeStart, m_rangeEnd);
          }
        });
+}
+
+QVariantMap AppController::secondaryTimeLabels(const QString& dateText,
+                                               const QString& zoneId) const {
+  const QDate date = QDate::fromString(dateText, Qt::ISODate);
+  const QTimeZone secondary(zoneId.trimmed().toUtf8());
+  if (!date.isValid() || !secondary.isValid()) {
+    return {};
+  }
+  const QString requestedZone =
+      m_preferences.value(QStringLiteral("displayTimeZone")).toString().trimmed();
+  QTimeZone displayZone = requestedZone.isEmpty() ? QTimeZone(QTimeZone::LocalTime)
+                                                  : QTimeZone(requestedZone.toUtf8());
+  if (!displayZone.isValid()) {
+    displayZone = QTimeZone(QTimeZone::LocalTime);
+  }
+  QVariantList hours;
+  for (int hour = 0; hour <= 24; ++hour) {
+    // Offsets are looked up per hour, so a DST change in either zone on this
+    // day shows where it happens.
+    const QDateTime wall(date.addDays(hour / 24), QTime(hour % 24, 0), displayZone);
+    const QDateTime there = wall.toTimeZone(secondary);
+    hours.append(QVariantMap{
+        {QStringLiteral("minute"), there.time().hour() * 60 + there.time().minute()},
+        {QStringLiteral("dayOffset"), static_cast<int>(date.daysTo(there.date()))}});
+  }
+  const QDateTime noon(date, QTime(12, 0), displayZone);
+  const int offsetMinutes = secondary.offsetFromUtc(noon) / 60;
+  QString offset = QStringLiteral("UTC%1%2")
+                       .arg(offsetMinutes < 0 ? QLatin1Char('-') : QLatin1Char('+'))
+                       .arg(qAbs(offsetMinutes) / 60);
+  if (offsetMinutes % 60 != 0) {
+    offset +=
+        QStringLiteral(":%1").arg(qAbs(offsetMinutes) % 60, 2, 10, QLatin1Char('0'));
+  }
+  QString city = QString::fromUtf8(secondary.id()).section(QLatin1Char('/'), -1);
+  city.replace(QLatin1Char('_'), QLatin1Char(' '));
+  return {{QStringLiteral("label"), city},
+          {QStringLiteral("offsetLabel"), offset},
+          {QStringLiteral("hours"), hours}};
 }
 
 QString AppController::wallTimeToUtc(const QString& dateText, const QString& timeText,

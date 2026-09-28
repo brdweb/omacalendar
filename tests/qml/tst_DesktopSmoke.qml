@@ -559,6 +559,30 @@ Item {
             }
         }
 
+        function test_timelines_show_a_second_time_zone() {
+            const hours = []
+            for (let hour = 0; hour <= 24; ++hour)
+                hours.push({"minute": ((hour * 60 + 570) % 1440),
+                            "dayOffset": hour * 60 + 570 >= 1440 ? 1 : 0})
+            const secondary = {"label": "Kolkata", "offsetLabel": "UTC+5:30", "hours": hours}
+            const factories = [dayFactory, weekFactory]
+            for (let index = 0; index < factories.length; ++index) {
+                const view = createTemporaryObject(factories[index], scene, {
+                    "width": 900, "height": 700, "currentDate": scene.referenceDate,
+                    "events": [], "timeFormat": "24h", "visible": true})
+                wait(0)
+                const nine = findChild(view, "secondaryHourLabel-9")
+                verify(nine !== null)
+                verify(!nine.visible, "no second zone by default")
+                verify(!findChild(view, "secondaryZoneCaption").parent.visible)
+                view.secondaryTime = secondary
+                compare(nine.text, "18:30")
+                compare(findChild(view, "secondaryHourLabel-20").text, "05:30 +1")
+                verify(findChild(view, "secondaryZoneCaption").parent.visible)
+                compare(findChild(view, "secondaryZoneCaption").text, "Kolkata")
+            }
+        }
+
         function test_undo_toast_offers_undo_only_when_possible() {
             const toast = createTemporaryObject(undoToastFactory, scene)
             verify(!toast.visible)
