@@ -105,14 +105,15 @@ class Database final {
   bool removeRemoteEvent(const QString& calendarId, const QString& remoteId,
                          const QString& remotePayload = {},
                          QString* errorMessage = nullptr, bool* conflicted = nullptr);
-  // Commits one provider response as a unit. A parse/database failure rolls
-  // back every upsert, deletion, calendar token, and conflict discovered in
-  // the batch, leaving the previous cache usable.
+  // A response may be spread across independently committed chunks. Intermediate
+  // chunks leave sync state and coverage unchanged; only the final chunk
+  // publishes the cursor and prunes orphaned provider resources.
   bool applyRemoteSyncBatch(const Calendar& calendar, const QList<Event>& events,
                             const QStringList& deletedRemoteIds,
                             const QStringList& prunedRemoteIds = {},
                             QString* errorMessage = nullptr,
-                            const QList<ProviderResource>& providerResources = {});
+                            const QList<ProviderResource>& providerResources = {},
+                            bool finalizeCalendar = true);
   // Commits a bounded replacement and its completed coverage marker in one
   // savepoint. Failed parsing/database work therefore cannot make an
   // uncovered range look complete after restart.

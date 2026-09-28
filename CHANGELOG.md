@@ -21,6 +21,9 @@ Versioning once public releases begin.
 - Bound historical recurring-series reads by their last occurrence, with a
   schema-3 backfill, indexed exception identities, and a revision-aware
   per-series expansion cache (#41).
+- Remote sync responses commit in bounded chunks so widget IPC stays
+  responsive during large Google, CalDAV, and ICS imports; sync cursors and
+  coverage advance only after the last chunk, and notifications are coalesced.
 
 ### Added
 

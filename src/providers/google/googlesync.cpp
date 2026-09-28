@@ -1,11 +1,13 @@
 #include "providers/google/googlesync.h"
 
 #include <QCryptographicHash>
+#include <QFutureWatcher>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QPointer>
 #include <QTimeZone>
 #include <QUrl>
+#include <QtConcurrent>
 #include <algorithm>
 #include <limits>
 #include <utility>
@@ -13,6 +15,7 @@
 #include "core/domain.h"
 #include "providers/google/googlemapper.h"
 #include "providers/google/googleoauthconfig.h"
+#include "sync/chunkedsyncapply.h"
 
 namespace omacalendar::google {
 namespace {
@@ -161,6 +164,7 @@ struct GoogleSync::SyncJob final {
   QStringList stagedDeletedRemoteIds;
   QDateTime eventWindowStartUtc;
   QDateTime eventWindowEndUtc;
+  QPointer<ChunkedSyncApply> apply;
   QList<OutboxItem> outbox;
   int outboxIndex = 0;
   QStringList changedCalendarIds;
@@ -180,6 +184,7 @@ GoogleSync::GoogleSync(Database* database, QObject* parent)
       m_database(database),
       m_auth(this),
       m_client(&m_auth, this) {
+  m_mappingPool.setMaxThreadCount(1);
   m_pollTimer.setInterval(5 * 60 * 1000);
   connect(&m_pollTimer, &QTimer::timeout, this, &GoogleSync::syncAll);
   m_pollTimer.start();
@@ -700,6 +705,10 @@ bool GoogleSync::disconnectAccount(const QString& accountId,
   m_retryWakeAt.remove(accountId);
   m_pendingHydrations.remove(accountId);
   if (SyncJob* job = m_jobs.take(accountId); job != nullptr) {
+    if (job->apply) {
+      job->apply->cancel();
+      job->apply->deleteLater();
+    }
     delete job;
   }
   auto* pending = new PendingDisconnect;
@@ -1277,97 +1286,121 @@ void GoogleSync::startEventPage(SyncJob* job, const QString& pageToken) {
         }
         currentJob->readRetryAttempts = 0;
         const QJsonArray items = response.body.value(QStringLiteral("items")).toArray();
-        for (const QJsonValue& value : items) {
-          if (!value.isObject()) {
-            continue;
-          }
-          const QJsonObject raw = value.toObject();
-          Event event = eventFromGoogleJson(
-              raw, currentJob->currentCalendar.id,
-              calendarDefaultReminders(currentJob->currentCalendar));
-          if (!event.remoteId.isEmpty()) {
-            currentJob->seenRemoteIds.insert(event.remoteId);
-          }
-          QString error;
-          bool conflict = false;
-          // A cancelled recurring instance is an exception tombstone, not a
-          // deletion of the series. Persist it so recurrence expansion can
-          // suppress that occurrence. Ordinary/series cancellations remove
-          // the matching remote record as before.
-          bool applied = true;
-          if (currentJob->eventFullSync) {
-            if (event.deleted && event.recurrenceId.isEmpty()) {
-              currentJob->stagedDeletedRemoteIds.append(event.remoteId);
-            } else {
-              currentJob->stagedEvents.append(std::move(event));
-            }
-          } else {
-            applied = event.deleted && event.recurrenceId.isEmpty()
-                          ? m_database->removeRemoteEvent(
-                                currentJob->currentCalendar.id, event.remoteId,
-                                event.rawPayload, &error, &conflict)
-                          : m_database->applyRemoteEvent(event, &error, &conflict);
-          }
-          if (!applied) {
-            finish(currentJob, QStringLiteral("database_error"), error);
-            return;
-          }
-          if (!currentJob->eventFullSync && !currentJob->changedCalendarIds.contains(
-                                                currentJob->currentCalendar.id)) {
-            currentJob->changedCalendarIds.append(currentJob->currentCalendar.id);
-          }
-        }
+        const QString calendarId = currentJob->currentCalendar.id;
+        const QJsonArray defaults = calendarDefaultReminders(currentJob->currentCalendar);
         const QString nextPage =
             response.body.value(QStringLiteral("nextPageToken")).toString();
-        if (!nextPage.isEmpty()) {
-          startEventPage(currentJob, nextPage);
-          return;
-        }
         const QString nextSync =
             response.body.value(QStringLiteral("nextSyncToken")).toString();
-        if (!nextSync.isEmpty() && !currentJob->hydrationSync) {
-          currentJob->currentCalendar.syncToken = nextSync;
-        }
-        currentJob->currentCalendar.lastSyncAt = QDateTime::currentDateTimeUtc();
-        QString error;
-        if (currentJob->eventFullSync) {
-          const QList<Event> coveredEvents = m_database->eventsBetween(
-              currentJob->eventWindowStartUtc, currentJob->eventWindowEndUtc,
-              {currentJob->currentCalendar.id}, &error);
-          if (!error.isEmpty()) {
-            finish(currentJob, QStringLiteral("database_error"), error);
-            return;
-          }
-          currentJob->stagedDeletedRemoteIds.removeDuplicates();
-          const QStringList prunedRemoteIds =
-              googleFullSyncPruneCandidates(coveredEvents, currentJob->seenRemoteIds);
-          if (!m_database->applyRemoteRangeSyncBatch(
-                  currentJob->currentCalendar, currentJob->stagedEvents,
-                  currentJob->stagedDeletedRemoteIds, prunedRemoteIds,
-                  currentJob->eventWindowStartUtc, currentJob->eventWindowEndUtc,
-                  &error, currentJob->replaceEventCoverage)) {
-            finish(currentJob, QStringLiteral("database_error"), error);
-            return;
-          }
-          if (!currentJob->changedCalendarIds.contains(
-                  currentJob->currentCalendar.id)) {
-            currentJob->changedCalendarIds.append(currentJob->currentCalendar.id);
-          }
-        } else if (!m_database->upsertCalendar(currentJob->currentCalendar, &error)) {
-          finish(currentJob, QStringLiteral("database_error"), error);
+        auto* watcher = new QFutureWatcher<QList<Event>>(this);
+        connect(watcher, &QFutureWatcherBase::finished, this,
+                [this, guard, accountId, generation, watcher, nextPage, nextSync]() {
+                  QList<Event> events = watcher->future().takeResult();
+                  watcher->deleteLater();
+                  if (guard != nullptr) {
+                    if (SyncJob* active = activeJob(accountId, generation);
+                        active != nullptr) {
+                      stageEventPage(active, std::move(events), nextPage, nextSync);
+                    }
+                  }
+                });
+        watcher->setFuture(QtConcurrent::run(
+            &m_mappingPool, [items, calendarId, defaults]() {
+              QList<Event> events;
+              events.reserve(items.size());
+              for (const QJsonValue& value : items) {
+                if (value.isObject()) {
+                  events.append(eventFromGoogleJson(value.toObject(), calendarId,
+                                                    defaults));
+                }
+              }
+              return events;
+            }));
+      });
+}
+
+void GoogleSync::stageEventPage(SyncJob* job, QList<Event> events,
+                                const QString& nextPage, const QString& nextSync) {
+  const QString accountId = job->accountId;
+  const quint64 generation = job->generation;
+  for (Event& event : events) {
+    if (!event.remoteId.isEmpty()) {
+      job->seenRemoteIds.insert(event.remoteId);
+    }
+    // Cancelled recurring instances are tombstone exceptions, not series
+    // deletions. Both full and incremental pulls stage them before applying.
+    if (event.deleted && event.recurrenceId.isEmpty()) {
+      job->stagedDeletedRemoteIds.append(event.remoteId);
+    } else {
+      job->stagedEvents.append(std::move(event));
+    }
+  }
+  if (!nextPage.isEmpty()) {
+    startEventPage(job, nextPage);
+    return;
+  }
+  if (!nextSync.isEmpty() && !job->hydrationSync) {
+    job->currentCalendar.syncToken = nextSync;
+  }
+  job->currentCalendar.lastSyncAt = QDateTime::currentDateTimeUtc();
+  QString error;
+  ChunkedSyncApply::Request batch;
+  batch.calendar = job->currentCalendar;
+  batch.events = std::move(job->stagedEvents);
+  batch.deletedRemoteIds = std::move(job->stagedDeletedRemoteIds);
+  if (job->eventFullSync) {
+    const QList<Event> coveredEvents = m_database->eventsBetween(
+        job->eventWindowStartUtc, job->eventWindowEndUtc, {batch.calendar.id}, &error);
+    if (!error.isEmpty()) {
+      finish(job, QStringLiteral("database_error"), error);
+      return;
+    }
+    batch.prunedRemoteIds =
+        googleFullSyncPruneCandidates(coveredEvents, job->seenRemoteIds);
+    batch.kind = ChunkedSyncApply::Request::Kind::Range;
+    batch.coverageStartUtc = job->eventWindowStartUtc;
+    batch.coverageEndUtc = job->eventWindowEndUtc;
+    batch.replaceCoverage = job->replaceEventCoverage;
+  }
+  auto* apply = new ChunkedSyncApply(m_database, this);
+  job->apply = apply;
+  connect(apply, &ChunkedSyncApply::chunkCommitted, this,
+          [this, accountId, generation](const QString& calendarId) {
+            SyncJob* active = activeJob(accountId, generation);
+            if (active != nullptr &&
+                !active->changedCalendarIds.contains(calendarId)) {
+              active->changedCalendarIds.append(calendarId);
+            }
+          });
+  apply->start(
+      std::move(batch),
+      [this, accountId, generation, apply](const bool succeeded,
+                                           const QString& applyError) {
+        SyncJob* active = activeJob(accountId, generation);
+        apply->deleteLater();
+        if (active == nullptr) {
           return;
         }
-        if (currentJob->hydrationSync) {
-          QList<RangeSyncRequest>& pending = m_pendingHydrations[currentJob->accountId];
+        active->apply = nullptr;
+        if (!succeeded) {
+          finish(active, QStringLiteral("database_error"), applyError);
+          return;
+        }
+        if (active->eventFullSync &&
+            !active->changedCalendarIds.contains(active->currentCalendar.id)) {
+          active->changedCalendarIds.append(active->currentCalendar.id);
+        }
+        if (active->hydrationSync) {
+          QList<RangeSyncRequest>& pending = m_pendingHydrations[accountId];
           if (!pending.isEmpty() &&
-              pending.first().calendarId == currentJob->hydrationRequest.calendarId &&
-              pending.first().startUtc == currentJob->hydrationRequest.startUtc &&
-              pending.first().endUtc == currentJob->hydrationRequest.endUtc) {
+              pending.first().calendarId == active->hydrationRequest.calendarId &&
+              pending.first().startUtc == active->hydrationRequest.startUtc &&
+              pending.first().endUtc == active->hydrationRequest.endUtc) {
             pending.removeFirst();
           }
-          syncNextHydration(currentJob);
+          syncNextHydration(active);
         } else {
-          syncNextCalendar(currentJob);
+          syncNextCalendar(active);
         }
       });
 }
@@ -2240,6 +2273,10 @@ void GoogleSync::finish(SyncJob* job, const QString& errorCode,
                          errorCode, errorMessage);
   m_status.insert(accountId, value);
   m_jobs.remove(accountId);
+  if (job->apply) {
+    job->apply->cancel();
+    job->apply->deleteLater();
+  }
   delete job;
   if (!changed.isEmpty()) {
     emit eventsChanged(changed);

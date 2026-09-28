@@ -4,10 +4,12 @@
 #include <QTemporaryDir>
 #include <QtTest>
 #include <algorithm>
+#include <utility>
 
 #include "core/database.h"
 #include "providers/caldav/icalcodec.h"
 #include "providers/ics/icsservice.h"
+#include "sync/chunkedsyncapply.h"
 
 using namespace omacalendar;
 
@@ -103,14 +105,22 @@ void IcsServiceTest::preservesCompleteRecurrenceAcrossFeedRefreshAndImport() {
     subscription.url = QStringLiteral("https://calendar.example.test/fixture.ics");
     QVERIFY(database.upsertIcsSubscription(subscription, &error));
     ics::IcsService service(&database);
-    QVERIFY2(
-        service.applyFeed(subscription, payload, QStringLiteral("one"), {}, &error),
-        qPrintable(error));
-    verify(database, calendar.id);
-    QVERIFY2(
-        service.applyFeed(subscription, payload, QStringLiteral("two"), {}, &error),
-        qPrintable(error));
-    verify(database, calendar.id);
+    for (const QString& revision : {QStringLiteral("one"), QStringLiteral("two")}) {
+      ChunkedSyncApply::Request batch;
+      QVERIFY2(service.prepareFeed(subscription, payload, revision, {}, &batch,
+                                   &error), qPrintable(error));
+      ChunkedSyncApply apply(&database);
+      bool completed = false;
+      bool succeeded = false;
+      apply.start(std::move(batch), [&](const bool ok, const QString& message) {
+        succeeded = ok;
+        error = message;
+        completed = true;
+      });
+      QTRY_VERIFY_WITH_TIMEOUT(completed, 5000);
+      QVERIFY2(succeeded, qPrintable(error));
+      verify(database, calendar.id);
+    }
     ics::IcsError operationError;
     const auto imported = service.commitImport(payload, QStringLiteral("local-default"),
                                                QStringLiteral("skip"), &operationError);

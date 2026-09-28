@@ -2175,11 +2175,14 @@ bool Database::removeOrphanedProviderResources(const QString& calendarId,
     DELETE FROM provider_resources
     WHERE calendar_id=? AND NOT EXISTS (
       SELECT 1 FROM events e
-      WHERE e.calendar_id=provider_resources.calendar_id AND e.remote_id<>'' AND (
-        e.remote_id=provider_resources.canonical_key OR
-        substr(e.remote_id,1,length(provider_resources.canonical_key)+1)=
-          provider_resources.canonical_key || '#'
-      )
+      WHERE e.calendar_id=provider_resources.calendar_id
+        AND e.remote_id<>'' AND e.remote_id=provider_resources.canonical_key
+    ) AND NOT EXISTS (
+      SELECT 1 FROM events e
+      WHERE e.calendar_id=provider_resources.calendar_id
+        AND e.remote_id<>''
+        AND e.remote_id>=provider_resources.canonical_key || '#'
+        AND e.remote_id<provider_resources.canonical_key || '$'
     )
   )SQL"));
   query.addBindValue(calendarId);
@@ -2751,7 +2754,8 @@ bool Database::applyRemoteSyncBatch(const Calendar& calendar,
                                     const QStringList& deletedRemoteIds,
                                     const QStringList& prunedRemoteIds,
                                     QString* errorMessage,
-                                    const QList<ProviderResource>& providerResources) {
+                                    const QList<ProviderResource>& providerResources,
+                                    const bool finalizeCalendar) {
   if (calendar.id.isEmpty()) {
     if (errorMessage != nullptr) {
       *errorMessage = QStringLiteral("A remote sync batch needs a calendar");
@@ -2841,10 +2845,9 @@ bool Database::applyRemoteSyncBatch(const Calendar& calendar,
       return fail(QStringLiteral("Unable to apply a staged remote deletion"));
     }
   }
-  if (!removeOrphanedProviderResources(calendar.id, errorMessage)) {
-    return fail(QStringLiteral("Unable to prune provider resources"));
-  }
-  if (!upsertCalendar(calendar, errorMessage)) {
+  if (finalizeCalendar &&
+      (!removeOrphanedProviderResources(calendar.id, errorMessage) ||
+       !upsertCalendar(calendar, errorMessage))) {
     return fail(QStringLiteral("Unable to commit the staged calendar state"));
   }
   QSqlQuery release(m_database);

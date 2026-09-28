@@ -87,6 +87,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND
 endif()
 
 find_package(Qt6 6.9 REQUIRED COMPONENTS
+  Concurrent
   Core
   DBus
   Gui
@@ -151,6 +152,8 @@ target_include_directories(omacalendar_ipc PUBLIC src)
 target_link_libraries(omacalendar_ipc PUBLIC Qt6::Core Qt6::Network)
 
 add_library(omacalendar_sync STATIC
+  src/sync/chunkedsyncapply.cpp
+  src/sync/chunkedsyncapply.h
   src/sync/provider.h
   src/sync/localprovider.cpp
   src/sync/localprovider.h
@@ -186,6 +189,7 @@ target_link_libraries(omacalendar_sync
     Qt6::Network
     Qt6::NetworkAuth
   PRIVATE
+    Qt6::Concurrent
     PkgConfig::LibIcal
 )
 

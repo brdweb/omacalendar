@@ -137,6 +137,7 @@ class CalDavRangeFixture final : public QObject {
   [[nodiscard]] bool probeResourceExists() const { return m_probeExists; }
   void failCleanupAfterCreate(bool fail) { m_failCleanupAfterCreate = fail; }
   [[nodiscard]] QByteArray lastPut() const { return m_lastPut; }
+  void setBulkEvents(const int count) { m_bulkEvents = count; }
 
  private:
   static QByteArray httpResponse(const QByteArray& status, const QByteArray& body,
@@ -148,6 +149,34 @@ class CalDavRangeFixture final : public QObject {
   }
 
   QByteArray multiStatusResource() const {
+    if (m_bulkEvents > 0) {
+      QByteArray body = QByteArrayLiteral(
+          "<?xml version=\"1.0\"?><d:multistatus xmlns:d=\"DAV:\" "
+          "xmlns:c=\"urn:ietf:params:xml:ns:caldav\">");
+      for (int index = 0; index < m_bulkEvents; ++index) {
+        const QByteArray number = QByteArray::number(index);
+        const QByteArray event =
+            QByteArrayLiteral("BEGIN:VCALENDAR\r\nVERSION:2.0\r\n"
+                              "BEGIN:VEVENT\r\nUID:bulk-") +
+            number + QByteArrayLiteral(
+                         "@example.test\r\nDTSTAMP:20260901T000000Z\r\n"
+                         "DTSTART:20260901T090000Z\r\n"
+                         "DTEND:20260901T093000Z\r\n"
+                         "SUMMARY:Bulk fixture\r\nEND:VEVENT\r\n"
+                         "END:VCALENDAR\r\n");
+        body += QByteArrayLiteral("<d:response><d:href>/calendar/bulk-") +
+                number + QByteArrayLiteral(
+                             ".ics</d:href><d:propstat><d:prop>"
+                             "<d:getetag>\"v1\"</d:getetag>"
+                             "<c:calendar-data><![CDATA[") +
+                event + QByteArrayLiteral(
+                            "]]></c:calendar-data></d:prop>"
+                            "<d:status>HTTP/1.1 200 OK</d:status>"
+                            "</d:propstat></d:response>");
+      }
+      return body + QByteArrayLiteral(
+                        "<d:sync-token>token-1</d:sync-token>");
+    }
     return QByteArrayLiteral(
                "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
                "<d:multistatus xmlns:d=\"DAV:\" "
@@ -312,6 +341,7 @@ class CalDavRangeFixture final : public QObject {
   bool m_loseProbeCreateAck = false;
   bool m_staleProbeWasSeeded = false;
   int m_probePutCount = 0;
+  int m_bulkEvents = 0;
   int m_probeDeleteCount = 0;
 };
 
@@ -515,6 +545,7 @@ class CalDavHardeningTest final : public QObject {
   void multigetBatchesAreBounded();
   void syncBudgetDeduplicatesAndCapsWork();
   void inlineCalendarResponsesRespectBudgets();
+  void providerCoalescesNotificationAcrossChunks();
   void futureRangeProbeCleansUpOnBudgetFailure();
   void readResourceUsesCalendarMultiGetReport();
   void scheduleReplyHeaderIsExplicit();
@@ -1465,6 +1496,27 @@ void CalDavHardeningTest::inlineCalendarResponsesRespectBudgets() {
     QVERIFY(database.eventsForCalendars({calendars.first().id}).isEmpty());
     qputenv("PATH", originalPath);
   }
+}
+
+void CalDavHardeningTest::providerCoalescesNotificationAcrossChunks() {
+  QTemporaryDir helperDirectory;
+  QByteArray originalPath;
+  QVERIFY(installFastSecretTool(&helperDirectory, &originalPath));
+  const auto restorePath = qScopeGuard([&]() { qputenv("PATH", originalPath); });
+  CalDavRangeFixture server;
+  server.setBulkEvents(70);
+  QVERIFY(server.listen());
+  Database database;
+  QString error;
+  QVERIFY2(database.open(QStringLiteral(":memory:"), &error), qPrintable(error));
+  caldav::CalDavSync sync(&database);
+  QSignalSpy notifications(&sync, &Provider::eventsChanged);
+  const QString accountId = setupRangeAccount(&server, &database, &sync, &error);
+  QVERIFY2(!accountId.isEmpty(), qPrintable(error));
+  const Calendar calendar = database.calendars(accountId).first();
+  QCOMPARE(database.eventsForCalendars({calendar.id}, &error).size(), 70);
+  QCOMPARE(notifications.count(), 1);
+  QCOMPARE(notifications.at(0).at(0).toStringList(), QStringList{calendar.id});
 }
 
 void CalDavHardeningTest::futureRangeProbeCleansUpOnBudgetFailure() {

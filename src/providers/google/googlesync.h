@@ -3,6 +3,7 @@
 #include <QHash>
 #include <QObject>
 #include <QSet>
+#include <QThreadPool>
 #include <QTimer>
 #include <functional>
 
@@ -72,6 +73,8 @@ class GoogleSync final : public Provider {
   void syncNextCalendar(SyncJob* job);
   void syncNextHydration(SyncJob* job);
   void startEventPage(SyncJob* job, const QString& pageToken = {});
+  void stageEventPage(SyncJob* job, QList<Event> events, const QString& nextPage,
+                      const QString& nextSync);
   void drainOutbox(SyncJob* job);
   void dispatchNextOutbox(SyncJob* job);
   void resolveOccurrenceAndDispatch(SyncJob* job, const OutboxItem& item,
@@ -98,6 +101,7 @@ class GoogleSync final : public Provider {
   GoogleAuthManager m_auth;
   GoogleClient m_client;
   RetryPolicy m_retryPolicy;
+  QThreadPool m_mappingPool;
   QTimer m_pollTimer;
   QHash<QString, SyncJob*> m_jobs;
   QHash<QString, PendingDisconnect*> m_pendingDisconnects;

@@ -4,6 +4,7 @@
 #include <QObject>
 #include <QSet>
 #include <QTimer>
+#include <QThreadPool>
 #include <memory>
 
 #include "core/database.h"
@@ -71,6 +72,7 @@ class CalDavSync final : public Provider {
 
   struct SyncJob;
   struct FutureCapabilityProbe;
+  struct ParsedResponse;
 
   bool refreshCachedTimeKinds(const QString& accountId, QString* errorMessage);
   void loadCredentialsAsync(const Account& account);
@@ -92,7 +94,10 @@ class CalDavSync final : public Provider {
   void applyCalendarResponse(SyncJob* job, const DavResponse& response, bool fullSync);
   void applyCalendarResources(SyncJob* job, const QList<CalDavResource>& resources,
                               const QString& responseSyncToken, bool fullSync);
+  void consumeCalendarResponse(SyncJob* job, QList<CalDavResource> resources,
+                               const QString& responseSyncToken, bool fullSync);
   void drainOutbox(SyncJob* job);
+  void parseNextResource(SyncJob* job, std::shared_ptr<ParsedResponse> state);
   void dispatchNextOutbox(SyncJob* job);
   void startFutureCapabilityProbe(SyncJob* job, const OutboxItem& item,
                                   const Calendar& calendar, const QUrl& calendarUrl);
@@ -143,6 +148,7 @@ class CalDavSync final : public Provider {
   AsyncSecretStore m_secrets;
   CalDavClient m_client;
   ResourceBudget m_resourceBudgetLimits;
+  QThreadPool m_parsePool;
   RetryPolicy m_retryPolicy;
   QTimer m_pollTimer;
   QHash<QString, SyncJob*> m_jobs;

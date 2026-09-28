@@ -94,6 +94,28 @@ ctest --test-dir build-performance \
 A failed hardware gate is a release blocker until a repeat run on the same idle
 reference machine confirms whether the cause is a regression or host contention.
 
+## Sync-time widget latency
+
+`sync_latency.py` runs an isolated daemon against a deterministic 20,000-event
+CalDAV response served on loopback. A disposable `secret-tool` stand-in lives
+only in the harness's temporary `PATH`; neither the real keyring nor any external
+provider is contacted. The script samples full `widget.snapshot` calls during
+provider parsing and chunked database apply, verifies the final event count and
+sync token, and reports every sample plus nearest-rank p95 and max against the
+existing 100 ms widget gate. The script exits nonzero on either latency failure
+when `--enforce-gate` is supplied. Run it on idle reference hardware:
+
+```sh
+python3 scripts/performance/sync_latency.py \
+  --daemon build-performance/omacalendard \
+  --output build-performance/sync-latency.json \
+  --enforce-gate
+```
+
+This measures the real daemon IPC path while applying remote events, rather
+than timing offline SQLite fixture insertion. The HTTP fixture binds only to
+127.0.0.1 and the daemon uses separate temporary XDG directories and socket.
+
 ## Desktop view benchmark
 
 The daemon gate above does not cover the desktop app, which can spend far

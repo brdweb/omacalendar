@@ -428,6 +428,10 @@ bool IcsService::disconnectAccount(const QString& accountId,
     }
     return false;
   }
+  if (auto apply = m_applies.take(accountId); apply) {
+    apply->cancel();
+    apply->deleteLater();
+  }
   removeSubscriptionCredentials(accountId);
   m_refreshing.remove(accountId);
   m_lastAttemptAt.remove(accountId);
@@ -476,6 +480,10 @@ bool IcsService::updateCredentials(const QString& accountId, const QString& user
                                     false, errorMessage) ||
       !m_database->upsertAccount(account, errorMessage)) {
     return false;
+  }
+  if (auto apply = m_applies.take(accountId); apply) {
+    apply->cancel();
+    apply->deleteLater();
   }
   m_refreshing.remove(accountId);
   emit accountChanged(accountId);
@@ -764,13 +772,39 @@ void IcsService::beginFetch(const std::shared_ptr<FetchContext>& context,
                       publicNetworkError(status, networkError), retryable);
           return;
         }
+        ChunkedSyncApply::Request batch;
         QString applyError;
-        if (!applyFeed(context->subscription, context->body, etag, modified,
-                       &applyError)) {
+        if (!prepareFeed(context->subscription, context->body, etag, modified,
+                         &batch, &applyError)) {
           finishFetch(context, QStringLiteral("invalid_calendar"), applyError);
           return;
         }
-        finishFetch(context);
+        const QString accountId = context->subscription.accountId;
+        const QString calendarId = batch.calendar.id;
+        auto* apply = new ChunkedSyncApply(m_database, this);
+        m_applies.insert(accountId, apply);
+        auto changed = std::make_shared<bool>(false);
+        connect(apply, &ChunkedSyncApply::chunkCommitted, this,
+                [changed](const QString&) { *changed = true; });
+        apply->start(std::move(batch),
+                     [this, context, apply, accountId, calendarId, changed](
+                         const bool succeeded, const QString& error) {
+                       apply->deleteLater();
+                       if (m_applies.value(accountId) != apply) {
+                         return;
+                       }
+                       m_applies.remove(accountId);
+                       if (!succeeded) {
+                         if (*changed) {
+                           emit eventsChanged({calendarId});
+                         }
+                         finishFetch(context, QStringLiteral("database_error"), error);
+                         return;
+                       }
+                       emit eventsChanged({calendarId});
+                       emit calendarsChanged(accountId);
+                       finishFetch(context);
+                     });
       });
 }
 
@@ -812,11 +846,15 @@ QString IcsService::remoteIdentity(const Event& event) {
              : event.uid + QStringLiteral("#") + event.recurrenceId;
 }
 
-bool IcsService::applyFeed(const IcsSubscription& subscription,
-                           const QByteArray& payload, const QString& etag,
-                           const QString& lastModified, QString* errorMessage) {
-  const caldav::ICalendarParseResult parsed = caldav::ICalendarCodec::parse(payload);
-  const QByteArray upperPayload = payload.toUpper();
+bool IcsService::prepareFeed(const IcsSubscription& subscription,
+                             const QByteArray& payload, const QString& etag,
+                             const QString& lastModified,
+                             ChunkedSyncApply::Request* batch,
+                             QString* errorMessage) {
+  caldav::ICalendarParseResult parsed = caldav::ICalendarCodec::parse(payload);
+  const QByteArray upperPayload =
+      parsed.error.code == QStringLiteral("no_events") ? payload.toUpper()
+                                                        : QByteArray{};
   const bool emptyCalendar = parsed.error.code == QStringLiteral("no_events") &&
                              upperPayload.contains("BEGIN:VCALENDAR") &&
                              upperPayload.contains("END:VCALENDAR");
@@ -854,7 +892,7 @@ bool IcsService::applyFeed(const IcsSubscription& subscription,
   }
   QList<Event> replacementEvents;
   replacementEvents.reserve(parsed.events.size());
-  for (Event event : parsed.events) {
+  for (Event& event : parsed.events) {
     const QString identity = remoteIdentity(event);
     event.id.clear();
     event.calendarId = calendar.id;
@@ -876,15 +914,15 @@ bool IcsService::applyFeed(const IcsSubscription& subscription,
       staleRemoteIds.append(event.remoteId);
     }
   }
-  const QDateTime now = QDateTime::currentDateTimeUtc();
-  calendar.lastSyncAt = now;
+  batch->kind = ChunkedSyncApply::Request::Kind::IcsFeed;
+  calendar.lastSyncAt = QDateTime::currentDateTimeUtc();
   calendar.etag = etag;
-  if (!m_database->applyIcsFeedReplacement(calendar, replacementEvents, staleRemoteIds,
-                                           etag, lastModified, now, errorMessage)) {
-    return false;
-  }
-  emit eventsChanged({calendar.id});
-  emit calendarsChanged(subscription.accountId);
+  batch->calendar = std::move(calendar);
+  batch->events = std::move(replacementEvents);
+  batch->prunedRemoteIds = std::move(staleRemoteIds);
+  batch->etag = etag;
+  batch->lastModified = lastModified;
+  batch->successAt = batch->calendar.lastSyncAt;
   return true;
 }
 
