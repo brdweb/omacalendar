@@ -49,6 +49,14 @@ void SyncCoordinator::start() {
   }
 }
 
+void SyncCoordinator::setPollInterval(const int intervalMs) {
+  for (Provider* provider : std::as_const(m_providers)) {
+    if (provider != nullptr) {
+      provider->setPollInterval(intervalMs);
+    }
+  }
+}
+
 void SyncCoordinator::syncAll() {
   for (Provider* provider : std::as_const(m_providers)) {
     if (provider != nullptr) {

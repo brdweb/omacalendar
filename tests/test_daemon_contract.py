@@ -1542,6 +1542,24 @@ def run_search_attendee_contract(harness: DaemonHarness) -> None:
         assert_ipc_error(harness.call_error("events.search", params), "invalid_params", context)
 
 
+def run_sync_set_interactive_contract(harness: DaemonHarness) -> None:
+    result = harness.call("sync.setInteractive", {"interactive": True})
+    require(result.get("interactive") is True, f"sync.setInteractive did not apply: {result}")
+    require(result.get("pollIntervalSeconds") == 120,
+            f"sync.setInteractive did not shorten polling: {result}")
+    require(isinstance(result.get("leaseSeconds"), int) and result["leaseSeconds"] > 0,
+            "sync.setInteractive did not report its lease")
+    result = harness.call("sync.setInteractive", {"interactive": False})
+    require(result.get("interactive") is False and result.get("pollIntervalSeconds") >= 300,
+            f"sync.setInteractive did not restore polling: {result}")
+    for params, context in (
+        ({}, "sync.setInteractive without a value"),
+        ({"interactive": "yes"}, "sync.setInteractive with a non-boolean"),
+    ):
+        assert_ipc_error(harness.call_error("sync.setInteractive", params), "invalid_params",
+                         context)
+
+
 def run_settings_get_many_contract(harness: DaemonHarness) -> None:
     harness.call("settings.set", {"key": "workDayStart", "value": 7})
     keys = ["workDayStart", "timeFormat", "defaultCalendarId"]
@@ -1739,6 +1757,7 @@ def run_contract(harness: DaemonHarness) -> None:
     run_settings_get_many_contract(harness)
     run_contacts_suggest_contract(harness)
     run_search_attendee_contract(harness)
+    run_sync_set_interactive_contract(harness)
     for owned_directory in (
         harness.root / "data" / "omacalendar",
         harness.root / "config" / "omacalendar",

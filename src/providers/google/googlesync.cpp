@@ -789,6 +789,13 @@ void GoogleSync::finishDisconnect(const QString& accountId, const bool secretRem
   emit accountChanged(accountId);
 }
 
+void GoogleSync::setPollInterval(const int intervalMs) {
+  // Changing the interval restarts the countdown, so only do it on a change.
+  if (intervalMs > 0 && intervalMs != m_pollTimer.interval()) {
+    m_pollTimer.setInterval(intervalMs);
+  }
+}
+
 void GoogleSync::syncAll() {
   QString error;
   const QList<Account> accounts = m_database->accounts(&error);

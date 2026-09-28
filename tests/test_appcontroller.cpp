@@ -64,7 +64,8 @@ class FakeDaemon final : public QObject {
   void setConflicts(const QJsonArray& conflicts) { m_conflicts = conflicts; }
   void setContacts(const QJsonArray& contacts) { m_contacts = contacts; }
   void setAccounts(const QJsonArray& accounts) { m_accounts = accounts; }
-  // Event mutations received, oldest first, as {method, params}.
+  // Event mutations and sync.setInteractive requests received, oldest first,
+  // as {method, params}.
   [[nodiscard]] QList<QPair<QString, QJsonObject>> mutations() const {
     return m_mutations;
   }
@@ -175,6 +176,8 @@ class FakeDaemon final : public QObject {
             QStringLiteral("result"),
             QJsonObject{{QStringLiteral("undoToken"),
                          QStringLiteral("token-%1").arg(m_mutations.size())}});
+      } else if (method == QStringLiteral("sync.setInteractive")) {
+        m_mutations.append({method, params});
       } else if (method == QStringLiteral("events.undo")) {
         m_mutations.append({method, params});
         response.insert(
@@ -313,6 +316,7 @@ class AppControllerTest final : public QObject {
   void accountSyncStatesFollowTheDaemon();
   void undoAndRedoWalkTheHistory();
   void secondaryTimeLabelsFollowBothZones();
+  void windowActivityReachesTheDaemon();
 
  private:
   QTemporaryDir m_xdgRoot;
@@ -1168,6 +1172,28 @@ void AppControllerTest::secondaryTimeLabelsFollowBothZones() {
               .secondaryTimeLabels(QStringLiteral("2026-09-28"),
                                    QStringLiteral("Not/AZone"))
               .isEmpty());
+}
+
+void AppControllerTest::windowActivityReachesTheDaemon() {
+  FakeDaemon daemon(0);
+  QVERIFY(daemon.listen());
+  AppController controller;
+  QTRY_VERIFY(controller.connected());
+  const auto interactiveRequests = [&daemon]() {
+    QList<bool> values;
+    for (const auto& request : daemon.mutations()) {
+      if (request.first == QStringLiteral("sync.setInteractive")) {
+        values.append(request.second.value(QStringLiteral("interactive")).toBool());
+      }
+    }
+    return values;
+  };
+  controller.setInteractive(true);
+  QTRY_COMPARE(interactiveRequests(), QList<bool>{true});
+  // Only changes are sent; the renewal timer repeats "true" later.
+  controller.setInteractive(true);
+  controller.setInteractive(false);
+  QTRY_COMPARE(interactiveRequests(), (QList<bool>{true, false}));
 }
 
 #include "test_appcontroller.moc"

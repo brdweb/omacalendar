@@ -164,6 +164,9 @@ class AppController final : public QObject {
   Q_INVOKABLE void setCurrentView(const QString& view);
   // Undo and redo walk a bounded history of event edits, creates and
   // deletes. undoLastMutation is kept for older callers.
+  // While the window is active the daemon polls providers more often; the
+  // controller renews that before the daemon's lease runs out.
+  Q_INVOKABLE void setInteractive(bool interactive);
   Q_INVOKABLE void undo();
   Q_INVOKABLE void redo();
   Q_INVOKABLE void undoLastMutation();
@@ -343,6 +346,9 @@ class AppController final : public QObject {
   bool m_googleOAuthConfigured = false;
   QString m_activeCalendarSetId = QStringLiteral("all-calendars");
   QUrl m_pendingDeepLink;
+  bool m_interactive = false;
+  QTimer m_interactiveRenewal;
+  void sendInteractive();
   QList<HistoryEntry> m_undoHistory;
   QList<HistoryEntry> m_redoHistory;
 };

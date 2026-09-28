@@ -237,6 +237,8 @@ class Provider : public QObject {
   [[nodiscard]] virtual ProviderCapabilities capabilities() const = 0;
 
   virtual void start() {}
+  // How often to poll for remote changes; adapters without polling ignore it.
+  virtual void setPollInterval(int intervalMs) { Q_UNUSED(intervalMs) }
   virtual void syncAll() = 0;
   virtual void syncAccount(const QString& accountId) = 0;
   // Queue a bounded historical/future hydration. Implementations must return

@@ -33,6 +33,7 @@ class SyncCoordinator final : public QObject {
                   QObject* parent = nullptr);
 
   void start();
+  void setPollInterval(int intervalMs);
   void syncAll();
   bool syncAccount(const QString& accountId, QString* errorMessage = nullptr);
   bool syncCalendar(const QString& calendarId, QString* errorMessage = nullptr);

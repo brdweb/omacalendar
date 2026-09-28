@@ -85,6 +85,10 @@ QString normalizedGuestPolicy(const QString& value) {
 
 AppController::AppController(QObject* parent) : QObject(parent) {
   m_refreshTimer.setSingleShot(true);
+  // The daemon's interactive lease is 10 minutes.
+  m_interactiveRenewal.setInterval(5 * 60 * 1000);
+  connect(&m_interactiveRenewal, &QTimer::timeout, this,
+          &AppController::sendInteractive);
   m_refreshTimer.setInterval(120);
   connect(&m_refreshTimer, &QTimer::timeout, this, [this]() {
     const int parts = std::exchange(m_pendingRefreshParts, 0);
@@ -117,6 +121,10 @@ AppController::AppController(QObject* parent) : QObject(parent) {
       m_settingsGetManySupported = true;
       setError({});
       setStatus(tr("Calendar service connected"));
+      if (m_interactive) {
+        // A restarted daemon has forgotten that the window is in use.
+        sendInteractive();
+      }
       QJsonObject subscription{
           {QStringLiteral("topics"),
            QJsonArray{QStringLiteral("accounts"), QStringLiteral("calendars"),
@@ -1535,6 +1543,30 @@ void AppController::activateCalendarSet(const QString& setId) {
 
 void AppController::setCurrentView(const QString& view) {
   setPreference(QStringLiteral("currentView"), view);
+}
+
+void AppController::setInteractive(const bool interactive) {
+  if (interactive == m_interactive) {
+    return;
+  }
+  m_interactive = interactive;
+  if (interactive) {
+    m_interactiveRenewal.start();
+  } else {
+    m_interactiveRenewal.stop();
+  }
+  sendInteractive();
+}
+
+void AppController::sendInteractive() {
+  if (!connected()) {
+    return;
+  }
+  // Daemons from before this method answer method_not_found; polling then
+  // simply stays at its default.
+  send(QStringLiteral("sync.setInteractive"),
+       {{QStringLiteral("interactive"), m_interactive}}, {}, false,
+       [](const QJsonObject&) { return true; });
 }
 
 bool AppController::canUndo() const { return !m_undoHistory.isEmpty(); }

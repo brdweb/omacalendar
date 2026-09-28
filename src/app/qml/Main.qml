@@ -116,6 +116,9 @@ ApplicationWindow {
     readonly property var latestSyncDate: latestCalendarSync()
 
     onWidthChanged: updateSidebarForWidth()
+    // Tells the daemon to poll providers more often while this window is in
+    // use.
+    onActiveChanged: window.callApp("setInteractive", [window.active])
 
     Timer {
         interval: 60000

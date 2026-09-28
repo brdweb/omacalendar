@@ -13,6 +13,7 @@
 #include "providers/google/googlesync.h"
 #include "providers/ics/icsservice.h"
 #include "reminders/reminderscheduler.h"
+#include "sync/syncactivity.h"
 #include "sync/synccoordinator.h"
 
 namespace omacalendar {
@@ -129,6 +130,8 @@ class Daemon final : public QObject {
   [[nodiscard]] QJsonValue onSyncStatus(const QJsonObject& params,
                                         ipc::Error* error) const;
   [[nodiscard]] QJsonValue onSyncCalendar(const QJsonObject& params, ipc::Error* error);
+  [[nodiscard]] QJsonValue onSyncSetInteractive(const QJsonObject& params,
+                                                ipc::Error* error);
   [[nodiscard]] QJsonValue onWidgetSnapshot(const QJsonObject& params,
                                             ipc::Error* error);
 
@@ -146,6 +149,7 @@ class Daemon final : public QObject {
   caldav::CalDavSync m_caldav;
   ics::IcsService m_ics;
   SyncCoordinator m_sync;
+  SyncActivity m_activity;
   ReminderScheduler m_reminders;
   QList<Event> m_invitationReadCache;
   qint64 m_invitationReadCacheRevision = -1;
