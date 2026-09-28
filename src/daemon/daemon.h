@@ -132,6 +132,8 @@ class Daemon final : public QObject {
   [[nodiscard]] QJsonValue onSyncCalendar(const QJsonObject& params, ipc::Error* error);
   [[nodiscard]] QJsonValue onSyncSetInteractive(const QJsonObject& params,
                                                 ipc::Error* error);
+  [[nodiscard]] QJsonValue onFreeBusyQuery(const QJsonObject& params,
+                                           ipc::Error* error);
   [[nodiscard]] QJsonValue onWidgetSnapshot(const QJsonObject& params,
                                             ipc::Error* error);
 
@@ -154,6 +156,13 @@ class Daemon final : public QObject {
   QList<Event> m_invitationReadCache;
   qint64 m_invitationReadCacheRevision = -1;
   QDateTime m_invitationReadCacheExpiresAt;
+  // Remote free/busy answers by "email|start|end", kept briefly so the editor
+  // can re-ask as guests change without repeating the provider round trip.
+  struct FreeBusyCacheEntry {
+    QList<BusyInterval> busy;
+    QDateTime expiresAt;
+  };
+  QHash<QString, FreeBusyCacheEntry> m_freeBusyCache;
 };
 
 }  // namespace omacalendar

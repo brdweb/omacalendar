@@ -643,6 +643,8 @@ ApplicationWindow {
         id: editor
         defaultDurationMinutes: Number(window.preferences.defaultDuration || 60)
         defaultCalendarId: String(window.preferences.defaultCalendarId || "")
+        workDayStart: Number(window.preferences.workDayStart || 8)
+        workDayEnd: Number(window.preferences.workDayEnd || 18)
         onSaveRequested: (value, options) => window.saveEvent(value, options)
         onRemoveRequested: (eventId, options) => window.removeEvent(eventId, options)
         onDuplicateRequested: value => window.duplicateEvent(value)

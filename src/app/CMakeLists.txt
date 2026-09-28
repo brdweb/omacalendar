@@ -38,6 +38,7 @@ qt_add_qml_module(omacalendar
     qml/components/AccountSettingsDrawer.qml
     qml/components/ActivityPanel.qml
     qml/components/AttendeeEditor.qml
+    qml/components/AvailabilityStrip.qml
     qml/components/CalendarSidebar.qml
     qml/components/ConflictMergeDialog.qml
     qml/components/EmptyState.qml

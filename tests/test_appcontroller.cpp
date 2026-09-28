@@ -170,6 +170,22 @@ class FakeDaemon final : public QObject {
                 {QStringLiteral("code"), QStringLiteral("conflict")},
                 {QStringLiteral("message"), QStringLiteral("The event changed")},
                 {QStringLiteral("retryable"), false}});
+      } else if (method == QStringLiteral("freebusy.query")) {
+        m_mutations.append({method, params});
+        response.insert(
+            QStringLiteral("result"),
+            QJsonObject{
+                {QStringLiteral("requestId"), QStringLiteral("request-1")},
+                {QStringLiteral("start"), params.value("start")},
+                {QStringLiteral("end"), params.value("end")},
+                {QStringLiteral("self"),
+                 QJsonArray{QJsonObject{{QStringLiteral("start"),
+                                         QStringLiteral("2026-09-28T09:00:00.000Z")},
+                                        {QStringLiteral("end"),
+                                         QStringLiteral("2026-09-28T10:00:00.000Z")}}}},
+                {QStringLiteral("attendees"), QJsonObject{}},
+                {QStringLiteral("pending"), params.value("attendees")},
+                {QStringLiteral("unavailable"), QJsonArray{}}});
       } else if (method == QStringLiteral("events.search")) {
         m_mutations.append({method, params});
         response.insert(QStringLiteral("result"),
@@ -335,6 +351,7 @@ class AppControllerTest final : public QObject {
   void windowActivityReachesTheDaemon();
   void failedUndoStaysAvailable();
   void guestOnlySearchReachesTheDaemon();
+  void freeBusyAnswersMergeAndFindASlot();
 
  private:
   QTemporaryDir m_xdgRoot;
@@ -1254,6 +1271,62 @@ void AppControllerTest::guestOnlySearchReachesTheDaemon() {
   QCOMPARE(daemon.mutations().first().first, QStringLiteral("events.search"));
   QCOMPARE(daemon.mutations().first().second.value("attendee").toString(),
            QStringLiteral("sam"));
+}
+
+void AppControllerTest::freeBusyAnswersMergeAndFindASlot() {
+  FakeDaemon daemon(0);
+  QVERIFY(daemon.listen());
+  AppController controller;
+  QTRY_VERIFY(controller.connected());
+  QSignalSpy changed(&controller, &AppController::freeBusyChanged);
+  controller.queryFreeBusy(QStringLiteral("2026-09-28T00:00:00.000Z"),
+                           QStringLiteral("2026-10-05T00:00:00.000Z"),
+                           {QStringLiteral("sam@example.com")},
+                           QStringLiteral("calendar-1"), QStringLiteral("event-1"), {});
+  QTRY_COMPARE(changed.count(), 1);
+  const QJsonObject request = daemon.mutations().first().second;
+  QCOMPARE(request.value("excludeEventId").toString(), QStringLiteral("event-1"));
+  QCOMPARE(request.value("calendarId").toString(), QStringLiteral("calendar-1"));
+  QCOMPARE(controller.freeBusy().value(QStringLiteral("pending")).toList().size(), 1);
+
+  // A later answer for another request is ignored; this one merges in.
+  daemon.broadcast(QStringLiteral("events.freeBusy"),
+                   {{QStringLiteral("requestId"), QStringLiteral("other")},
+                    {QStringLiteral("attendees"), QJsonObject{}}});
+  daemon.broadcast(
+      QStringLiteral("events.freeBusy"),
+      {{QStringLiteral("requestId"), QStringLiteral("request-1")},
+       {QStringLiteral("attendees"),
+        QJsonObject{
+            {QStringLiteral("sam@example.com"),
+             QJsonArray{QJsonObject{
+                 {QStringLiteral("start"), QStringLiteral("2026-09-28T10:00:00.000Z")},
+                 {QStringLiteral("end"),
+                  QStringLiteral("2026-09-28T11:00:00.000Z")}}}}}},
+       {QStringLiteral("unavailable"), QJsonArray{}}});
+  QTRY_COMPARE(changed.count(), 2);
+  const QVariantMap merged = controller.freeBusy();
+  QVERIFY(merged.value(QStringLiteral("pending")).toList().isEmpty());
+  const QVariantList samBusy = merged.value(QStringLiteral("attendees"))
+                                   .toMap()
+                                   .value(QStringLiteral("sam@example.com"))
+                                   .toList();
+  QCOMPARE(samBusy.size(), 1);
+
+  // You are busy 09:00-10:00 and Sam 10:00-11:00: the next free hour in
+  // Berlin working hours (08:00-18:00, UTC+2) starts at 11:00 UTC.
+  QVariantList busy = merged.value(QStringLiteral("self")).toList();
+  busy.append(samBusy);
+  QCOMPARE(controller.nextFreeSlot(busy, QStringLiteral("2026-09-28T09:00:00.000Z"), 60,
+                                   8, 18, QStringLiteral("2026-10-05T00:00:00.000Z"),
+                                   QStringLiteral("Europe/Berlin")),
+           QStringLiteral("2026-09-28T11:00:00.000Z"));
+  // With no room before the horizon there is no slot.
+  QVERIFY(controller
+              .nextFreeSlot(busy, QStringLiteral("2026-09-28T09:00:00.000Z"), 60, 8, 18,
+                            QStringLiteral("2026-09-28T11:30:00.000Z"),
+                            QStringLiteral("Europe/Berlin"))
+              .isEmpty());
 }
 
 #include "test_appcontroller.moc"

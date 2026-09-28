@@ -17,6 +17,7 @@
 #include <utility>
 
 #include "core/domain.h"
+#include "core/freebusy.h"
 #include "core/paths.h"
 #include "core/quickadd.h"
 #include "providers/google/googleoauthconfig.h"
@@ -205,6 +206,28 @@ AppController::AppController(QObject* parent) : QObject(parent) {
           return;
         }
         const int parts = refreshPartsForNotification(event);
+        if (event == QStringLiteral("events.freeBusy")) {
+          // A remote answer for the free/busy request on screen.
+          if (data.value(QStringLiteral("requestId")).toString() ==
+              m_freeBusy.value(QStringLiteral("requestId")).toString()) {
+            QVariantMap attendees =
+                m_freeBusy.value(QStringLiteral("attendees")).toMap();
+            const QVariantMap answered =
+                data.value(QStringLiteral("attendees")).toObject().toVariantMap();
+            for (auto it = answered.cbegin(); it != answered.cend(); ++it) {
+              attendees.insert(it.key(), it.value());
+            }
+            QVariantList unavailable =
+                m_freeBusy.value(QStringLiteral("unavailable")).toList();
+            unavailable.append(
+                data.value(QStringLiteral("unavailable")).toArray().toVariantList());
+            m_freeBusy.insert(QStringLiteral("attendees"), attendees);
+            m_freeBusy.insert(QStringLiteral("unavailable"), unavailable);
+            m_freeBusy.insert(QStringLiteral("pending"), QVariantList{});
+            emit freeBusyChanged();
+          }
+          return;
+        }
         if (event == QStringLiteral("events.changed")) {
           // Subscriptions announce a refresh only through changed events.
           refreshAccountSyncStates(true);
@@ -1576,6 +1599,65 @@ void AppController::sendInteractive() {
   send(QStringLiteral("sync.setInteractive"),
        {{QStringLiteral("interactive"), m_interactive}}, {}, false,
        [](const QJsonObject&) { return true; });
+}
+
+QVariantMap AppController::freeBusy() const { return m_freeBusy; }
+
+QTimeZone AppController::displayTimeZone() const {
+  const QString requested =
+      m_preferences.value(QStringLiteral("displayTimeZone")).toString().trimmed();
+  const QTimeZone zone = requested.isEmpty() ? QTimeZone(QTimeZone::LocalTime)
+                                             : QTimeZone(requested.toUtf8());
+  return zone.isValid() ? zone : QTimeZone(QTimeZone::LocalTime);
+}
+
+void AppController::queryFreeBusy(const QString& start, const QString& end,
+                                  const QStringList& emails, const QString& calendarId,
+                                  const QString& excludeEventId,
+                                  const QString& excludeRecurrenceId) {
+  if (!connected()) {
+    return;
+  }
+  QJsonObject params{{QStringLiteral("start"), start},
+                     {QStringLiteral("end"), end},
+                     {QStringLiteral("attendees"), QJsonArray::fromStringList(emails)}};
+  if (!calendarId.isEmpty()) {
+    params.insert(QStringLiteral("calendarId"), calendarId);
+  }
+  if (!excludeEventId.isEmpty()) {
+    params.insert(QStringLiteral("excludeEventId"), excludeEventId);
+    params.insert(QStringLiteral("excludeRecurrenceId"), excludeRecurrenceId);
+  }
+  // Older daemons lack freebusy.query; the editor then shows no strip.
+  send(
+      QStringLiteral("freebusy.query"), params,
+      [this](const QJsonValue& value) {
+        m_freeBusy = value.toObject().toVariantMap();
+        emit freeBusyChanged();
+      },
+      false, [](const QJsonObject&) { return true; });
+}
+
+QString AppController::nextFreeSlot(const QVariantList& busy, const QString& earliest,
+                                    const int durationMinutes,
+                                    const int workDayStartHour,
+                                    const int workDayEndHour, const QString& horizon,
+                                    const QString& timeZoneId) const {
+  QList<BusyInterval> intervals;
+  for (const QVariant& value : busy) {
+    const QVariantMap span = value.toMap();
+    intervals.append({dateTimeFromIso(span.value(QStringLiteral("start")).toString()),
+                      dateTimeFromIso(span.value(QStringLiteral("end")).toString())});
+  }
+  const QDateTime slot = omacalendar::nextFreeSlot(
+      intervals, dateTimeFromIso(earliest), durationMinutes, workDayStartHour,
+      workDayEndHour,
+      timeZoneId.trimmed().isEmpty() ||
+              !QTimeZone(timeZoneId.trimmed().toUtf8()).isValid()
+          ? displayTimeZone()
+          : QTimeZone(timeZoneId.trimmed().toUtf8()),
+      dateTimeFromIso(horizon));
+  return slot.isValid() ? isoUtc(slot) : QString();
 }
 
 bool AppController::canUndo() const { return !m_undoHistory.isEmpty(); }

@@ -1560,6 +1560,59 @@ def run_sync_set_interactive_contract(harness: DaemonHarness) -> None:
                          context)
 
 
+def run_freebusy_contract(harness: DaemonHarness) -> None:
+    def create(name: str, start: str, end: str, transparency: str) -> None:
+        harness.call(
+            "events.create",
+            {
+                "clientMutationId": f"contract-freebusy-{name}",
+                "recurrenceScope": "series",
+                "guestNotificationPolicy": "none",
+                "event": {
+                    "calendarId": "local-default",
+                    "summary": name,
+                    "startUtc": start,
+                    "endUtc": end,
+                    "startTimeZone": "UTC",
+                    "endTimeZone": "UTC",
+                    "allDay": False,
+                    "timeKind": "zoned",
+                    "transparency": transparency,
+                },
+            },
+        )
+
+    create("busy-a", "2026-11-03T09:00:00Z", "2026-11-03T10:00:00Z", "opaque")
+    create("busy-b", "2026-11-03T09:30:00Z", "2026-11-03T11:00:00Z", "opaque")
+    create("free", "2026-11-03T13:00:00Z", "2026-11-03T14:00:00Z", "transparent")
+    result = harness.call(
+        "freebusy.query",
+        {"start": "2026-11-03T00:00:00Z", "end": "2026-11-04T00:00:00Z",
+         "attendees": ["Someone@Example.com"]},
+    )
+    self_busy = [(span["start"][11:16], span["end"][11:16]) for span in result["self"]]
+    require(self_busy == [("09:00", "11:00")],
+            f"freebusy.query did not merge busy time or skip free events: {self_busy}")
+    require(result.get("pending") == [], "freebusy.query queued a remote lookup without Google")
+    require(result.get("unavailable") == [{"email": "someone@example.com",
+                                           "reason": "unsupported"}],
+            f"freebusy.query did not report the guest as unavailable: {result}")
+    require(isinstance(result.get("requestId"), str) and result["requestId"],
+            "freebusy.query returned no request id")
+    for params, context in (
+        ({"start": "2026-11-03T00:00:00Z"}, "freebusy.query without an end"),
+        ({"start": "2026-11-03T00:00:00Z", "end": "2026-11-20T00:00:00Z"},
+         "freebusy.query over more than 8 days"),
+        ({"start": "2026-11-03T00:00:00Z", "end": "2026-11-04T00:00:00Z",
+          "attendees": ["not-an-address"]}, "freebusy.query with a bad address"),
+        ({"start": "2026-11-03T00:00:00Z", "end": "2026-11-04T00:00:00Z",
+          "attendees": [f"guest{index}@example.com" for index in range(21)]},
+         "freebusy.query with too many attendees"),
+    ):
+        assert_ipc_error(harness.call_error("freebusy.query", params), "invalid_params",
+                         context)
+
+
 def run_settings_get_many_contract(harness: DaemonHarness) -> None:
     harness.call("settings.set", {"key": "workDayStart", "value": 7})
     keys = ["workDayStart", "timeFormat", "defaultCalendarId"]
@@ -1758,6 +1811,7 @@ def run_contract(harness: DaemonHarness) -> None:
     run_contacts_suggest_contract(harness)
     run_search_attendee_contract(harness)
     run_sync_set_interactive_contract(harness)
+    run_freebusy_contract(harness)
     for owned_directory in (
         harness.root / "data" / "omacalendar",
         harness.root / "config" / "omacalendar",

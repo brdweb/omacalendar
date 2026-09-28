@@ -22,6 +22,19 @@ Dialog {
     property string validationError: ""
     property int defaultStartMinute: 540
     property int defaultDurationMinutes: 60
+    property int workDayStart: 8
+    property int workDayEnd: 18
+    // Start (UTC ISO) of the free/busy window this editor last asked for, so a
+    // stale answer for another event is not shown.
+    property string freeBusyWindowStart: ""
+    property string freeTimeMessage: ""
+    readonly property var guestEmails: attendeeEditor.attendees.map(function(value) {
+        return String(value.email || "")
+    }).filter(function(email) { return email.length > 0 })
+    readonly property bool showAvailability: guestEmails.length > 0 && !allDay.checked
+                                             && Boolean(App.freeBusy && App.freeBusy.start)
+                                             && Date.parse(App.freeBusy.start)
+                                                === Date.parse(freeBusyWindowStart)
     property string defaultCalendarId: ""
     readonly property var sourceCalendar: calendarForId(eventData.calendarId || "")
     readonly property bool readOnly: Boolean(eventData && eventData.readOnly)
@@ -131,6 +144,85 @@ Dialog {
             }
         }
         recurrenceEditor.load(draft.recurrenceRule || "")
+    }
+
+    // Asks the daemon who is busy over the week starting on the event's day.
+    function requestFreeBusy() {
+        freeTimeMessage = ""
+        if (!opened || allDay.checked || guestEmails.length === 0
+                || typeof App.queryFreeBusy !== "function")
+            return
+        const start = App.wallTimeToUtc(startDateField.text, "00:00", selectedTimeZone())
+        if (!start)
+            return
+        freeBusyWindowStart = start
+        const end = new Date(Date.parse(start) + 7 * 86400000).toISOString()
+        App.queryFreeBusy(start, end, guestEmails,
+                          writableCalendars[calendarBox.currentIndex]
+                          ? String(writableCalendars[calendarBox.currentIndex].id) : "",
+                          String(eventData.id || ""), String(eventData.recurrenceId || ""))
+    }
+
+    // Moves the event, keeping its length, to the next time everyone shown is
+    // free within working hours.
+    function findFreeTime() {
+        const freeBusy = App.freeBusy || ({})
+        let busy = (freeBusy.self || []).slice()
+        const attendees = freeBusy.attendees || ({})
+        for (const email of guestEmails) {
+            const known = attendees[email.toLowerCase()]
+            if (known)
+                busy = busy.concat(known)
+        }
+        const zone = selectedTimeZone()
+        const startUtc = App.wallTimeToUtc(startDateField.text, startTimeField.text, zone)
+        const endUtc = App.wallTimeToUtc(endDateField.text, endTimeField.text, zone)
+        let duration = Math.round((Date.parse(endUtc) - Date.parse(startUtc)) / 60000)
+        if (!(duration > 0))
+            duration = defaultDurationMinutes
+        const slot = typeof App.nextFreeSlot === "function"
+                ? App.nextFreeSlot(busy, startUtc, duration, workDayStart, workDayEnd,
+                                   freeBusy.end, zone)
+                : ""
+        if (!slot) {
+            freeTimeMessage = qsTr("No time in the next week when everyone shown is free.")
+            return
+        }
+        const slotStart = String(App.utcToWallTime(slot, zone))
+        const slotEnd = String(App.utcToWallTime(
+                                   new Date(Date.parse(slot) + duration * 60000).toISOString(),
+                                   zone))
+        freeTimeMessage = Date.parse(slot) === Date.parse(startUtc)
+                ? qsTr("Everyone shown is free at this time.")
+                : qsTr("Moved to the next time everyone shown is free.")
+        startDateField.text = slotStart.slice(0, 10)
+        startTimeField.text = slotStart.slice(11, 16)
+        endDateField.text = slotEnd.slice(0, 10)
+        endTimeField.text = slotEnd.slice(11, 16)
+    }
+
+    Timer {
+        id: freeBusyDelay
+        interval: 400
+        onTriggered: editor.requestFreeBusy()
+    }
+    onGuestEmailsChanged: freeBusyDelay.restart()
+    onOpened: freeBusyDelay.restart()
+    Connections {
+        target: startDateField
+        function onTextChanged() { freeBusyDelay.restart() }
+    }
+    Connections {
+        target: calendarBox
+        function onActivated() { freeBusyDelay.restart() }
+    }
+    Connections {
+        target: timeZoneBox
+        function onActivated() { freeBusyDelay.restart() }
+    }
+    Connections {
+        target: allDay
+        function onToggled() { freeBusyDelay.restart() }
     }
 
     function openExisting(value) {
@@ -613,6 +705,7 @@ Dialog {
                     }
                     AppTextField {
                         id: startDateField
+                        objectName: "eventStartDate"
                         Layout.fillWidth: true
                         placeholderText: qsTr("YYYY-MM-DD")
                         accessibleName: qsTr("Start date")
@@ -620,6 +713,7 @@ Dialog {
                     }
                     AppTextField {
                         id: startTimeField
+                        objectName: "eventStartTime"
                         visible: !allDay.checked
                         Layout.fillWidth: true
                         placeholderText: qsTr("09:00")
@@ -637,6 +731,7 @@ Dialog {
                     }
                     AppTextField {
                         id: endDateField
+                        objectName: "eventEndDate"
                         Layout.fillWidth: true
                         placeholderText: qsTr("YYYY-MM-DD")
                         accessibleName: qsTr("End date")
@@ -644,6 +739,7 @@ Dialog {
                     }
                     AppTextField {
                         id: endTimeField
+                        objectName: "eventEndTime"
                         visible: !allDay.checked
                         Layout.fillWidth: true
                         placeholderText: qsTr("10:00")
@@ -831,6 +927,32 @@ Dialog {
                     id: attendeeEditor
                     Layout.fillWidth: true
                     editable: !editor.readOnly && editor.attendeeEditingSupported
+                }
+                AvailabilityStrip {
+                    id: availability
+                    objectName: "availabilityStrip"
+                    visible: editor.showAvailability
+                    Layout.fillWidth: true
+                    freeBusy: App.freeBusy || ({})
+                    guests: editor.guestEmails
+                    dateText: startDateField.text
+                    startText: startTimeField.text
+                    endText: endDateField.text === startDateField.text ? endTimeField.text
+                                                                       : "24:00"
+                    timeZone: editor.selectedTimeZone()
+                    workDayStart: editor.workDayStart
+                    workDayEnd: editor.workDayEnd
+                    onSlotRequested: editor.findFreeTime()
+                }
+                Text {
+                    objectName: "freeTimeMessage"
+                    visible: editor.showAvailability && editor.freeTimeMessage.length > 0
+                    Layout.fillWidth: true
+                    textFormat: Text.PlainText
+                    text: editor.freeTimeMessage
+                    color: Theme.mutedText
+                    font.pixelSize: Theme.smallFontSize
+                    wrapMode: Text.Wrap
                 }
                 AppComboBox {
                     id: notificationBox

@@ -5,6 +5,7 @@
 #include <QObject>
 #include <QSet>
 #include <QStringList>
+#include <QTimeZone>
 #include <QTimer>
 #include <QUrl>
 #include <QVariantList>
@@ -23,6 +24,10 @@ class AppController final : public QObject {
   Q_PROPERTY(QString statusText READ statusText NOTIFY statusTextChanged)
   Q_PROPERTY(QString lastError READ lastError NOTIFY lastErrorChanged)
   Q_PROPERTY(QVariantList accounts READ accounts NOTIFY accountsChanged)
+  // The latest free/busy answer: {requestId, start, end, self, attendees
+  // (email -> [{start, end}]), pending (emails), unavailable ([{email,
+  // reason}])}. Remote answers arrive after the request and merge in.
+  Q_PROPERTY(QVariantMap freeBusy READ freeBusy NOTIFY freeBusyChanged)
   Q_PROPERTY(bool canUndo READ canUndo NOTIFY historyChanged)
   Q_PROPERTY(bool canRedo READ canRedo NOTIFY historyChanged)
   // Account id -> {state, message, errorCode, lastSyncAt} for provider-backed
@@ -73,6 +78,7 @@ class AppController final : public QObject {
   [[nodiscard]] QString statusText() const;
   [[nodiscard]] QString lastError() const;
   [[nodiscard]] QVariantList accounts() const;
+  [[nodiscard]] QVariantMap freeBusy() const;
   [[nodiscard]] bool canUndo() const;
   [[nodiscard]] bool canRedo() const;
   [[nodiscard]] QVariantMap accountSyncStates() const;
@@ -167,6 +173,18 @@ class AppController final : public QObject {
   // While the window is active the daemon polls providers more often; the
   // controller renews that before the daemon's lease runs out.
   Q_INVOKABLE void setInteractive(bool interactive);
+  Q_INVOKABLE void queryFreeBusy(const QString& start, const QString& end,
+                                 const QStringList& emails, const QString& calendarId,
+                                 const QString& excludeEventId,
+                                 const QString& excludeRecurrenceId);
+  // The first start (ISO UTC) at or after earliest where durationMinutes
+  // avoids every busy {start, end} and fits the working hours of its day in
+  // timeZoneId (the display zone when empty); empty when nothing fits before
+  // horizon.
+  Q_INVOKABLE [[nodiscard]] QString nextFreeSlot(
+      const QVariantList& busy, const QString& earliest, int durationMinutes,
+      int workDayStartHour, int workDayEndHour, const QString& horizon,
+      const QString& timeZoneId = {}) const;
   Q_INVOKABLE void undo();
   Q_INVOKABLE void redo();
   Q_INVOKABLE void undoLastMutation();
@@ -216,6 +234,7 @@ class AppController final : public QObject {
   void googleOAuthConfiguredChanged();
   void eventSaved();
   void historyChanged();
+  void freeBusyChanged();
   // After an interactive change the user may want to take back, for the
   // undo toast; undoable says whether undo() would reverse it.
   void mutationCompleted(const QString& message, bool undoable);
@@ -354,6 +373,8 @@ class AppController final : public QObject {
   QString m_activeCalendarSetId = QStringLiteral("all-calendars");
   QUrl m_pendingDeepLink;
   bool m_interactive = false;
+  QVariantMap m_freeBusy;
+  [[nodiscard]] QTimeZone displayTimeZone() const;
   QTimer m_interactiveRenewal;
   void sendInteractive();
   quint64 m_historySerial = 0;

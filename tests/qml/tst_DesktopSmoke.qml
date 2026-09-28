@@ -29,6 +29,7 @@ Item {
     Component { id: quickAddFactory; Components.QuickAddDialog {} }
     Component { id: undoToastFactory; Components.UndoToast {} }
     Component { id: eventRowFactory; Components.EventRow {} }
+    Component { id: availabilityFactory; Components.AvailabilityStrip {} }
     Component { id: conflictMergeFactory; Components.ConflictMergeDialog {} }
     Component { id: icsImportFactory; Components.IcsImportDialog {} }
     Component { id: icsExportFactory; Components.IcsExportDialog {} }
@@ -637,6 +638,73 @@ Item {
             verify(!findChild(panel, "offlineSearchNote").visible)
             panel.connected = false
             verify(findChild(panel, "offlineSearchNote").visible)
+        }
+
+        function freeBusyFixture() {
+            return {"requestId": "request-1", "start": "2026-09-28T00:00:00.000Z",
+                    "end": "2026-10-05T00:00:00.000Z",
+                    "self": [{"start": "2026-09-28T09:00:00.000Z",
+                              "end": "2026-09-28T10:00:00.000Z"}],
+                    "attendees": {"sam@example.com": [{"start": "2026-09-28T13:00:00.000Z",
+                                                       "end": "2026-09-28T14:00:00.000Z"}]},
+                    "pending": ["pat@example.com"],
+                    "unavailable": [{"email": "out@example.org", "reason": "notFound"}]}
+        }
+
+        function test_availability_strip_marks_conflicts() {
+            const strip = createTemporaryObject(availabilityFactory, scene, {
+                "width": 600, "freeBusy": freeBusyFixture(),
+                "guests": ["Sam@example.com", "pat@example.com", "out@example.org"],
+                "dateText": "2026-09-28", "startText": "09:30", "endText": "10:30",
+                "timeZone": "UTC"})
+            wait(0)
+            compare(strip.rows.length, 4)
+            compare(findChild(strip, "availabilityStatus-0").text, "Busy", "you, 09:00-10:00")
+            compare(findChild(strip, "availabilityStatus-1").text, "Free", "guest matched case-insensitively")
+            compare(findChild(strip, "availabilityStatus-2").text, "Checking…")
+            compare(findChild(strip, "availabilityStatus-3").text, "Not shared")
+            verify(strip.anyConflict)
+            strip.startText = "13:30"
+            strip.endText = "14:30"
+            compare(findChild(strip, "availabilityStatus-0").text, "Free")
+            compare(findChild(strip, "availabilityStatus-1").text, "Busy")
+            const requested = createTemporaryObject(signalSpyFactory, testCase, {
+                "target": strip, "signalName": "slotRequested"})
+            findChild(strip, "findFreeTime").clicked()
+            compare(requested.count, 1)
+        }
+
+        function test_editor_asks_for_availability_and_finds_a_time() {
+            App.freeBusy = ({})
+            App.lastFreeBusyQuery = null
+            const editor = createTemporaryObject(editorFactory, scene)
+            const event = Object.assign({}, representativeEvents()[0], {
+                "startUtc": "2026-09-28T09:00:00.000Z", "endUtc": "2026-09-28T10:00:00.000Z",
+                "displayStartLocal": "2026-09-28T09:00:00", "displayEndLocal": "2026-09-28T10:00:00",
+                "startTimeZone": "UTC", "endTimeZone": "UTC",
+                "attendees": [{"email": "sam@example.com"}]})
+            editor.openExisting(event)
+            tryCompare(editor, "opened", true)
+            tryVerify(function() { return App.lastFreeBusyQuery !== null }, 2000,
+                      "the editor asks who is busy")
+            compare(App.lastFreeBusyQuery.emails, ["sam@example.com"])
+            compare(App.lastFreeBusyQuery.excludeEventId, event.id,
+                    "the event being edited does not count against you")
+            verify(!editor.showAvailability, "nothing to show before the answer")
+
+            const answer = freeBusyFixture()
+            answer.start = App.lastFreeBusyQuery.start
+            App.freeBusy = answer
+            tryCompare(editor, "showAvailability", true)
+            App.nextFreeSlotResult = "2026-09-28T11:00:00.000Z"
+            findChild(scene.Window.window.contentItem, "findFreeTime").clicked()
+            compare(findChild(scene.Window.window.contentItem, "freeTimeMessage").text,
+                    "Moved to the next time everyone shown is free.")
+            const content = scene.Window.window.contentItem
+            compare(findChild(content, "eventStartDate").text, "2026-09-28")
+            compare(findChild(content, "eventStartTime").text, "11:00")
+            compare(findChild(content, "eventEndTime").text, "12:00", "the length is kept")
+            App.freeBusy = ({})
         }
 
         function test_undo_toast_offers_undo_only_when_possible() {

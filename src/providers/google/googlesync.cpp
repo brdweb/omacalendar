@@ -789,6 +789,63 @@ void GoogleSync::finishDisconnect(const QString& accountId, const bool secretRem
   emit accountChanged(accountId);
 }
 
+void parseFreeBusyResponse(const QJsonObject& body, const QStringList& emails,
+                           QHash<QString, QList<BusyInterval>>* busy,
+                           QHash<QString, QString>* unavailable) {
+  const QJsonObject calendars = body.value(QStringLiteral("calendars")).toObject();
+  for (const QString& email : emails) {
+    const QJsonObject entry = calendars.value(email).toObject();
+    const QJsonArray errors = entry.value(QStringLiteral("errors")).toArray();
+    if (entry.isEmpty() || !errors.isEmpty()) {
+      // Google answers "notFound" for people outside the organisation
+      // who do not share their calendar.
+      unavailable->insert(email, errors.isEmpty()
+                                     ? QStringLiteral("unavailable")
+                                     : errors.first()
+                                           .toObject()
+                                           .value(QStringLiteral("reason"))
+                                           .toString(QStringLiteral("unavailable")));
+      continue;
+    }
+    QList<BusyInterval> intervals;
+    for (const QJsonValue& value : entry.value(QStringLiteral("busy")).toArray()) {
+      const QJsonObject span = value.toObject();
+      intervals.append({QDateTime::fromString(
+                            span.value(QStringLiteral("start")).toString(), Qt::ISODate)
+                            .toUTC(),
+                        QDateTime::fromString(
+                            span.value(QStringLiteral("end")).toString(), Qt::ISODate)
+                            .toUTC()});
+    }
+    busy->insert(email, mergeBusyIntervals(intervals));
+  }
+}
+
+void GoogleSync::queryFreeBusy(const QString& accountId, const QStringList& emails,
+                               const QDateTime& startUtc, const QDateTime& endUtc,
+                               FreeBusyCallback callback) {
+  m_client.queryFreeBusy(
+      accountId, emails, startUtc, endUtc,
+      [emails, callback = std::move(callback)](const ApiResponse& response) {
+        QHash<QString, QList<BusyInterval>> busy;
+        QHash<QString, QString> unavailable;
+        if (!response.ok) {
+          // Google refuses free/busy when the granted scopes do not cover it.
+          const QString reason =
+              response.insufficientScope        ? QStringLiteral("permission")
+              : response.authenticationRequired ? QStringLiteral("authorization")
+                                                : QStringLiteral("unavailable");
+          for (const QString& email : emails) {
+            unavailable.insert(email, reason);
+          }
+          callback(busy, unavailable);
+          return;
+        }
+        parseFreeBusyResponse(response.body, emails, &busy, &unavailable);
+        callback(busy, unavailable);
+      });
+}
+
 void GoogleSync::setPollInterval(const int intervalMs) {
   // Changing the interval restarts the countdown, so only do it on a change.
   if (intervalMs > 0 && intervalMs != m_pollTimer.interval()) {

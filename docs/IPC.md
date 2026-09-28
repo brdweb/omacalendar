@@ -120,6 +120,22 @@ and cleanup; a started check is not proof of server support.
   `events.respond`, `events.undo`
 - `invitations.list`, `invitations.markSeen`
 - `contacts.suggest`
+- `freebusy.query`
+
+`freebusy.query` is additive and not yet released (the protocol minor remains
+2.1). It takes ISO `start` and `end` at most 8 days apart and up to 20
+`attendees` addresses, plus optional `calendarId` (whose Google account is used
+for remote lookups) and `excludeEventId`/`excludeRecurrenceId` (the event being
+edited, which does not count as busy). It answers at once with `requestId`,
+`start`, `end`, `self` (the user's merged busy intervals, computed locally),
+`attendees` (address → busy intervals already known: the user's own addresses
+and five-minute cached answers), `pending` (addresses sent to Google) and
+`unavailable` (`[{email, reason}]`, where reason is `unsupported` when no
+Google account can answer). When Google replies, an `events.freeBusy`
+notification carries the same `requestId` with the remaining `attendees` and
+`unavailable` entries (`notFound` for people Google will not share,
+`permission` when the account's grant does not cover free/busy). Intervals are
+`{start, end}` in UTC.
 
 `contacts.suggest` is additive and not yet released. It takes a non-empty
 `prefix` (at most 200 characters) and an optional `limit` (1 to 25, default 8)

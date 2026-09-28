@@ -75,6 +75,31 @@ QtObject {
         return value.toISOString().slice(0, 19)
     }
 
+    // Free/busy: the smoke tests set freeBusy and nextFreeSlotResult and read
+    // the last query back.
+    property var freeBusy: ({})
+    property var lastFreeBusyQuery: null
+    property string nextFreeSlotResult: ""
+
+    function queryFreeBusy(start, end, emails, calendarId, excludeEventId,
+                           excludeRecurrenceId) {
+        lastFreeBusyQuery = {"start": start, "end": end, "emails": emails,
+                             "calendarId": calendarId, "excludeEventId": excludeEventId,
+                             "excludeRecurrenceId": excludeRecurrenceId}
+    }
+
+    function nextFreeSlot(busy, earliest, durationMinutes, workDayStart, workDayEnd,
+                          horizon, timeZone) {
+        busy
+        earliest
+        durationMinutes
+        workDayStart
+        workDayEnd
+        horizon
+        timeZone
+        return nextFreeSlotResult
+    }
+
     function isValidTimeZone(value) {
         return typeof value === "string" && value.trim().length > 0
     }
