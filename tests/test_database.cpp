@@ -148,6 +148,44 @@ class DatabaseTest final : public QObject {
     QCOMPARE(db.setting("missing", 123, &error).toInt(), 123);
   }
 
+  void connectionUsesTunedPragmas() {
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    Database db;
+    QString error;
+    QVERIFY2(db.open(directory.filePath("store.sqlite"), &error), qPrintable(error));
+
+    QSqlDatabase connection;
+    for (const QString& name : QSqlDatabase::connectionNames()) {
+      if (name.startsWith(QStringLiteral("omacalendar-"))) {
+        connection = QSqlDatabase::database(name, false);
+      }
+    }
+    QVERIFY(connection.isOpen());
+    const auto pragma = [&connection](const QString& name) {
+      QSqlQuery query(connection);
+      if (!query.exec(QStringLiteral("PRAGMA %1").arg(name)) || !query.next()) {
+        return QVariant();
+      }
+      return query.value(0);
+    };
+    QCOMPARE(pragma(QStringLiteral("journal_mode")).toString(), QStringLiteral("wal"));
+    // FULL (2): see Database::open for why NORMAL is not used.
+    QCOMPARE(pragma(QStringLiteral("synchronous")).toInt(), 2);
+    QCOMPARE(pragma(QStringLiteral("temp_store")).toInt(), 2);
+    QCOMPARE(pragma(QStringLiteral("cache_size")).toInt(), -16384);
+    QCOMPARE(pragma(QStringLiteral("mmap_size")).toLongLong(), 67108864LL);
+    QCOMPARE(pragma(QStringLiteral("foreign_keys")).toInt(), 1);
+    connection = QSqlDatabase();
+
+    // Closing runs PRAGMA optimize and must leave a database that reopens.
+    db.close();
+    Database reopened;
+    QVERIFY2(reopened.open(directory.filePath("store.sqlite"), &error),
+             qPrintable(error));
+    QCOMPARE(reopened.schemaVersion(), 2);
+  }
+
   void inclusiveAllDayEndDatesAreNormalizedOnWrite() {
     // Whatever a caller supplies, an all-day span must reach storage with an
     // exclusive end date: SQL range predicates compare it directly. See #28.

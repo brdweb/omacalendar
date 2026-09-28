@@ -90,7 +90,15 @@ replaces the connection's prior list and may contain `*`, a family such as
   calendars are protected
 - `calendarSets.list`, `calendarSets.upsert`, `calendarSets.remove`,
   `calendarSets.activate`
-- `settings.get`, `settings.set`
+- `settings.get`, `settings.set`, `settings.getMany`
+
+`settings.getMany` is an additive, not yet released method that reads several
+settings in one request; the protocol minor advances when it first ships. It
+takes `keys`, an array of 1 to 64 setting names, and an optional `fallbacks`
+object mapping a key to the value returned when that key is unset. The result is `{"values": {...}}` with one entry per requested key,
+resolved exactly as `settings.get` resolves it. Clients find it in
+`system.info` `methods`; a daemon without it answers `method_not_found`, and
+clients fall back to `settings.get`.
 
 `calendars.probeThisAndFuture` creates a temporary test resource on the selected
 server, checks that `RANGE=THISANDFUTURE` survives a write and readback, and

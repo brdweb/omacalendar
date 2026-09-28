@@ -214,6 +214,24 @@ class AppController final : public QObject {
   void processPendingDeepLink();
   void applyDisplayTimes(QVariantList* events) const;
   void requestRangePage(quint64 generation, int offset, int limit);
+  void refreshParts(int parts);
+  void scheduleRefresh(int parts);
+  [[nodiscard]] static int refreshPartsForNotification(const QString& event);
+  void loadPreferences();
+  void loadPreferencesIndividually();
+  void markPreferencesLoaded();
+  [[nodiscard]] static QStringList preferenceKeys();
+
+  enum RefreshPart {
+    RefreshSystemInfo = 1 << 0,
+    RefreshAccounts = 1 << 1,
+    RefreshCalendars = 1 << 2,
+    RefreshCalendarSets = 1 << 3,
+    RefreshInvitations = 1 << 4,
+    RefreshPreferences = 1 << 5,
+    RefreshEvents = 1 << 6,
+    RefreshAll = (1 << 7) - 1,
+  };
 
   // The daemon's default events.list page size. Pages shrink when a response
   // would exceed the IPC frame limit.
@@ -224,6 +242,8 @@ class AppController final : public QObject {
   QHash<QString, ErrorHandler> m_pendingErrors;
   QSet<QString> m_backgroundRequests;
   QTimer m_refreshTimer;
+  int m_pendingRefreshParts = 0;
+  bool m_settingsGetManySupported = true;
   QVariantList m_accounts;
   QVariantList m_calendars;
   QVariantList m_events;

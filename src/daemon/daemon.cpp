@@ -580,6 +580,10 @@ void Daemon::registerHandlers() {
                            [this](const QJsonObject& params, ipc::Error* error) {
                              return onSettingsGet(params, error);
                            });
+  m_router.registerHandler(QStringLiteral("settings.getMany"),
+                           [this](const QJsonObject& params, ipc::Error* error) {
+                             return onSettingsGetMany(params, error);
+                           });
   m_router.registerHandler(QStringLiteral("settings.set"),
                            [this](const QJsonObject& params, ipc::Error* error) {
                              return onSettingsSet(params, error);
@@ -2922,7 +2926,49 @@ QJsonValue Daemon::onSettingsGet(const QJsonObject& params, ipc::Error* error) {
   if (!validateRequiredString(params, QStringLiteral("key"), &key, error)) {
     return {};
   }
-  const QJsonValue fallback = params.value(QStringLiteral("fallback"));
+  const QJsonValue value =
+      settingValue(key, params.value(QStringLiteral("fallback")), error);
+  if (error != nullptr && !error->code.isEmpty()) {
+    return {};
+  }
+  return QJsonObject{
+      {QStringLiteral("key"), key},
+      {QStringLiteral("value"), value},
+  };
+}
+
+QJsonValue Daemon::onSettingsGetMany(const QJsonObject& params, ipc::Error* error) {
+  constexpr qsizetype kMaximumKeys = 64;
+  const QJsonArray keys = params.value(QStringLiteral("keys")).toArray();
+  if (keys.isEmpty() || keys.size() > kMaximumKeys) {
+    if (error != nullptr) {
+      *error = {QStringLiteral("invalid_params"),
+                QStringLiteral("keys must list between 1 and 64 setting names"), false};
+    }
+    return {};
+  }
+  const QJsonObject fallbacks = params.value(QStringLiteral("fallbacks")).toObject();
+  QJsonObject values;
+  for (const QJsonValue& entry : keys) {
+    const QString key = entry.toString().trimmed();
+    if (!entry.isString() || key.isEmpty()) {
+      if (error != nullptr) {
+        *error = {QStringLiteral("invalid_params"),
+                  QStringLiteral("Every key must be a non-empty string"), false};
+      }
+      return {};
+    }
+    const QJsonValue value = settingValue(key, fallbacks.value(key), error);
+    if (error != nullptr && !error->code.isEmpty()) {
+      return {};
+    }
+    values.insert(key, value);
+  }
+  return QJsonObject{{QStringLiteral("values"), values}};
+}
+
+QJsonValue Daemon::settingValue(const QString& key, const QJsonValue& fallback,
+                                ipc::Error* error) {
   QString dbError;
   QJsonValue value = m_database.setting(key, fallback, &dbError);
   if (key == QStringLiteral("defaultCalendarId")) {
@@ -2962,10 +3008,7 @@ QJsonValue Daemon::onSettingsGet(const QJsonObject& params, ipc::Error* error) {
       value = resolved;
     }
   }
-  return QJsonObject{
-      {QStringLiteral("key"), key},
-      {QStringLiteral("value"), value},
-  };
+  return value;
 }
 
 QJsonValue Daemon::onSettingsSet(const QJsonObject& params, ipc::Error* error) {

@@ -1,6 +1,10 @@
 #include "presentationlistmodel.h"
 
 #include <QByteArrayView>
+#include <QHash>
+#include <QSet>
+#include <QStringList>
+#include <utility>
 
 namespace omacalendar {
 namespace {
@@ -152,6 +156,16 @@ QVariantList PresentationListModel::toList() const {
   return result;
 }
 
+QString PresentationListModel::rowKey(const QVariantMap& row) {
+  const QString id = row.value(QStringLiteral("id")).toString();
+  if (id.isEmpty()) {
+    return {};
+  }
+  // Occurrences of one series share the series id; the recurrence id tells
+  // them apart.
+  return id + QLatin1Char('\n') + row.value(QStringLiteral("recurrenceId")).toString();
+}
+
 void PresentationListModel::replace(const QVariantList& rows) {
   QList<QVariantMap> nextRows;
   nextRows.reserve(rows.size());
@@ -165,12 +179,114 @@ void PresentationListModel::replace(const QVariantList& rows) {
   }
 
   const qsizetype previousCount = m_rows.size();
-  beginResetModel();
-  m_rows = std::move(nextRows);
-  endResetModel();
+  if (!applyIncrementally(nextRows)) {
+    resetTo(std::move(nextRows));
+  }
   if (previousCount != m_rows.size()) {
     emit countChanged();
   }
+}
+
+bool PresentationListModel::applyIncrementally(QList<QVariantMap>& nextRows) {
+  QStringList nextKeys;
+  nextKeys.reserve(nextRows.size());
+  QSet<QString> nextKeySet;
+  nextKeySet.reserve(nextRows.size());
+  for (const QVariantMap& row : nextRows) {
+    const QString key = rowKey(row);
+    if (key.isEmpty() || nextKeySet.contains(key)) {
+      return false;
+    }
+    nextKeys.append(key);
+    nextKeySet.insert(key);
+  }
+  QStringList keys;
+  keys.reserve(m_rows.size());
+  QSet<QString> keySet;
+  keySet.reserve(m_rows.size());
+  for (const QVariantMap& row : m_rows) {
+    const QString key = rowKey(row);
+    if (key.isEmpty() || keySet.contains(key)) {
+      return false;
+    }
+    keys.append(key);
+    keySet.insert(key);
+  }
+
+  // Rows that stay keep their relative order unless something moved. When
+  // most of them moved, individual move signals cost more than a reset.
+  qsizetype retained = 0;
+  qsizetype outOfOrder = 0;
+  qsizetype lastNextIndex = -1;
+  QHash<QString, qsizetype> nextIndex;
+  nextIndex.reserve(nextKeys.size());
+  for (qsizetype index = 0; index < nextKeys.size(); ++index) {
+    nextIndex.insert(nextKeys.at(index), index);
+  }
+  for (const QString& key : std::as_const(keys)) {
+    const auto found = nextIndex.constFind(key);
+    if (found == nextIndex.constEnd()) {
+      continue;
+    }
+    ++retained;
+    if (found.value() < lastNextIndex) {
+      ++outOfOrder;
+    } else {
+      lastNextIndex = found.value();
+    }
+  }
+  if (retained > 0 && outOfOrder * 2 > retained) {
+    return false;
+  }
+
+  // Remove rows that are gone, from the end so earlier indexes stay valid.
+  for (qsizetype index = keys.size() - 1; index >= 0; --index) {
+    if (!nextKeySet.contains(keys.at(index))) {
+      const int row = static_cast<int>(index);
+      beginRemoveRows({}, row, row);
+      m_rows.removeAt(index);
+      keys.removeAt(index);
+      endRemoveRows();
+    }
+  }
+
+  // Walk the target order, moving, inserting and updating rows in place.
+  for (qsizetype target = 0; target < nextKeys.size(); ++target) {
+    const QString& key = nextKeys.at(target);
+    if (target >= keys.size() || keys.at(target) != key) {
+      qsizetype source = -1;
+      if (keySet.contains(key)) {
+        source = keys.indexOf(key, target + 1);
+      }
+      if (source >= 0) {
+        const int from = static_cast<int>(source);
+        const int to = static_cast<int>(target);
+        beginMoveRows({}, from, from, {}, to);
+        m_rows.move(source, target);
+        keys.move(source, target);
+        endMoveRows();
+      } else {
+        const int row = static_cast<int>(target);
+        beginInsertRows({}, row, row);
+        m_rows.insert(target, std::move(nextRows[target]));
+        keys.insert(target, key);
+        endInsertRows();
+        continue;
+      }
+    }
+    if (m_rows.at(target) != nextRows.at(target)) {
+      m_rows[target] = std::move(nextRows[target]);
+      const QModelIndex changed = index(static_cast<int>(target));
+      emit dataChanged(changed, changed);
+    }
+  }
+  return true;
+}
+
+void PresentationListModel::resetTo(QList<QVariantMap>&& nextRows) {
+  beginResetModel();
+  m_rows = std::move(nextRows);
+  endResetModel();
 }
 
 void PresentationListModel::clear() { replace({}); }

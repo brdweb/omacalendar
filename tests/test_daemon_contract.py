@@ -1436,6 +1436,38 @@ def run_account_lifecycle_contract(
     )
 
 
+def run_settings_get_many_contract(harness: DaemonHarness) -> None:
+    harness.call("settings.set", {"key": "workDayStart", "value": 7})
+    keys = ["workDayStart", "timeFormat", "defaultCalendarId"]
+    fallbacks = {"workDayStart": 8, "timeFormat": "system"}
+    many = harness.call("settings.getMany", {"keys": keys, "fallbacks": fallbacks})
+    values = many.get("values") if isinstance(many, dict) else None
+    require(isinstance(values, dict), "settings.getMany values is not an object")
+    require(set(values) == set(keys), f"settings.getMany returned other keys: {values}")
+    for key in keys:
+        single = harness.call(
+            "settings.get", {"key": key, "fallback": fallbacks.get(key)}
+        )
+        require(
+            values[key] == single.get("value"),
+            f"settings.getMany disagrees with settings.get for {key}",
+        )
+    require(values["workDayStart"] == 7, "settings.getMany ignored a stored value")
+    require(values["timeFormat"] == "system", "settings.getMany ignored a fallback")
+    require(
+        isinstance(values["defaultCalendarId"], str) and values["defaultCalendarId"],
+        "settings.getMany did not resolve the default calendar",
+    )
+    for params, context in (
+        ({}, "settings.getMany without keys"),
+        ({"keys": []}, "settings.getMany with no keys"),
+        ({"keys": [f"key{index}" for index in range(65)]}, "settings.getMany over 64 keys"),
+        ({"keys": ["timeFormat", 3]}, "settings.getMany with a non-string key"),
+        ({"keys": ["  "]}, "settings.getMany with a blank key"),
+    ):
+        assert_ipc_error(harness.call_error("settings.getMany", params), "invalid_params", context)
+
+
 def run_contract(harness: DaemonHarness) -> None:
     require(not harness.database_path.exists(), "test did not begin with fresh state")
     harness.start()
@@ -1462,6 +1494,8 @@ def run_contract(harness: DaemonHarness) -> None:
         "events.move",
         "events.remove",
         "events.undo",
+        "settings.get",
+        "settings.getMany",
     }
     methods = info.get("methods")
     require(isinstance(methods, list), "system.info methods is not an array")
@@ -1494,6 +1528,7 @@ def run_contract(harness: DaemonHarness) -> None:
     schema, database_revision = read_schema(harness.database_path)
     require(schema == SCHEMA_VERSION, "database PRAGMA user_version is not schema 2")
     require(database_revision == initial_revision, "database/API revision mismatch")
+    run_settings_get_many_contract(harness)
     for owned_directory in (
         harness.root / "data" / "omacalendar",
         harness.root / "config" / "omacalendar",

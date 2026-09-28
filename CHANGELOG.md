@@ -6,6 +6,25 @@ Versioning once public releases begin.
 
 ## [Unreleased]
 
+### Changed
+
+- The desktop app keeps only the visible calendar view alive and finds each
+  day's events through a per-day index built once per change, instead of
+  every day cell in every view scanning all loaded events. With 5,000 loaded
+  events, applying one changed event drops from about 1.7 s to under 60 ms.
+- Change notifications reload only the lists they affect, and preferences
+  load in one request. A delivered reminder no longer reloads anything.
+- The activity panel, settings and search lists update the rows that changed
+  instead of rebuilding, so they keep their scroll position and focus.
+- The calendar database keeps temporary data in memory, uses a larger page
+  cache and memory-mapped reads, and refreshes its query statistics on close.
+
+### Added
+
+- The `settings.getMany` IPC method reads several settings in one request
+  (see docs/IPC.md).
+- A report-only desktop view benchmark (see docs/PERFORMANCE.md).
+
 ### Fixed
 
 - The desktop app reads every page of a date range from the calendar

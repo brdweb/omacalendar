@@ -6,12 +6,15 @@ import QtQuick.Controls
 import QtQuick.Layouts
 import OmaCalendar
 import "../components"
+import "../EventIndex.js" as EventIndex
 
 Item {
     id: root
 
     property date currentDate: new Date()
     property var events: []
+    // Built once per events change; day cells look their events up here.
+    readonly property var eventIndex: EventIndex.build(events)
     property string selectedEventReference: ""
     property int firstDayOfWeek: 1
     property int firstHour: 0
@@ -505,21 +508,18 @@ Item {
     }
 
     function eventsForDate(dateValue, allDayValue) {
-        const start = new Date(dateValue.getFullYear(), dateValue.getMonth(),
-                               dateValue.getDate())
-        const end = addDays(start, 1)
+        const entries = EventIndex.entriesForDate(eventIndex, dateValue)
         const matches = []
-        for (let index = 0; index < events.length; ++index) {
-            const value = events[index]
+        for (let index = 0; index < entries.length; ++index) {
+            const value = entries[index].event
             const inHeader = value.allDay || spansCalendarDays(value)
-            if (inHeader === allDayValue && eventStart(value) < end
-                    && eventEnd(value) > start)
-                matches.push(value)
+            if (inHeader === allDayValue)
+                matches.push(entries[index])
         }
         matches.sort(function(first, second) {
-            return eventStart(first) - eventStart(second)
+            return first.startMs - second.startMs
         })
-        return matches
+        return matches.map(function(entry) { return entry.event })
     }
 
     function headerEventsForDate(dateValue) {

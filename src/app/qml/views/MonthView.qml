@@ -6,12 +6,15 @@ import QtQuick.Controls
 import QtQuick.Layouts
 import OmaCalendar
 import "../components"
+import "../EventIndex.js" as EventIndex
 
 Item {
     id: root
 
     property date currentDate: new Date()
     property var events: []
+    // Built once per events change; day cells look their events up here.
+    readonly property var eventIndex: EventIndex.build(events)
     property string selectedEventReference: ""
     property int firstDayOfWeek: 1
     property string timeFormat: "system"
@@ -394,21 +397,7 @@ Item {
     }
 
     function eventsForDate(dateValue) {
-        const start = new Date(dateValue.getFullYear(), dateValue.getMonth(),
-                               dateValue.getDate())
-        const end = addDays(start, 1)
-        const matches = []
-        for (let index = 0; index < events.length; ++index) {
-            const value = events[index]
-            if (eventStart(value) < end && eventEnd(value) > start)
-                matches.push(value)
-        }
-        matches.sort(function(first, second) {
-            if (first.allDay !== second.allDay)
-                return first.allDay ? -1 : 1
-            return eventStart(first) - eventStart(second)
-        })
-        return matches
+        return EventIndex.eventsForDate(eventIndex, dateValue)
     }
 
     function timeText(value, dateValue) {

@@ -245,6 +245,18 @@ if(TARGET Qt6::qmltestrunner)
         "LC_ALL=C.UTF-8;TZ=UTC;QT_QPA_PLATFORM=offscreen;QT_QUICK_CONTROLS_STYLE=Basic;QT_QUICK_BACKEND=software;QSG_RHI_BACKEND=software;QT_SCALE_FACTOR=${scale};QT_SCALE_FACTOR_ROUNDING_POLICY=PassThrough;QML_DISABLE_DISK_CACHE=1"
     )
   endforeach()
+  # Report-only desktop view timings; see docs/PERFORMANCE.md.
+  add_test(NAME ui_benchmark_smoke
+    COMMAND ${Python3_EXECUTABLE}
+      ${CMAKE_SOURCE_DIR}/scripts/performance/ui_benchmark.py
+      --qmltestrunner $<TARGET_FILE:Qt6::qmltestrunner>
+      --events 500 5000
+  )
+  set_tests_properties(ui_benchmark_smoke PROPERTIES
+    TIMEOUT 300
+    RUN_SERIAL TRUE
+    LABELS "performance"
+  )
 else()
   message(STATUS "Qt qmltestrunner unavailable; desktop QML smoke tests disabled")
 endif()
