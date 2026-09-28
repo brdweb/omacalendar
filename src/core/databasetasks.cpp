@@ -509,6 +509,23 @@ TaskList Database::taskListByRemoteId(const QString& accountId, const QString& r
   return query.next() ? taskListFromQuery(query) : TaskList{};
 }
 
+QSet<QString> Database::taskRemoteIds(const QString& listId,
+                                      QString* errorMessage) const {
+  QSet<QString> ids;
+  QSqlQuery query(m_database);
+  query.prepare(
+      QStringLiteral("SELECT remote_id FROM tasks WHERE list_id=? AND remote_id<>''"));
+  query.addBindValue(listId);
+  if (!query.exec()) {
+    setError(errorMessage, sqlError(query, QStringLiteral("list task remote ids")));
+    return ids;
+  }
+  while (query.next()) {
+    ids.insert(query.value(0).toString());
+  }
+  return ids;
+}
+
 bool Database::removeTaskList(const QString& listId, QString* errorMessage) {
   QSqlQuery query(m_database);
   query.prepare(QStringLiteral("DELETE FROM task_lists WHERE id=?"));

@@ -75,9 +75,12 @@ bool applyTaskDraft(const QJsonObject& draft, Task* task, ipc::Error* error) {
 
 void Daemon::syncTaskList(const QString& listId) {
   const TaskList list = m_database.taskList(listId);
-  if (list.capabilities.value(QStringLiteral("provider")).toString() ==
-      QStringLiteral("caldav")) {
+  const QString provider =
+      list.capabilities.value(QStringLiteral("provider")).toString();
+  if (provider == QStringLiteral("caldav")) {
     m_caldav.syncTasks(list.accountId);
+  } else if (provider == QStringLiteral("google")) {
+    m_google.syncTasks(list.accountId);
   }
 }
 

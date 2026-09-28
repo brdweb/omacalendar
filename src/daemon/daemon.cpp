@@ -443,6 +443,8 @@ Daemon::Daemon(QObject* parent)
   });
   connect(&m_caldav, &caldav::CalDavSync::tasksChanged, this,
           [this](const QStringList& listIds) { emitTasksChanged(listIds); });
+  connect(&m_google, &google::GoogleSync::tasksChanged, this,
+          [this](const QStringList& listIds) { emitTasksChanged(listIds); });
   connect(&m_reminders, &ReminderScheduler::reminderStateChanged, this, [this]() {
     m_server.broadcast(QStringLiteral("reminders.changed"),
                        {{QStringLiteral("revision"), m_database.changeRevision()}});

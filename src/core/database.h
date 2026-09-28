@@ -4,6 +4,7 @@
 #include <QHash>
 #include <QJsonValue>
 #include <QList>
+#include <QSet>
 #include <QSqlDatabase>
 #include <QSqlQuery>
 #include <QString>
@@ -386,6 +387,9 @@ class Database final {
   // or a Google task id).
   [[nodiscard]] TaskList taskListByRemoteId(const QString& accountId,
                                             const QString& remoteId,
+                                            QString* errorMessage = nullptr) const;
+  // Every provider id stored for a list, removals still owed included.
+  [[nodiscard]] QSet<QString> taskRemoteIds(const QString& listId,
                                             QString* errorMessage = nullptr) const;
   bool removeTaskList(const QString& listId, QString* errorMessage = nullptr);
   // Tasks with a provider write still owed, removals included, oldest first.

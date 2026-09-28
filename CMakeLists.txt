@@ -191,6 +191,8 @@ add_library(omacalendar_sync STATIC
   src/providers/google/googleoauthconfig.h
   src/providers/google/googlesync.cpp
   src/providers/google/googlesync.h
+  src/providers/google/googletasksync.cpp
+  src/providers/google/googletasksync.h
   src/providers/ics/icsservice.cpp
   src/providers/ics/icsservice.h
 )
