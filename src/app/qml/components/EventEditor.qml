@@ -167,6 +167,11 @@ Dialog {
     // free within working hours.
     function findFreeTime() {
         const freeBusy = App.freeBusy || ({})
+        // Guests still being checked would otherwise count as free.
+        if ((freeBusy.pending || []).length > 0) {
+            freeTimeMessage = qsTr("Still checking who is free.")
+            return
+        }
         let busy = (freeBusy.self || []).slice()
         const attendees = freeBusy.attendees || ({})
         for (const email of guestEmails) {
@@ -185,7 +190,7 @@ Dialog {
                                    freeBusy.end, zone)
                 : ""
         if (!slot) {
-            freeTimeMessage = qsTr("No time in the next week when everyone shown is free.")
+            freeTimeMessage = qsTr("No time in the next week when everyone checked is free.")
             return
         }
         const slotStart = String(App.utcToWallTime(slot, zone))
@@ -193,8 +198,8 @@ Dialog {
                                    new Date(Date.parse(slot) + duration * 60000).toISOString(),
                                    zone))
         freeTimeMessage = Date.parse(slot) === Date.parse(startUtc)
-                ? qsTr("Everyone shown is free at this time.")
-                : qsTr("Moved to the next time everyone shown is free.")
+                ? qsTr("Everyone checked is free at this time.")
+                : qsTr("Moved to the next time everyone checked is free.")
         startDateField.text = slotStart.slice(0, 10)
         startTimeField.text = slotStart.slice(11, 16)
         endDateField.text = slotEnd.slice(0, 10)

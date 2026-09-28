@@ -668,6 +668,13 @@ Item {
             strip.endText = "14:30"
             compare(findChild(strip, "availabilityStatus-0").text, "Free")
             compare(findChild(strip, "availabilityStatus-1").text, "Busy")
+            verify(!findChild(strip, "findFreeTime").enabled,
+                   "a pending guest's time is unknown, not free")
+            const answered = freeBusyFixture()
+            answered.pending = []
+            answered.attendees["pat@example.com"] = []
+            strip.freeBusy = answered
+            verify(findChild(strip, "findFreeTime").enabled)
             const requested = createTemporaryObject(signalSpyFactory, testCase, {
                 "target": strip, "signalName": "slotRequested"})
             findChild(strip, "findFreeTime").clicked()
@@ -697,9 +704,14 @@ Item {
             App.freeBusy = answer
             tryCompare(editor, "showAvailability", true)
             App.nextFreeSlotResult = "2026-09-28T11:00:00.000Z"
+            // A guest is still pending, so the editor will not guess.
+            editor.findFreeTime()
+            compare(findChild(scene.Window.window.contentItem, "eventStartTime").text, "09:00")
+            answer.pending = []
+            App.freeBusy = Object.assign({}, answer)
             findChild(scene.Window.window.contentItem, "findFreeTime").clicked()
             compare(findChild(scene.Window.window.contentItem, "freeTimeMessage").text,
-                    "Moved to the next time everyone shown is free.")
+                    "Moved to the next time everyone checked is free.")
             const content = scene.Window.window.contentItem
             compare(findChild(content, "eventStartDate").text, "2026-09-28")
             compare(findChild(content, "eventStartTime").text, "11:00")

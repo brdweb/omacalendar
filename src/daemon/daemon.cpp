@@ -3635,8 +3635,10 @@ QJsonValue Daemon::onFreeBusyQuery(const QJsonObject& params, ipc::Error* error)
   }
 
   const QDateTime now = QDateTime::currentDateTimeUtc();
-  const QString rangeKey =
-      QLatin1Char('|') + isoUtc(startUtc) + QLatin1Char('|') + isoUtc(endUtc);
+  // Free/busy visibility differs between accounts, so the account that asked
+  // is part of the cache key.
+  const QString rangeKey = QLatin1Char('|') + googleAccountId + QLatin1Char('|') +
+                           isoUtc(startUtc) + QLatin1Char('|') + isoUtc(endUtc);
   QJsonObject known;
   QStringList remote;
   QJsonArray unavailable;

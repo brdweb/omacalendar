@@ -23,6 +23,10 @@ ColumnLayout {
     property int workDayEnd: 18
     readonly property var rows: buildRows()
     readonly property bool anyConflict: rows.some(function(row) { return row.conflict })
+    // Unknown availability is not free: finding a time waits for every answer.
+    readonly property bool anyPending: rows.some(function(row) {
+        return row.state === "pending"
+    })
     signal slotRequested()
 
     spacing: Theme.spacingXS
@@ -203,8 +207,11 @@ ColumnLayout {
         AppButton {
             objectName: "findFreeTime"
             compact: true
+            enabled: !root.anyPending
             text: qsTr("Find next free time")
-            toolTipText: qsTr("Move the event to the next time everyone shown is free")
+            toolTipText: root.anyPending
+                         ? qsTr("Waiting to hear who is free")
+                         : qsTr("Move the event to the next time everyone who could be checked is free")
             onClicked: root.slotRequested()
         }
     }
