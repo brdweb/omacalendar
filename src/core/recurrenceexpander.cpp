@@ -670,8 +670,7 @@ void sortOccurrences(QList<Event>* events) {
 
 }  // namespace
 
-std::optional<RecurrenceSeriesEnd> RecurrenceExpander::finiteEnd(
-    const Event& master) {
+std::optional<RecurrenceSeriesEnd> RecurrenceExpander::finiteEnd(const Event& master) {
   if (master.recurrenceRule.isEmpty() || !master.recurrenceId.isEmpty()) {
     return std::nullopt;
   }
@@ -719,9 +718,8 @@ std::optional<RecurrenceSeriesEnd> RecurrenceExpander::finiteEnd(
 
   for (icalproperty* property =
            icalcomponent_get_first_property(component.event, ICAL_RRULE_PROPERTY);
-       property != nullptr;
-       property = icalcomponent_get_next_property(component.event,
-                                                 ICAL_RRULE_PROPERTY)) {
+       property != nullptr; property = icalcomponent_get_next_property(
+                                component.event, ICAL_RRULE_PROPERTY)) {
     icalrecurrencetype* rule = icalproperty_get_rrule(property);
     if (rule == nullptr) {
       return std::nullopt;
@@ -793,14 +791,12 @@ std::optional<RecurrenceSeriesEnd> RecurrenceExpander::finiteEnd(
     // Use the same expansion path as events.list for COUNT, including raw
     // provider RDATE/EXDATE. A capped or invalid expansion cannot establish a
     // safe bound and must leave the series unbounded.
-    const QDateTime start = master.allDay
-                                ? QDateTime(master.startDate.addDays(-2), QTime(0, 0),
-                                            QTimeZone::UTC)
-                                : master.startUtc.addDays(-2);
-    const QDateTime end = master.allDay
-                              ? QDateTime(lastDate.addDays(2), QTime(0, 0),
-                                          QTimeZone::UTC)
-                              : lastUtc.addDays(2);
+    const QDateTime start = master.allDay ? QDateTime(master.startDate.addDays(-2),
+                                                      QTime(0, 0), QTimeZone::UTC)
+                                          : master.startUtc.addDays(-2);
+    const QDateTime end =
+        master.allDay ? QDateTime(lastDate.addDays(2), QTime(0, 0), QTimeZone::UTC)
+                      : lastUtc.addDays(2);
     const RecurrenceExpansionResult expansion =
         expand({master}, start, end, 10000, 100000);
     if (expansion.truncated || !expansion.warnings.isEmpty()) {
@@ -823,9 +819,8 @@ std::optional<RecurrenceSeriesEnd> RecurrenceExpander::finiteEnd(
   }
   // Date comparisons for floating series must err on the inclusive side of
   // time-zone changes; the UTC bound remains exact for zoned series.
-  const QDate floatingEnd = master.timeKind == TimeKind::Floating
-                                ? lastUtc.date().addDays(2)
-                                : QDate{};
+  const QDate floatingEnd =
+      master.timeKind == TimeKind::Floating ? lastUtc.date().addDays(2) : QDate{};
   if (master.timeKind == TimeKind::Floating && !floatingEnd.isValid()) {
     return std::nullopt;
   }
@@ -946,10 +941,9 @@ RecurrenceExpansionResult RecurrenceExpander::expand(
     QString cacheKey;
     CachedSeriesExpansion* cached = nullptr;
     if (cache != nullptr && !master.id.isEmpty()) {
-      cacheKey = master.id + QLatin1Char('\n') +
-                 QString::number(master.localRevision) + QLatin1Char('\n') +
-                 QString::number(startUtc.toMSecsSinceEpoch()) + QLatin1Char('\n') +
-                 QString::number(endUtc.toMSecsSinceEpoch());
+      cacheKey = master.id + QLatin1Char('\n') + QString::number(master.localRevision) +
+                 QLatin1Char('\n') + QString::number(startUtc.toMSecsSinceEpoch()) +
+                 QLatin1Char('\n') + QString::number(endUtc.toMSecsSinceEpoch());
       cached = cache->m_entries.object(cacheKey);
     }
     QList<Event> generated;

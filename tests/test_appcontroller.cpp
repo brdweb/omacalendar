@@ -124,13 +124,14 @@ class FakeDaemon final : public QObject {
         response.insert(QStringLiteral("result"),
                         QJsonObject{{QStringLiteral("calendars"), m_calendars}});
       } else if (method == QStringLiteral("calendarSets.list")) {
-        response.insert(QStringLiteral("result"),
-                        QJsonObject{{QStringLiteral("calendarSets"),
-                                     QJsonArray{QJsonObject{
-                                         {QStringLiteral("id"), QStringLiteral("focus")},
-                                         {QStringLiteral("calendarIds"),
-                                          QJsonArray{QStringLiteral("local-default")}}}}},
-                                    {QStringLiteral("activeId"), m_activeSet}});
+        response.insert(
+            QStringLiteral("result"),
+            QJsonObject{{QStringLiteral("calendarSets"),
+                         QJsonArray{QJsonObject{
+                             {QStringLiteral("id"), QStringLiteral("focus")},
+                             {QStringLiteral("calendarIds"),
+                              QJsonArray{QStringLiteral("local-default")}}}}},
+                        {QStringLiteral("activeId"), m_activeSet}});
       } else if (method == QStringLiteral("calendarSets.activate")) {
         m_activeSet = params.value(QStringLiteral("calendarSetId")).toString();
       } else if (method == QStringLiteral("calendars.updatePreferences")) {
@@ -660,9 +661,12 @@ void AppControllerTest::staleRangePagesAreDiscarded() {
   controller.loadRange(QDate(2026, 5, 1), QDate(2026, 5, 31));
   const QString current = QStringLiteral("2026-05-01");
   QTRY_COMPARE(controller.eventsModel()->rowCount(), kEvents);
-  QTRY_VERIFY(!controller.events().isEmpty() &&
-              controller.events().constFirst().toMap().value(QStringLiteral("id"))
-                  .toString().startsWith(current));
+  QTRY_VERIFY(!controller.events().isEmpty() && controller.events()
+                                                    .constFirst()
+                                                    .toMap()
+                                                    .value(QStringLiteral("id"))
+                                                    .toString()
+                                                    .startsWith(current));
   for (const QVariant& event : controller.events()) {
     const QString id = event.toMap().value(QStringLiteral("id")).toString();
     QVERIFY2(id.startsWith(current), qPrintable(id));
@@ -720,14 +724,17 @@ void AppControllerTest::requestsOnlyVisibleCalendars() {
   AppController controller;
   QTRY_VERIFY(controller.connected());
   QTRY_VERIFY(!daemon.eventListRequests().isEmpty());
-  QCOMPARE(daemon.eventListRequests().constLast().value(QStringLiteral("calendarIds"))
+  QCOMPARE(daemon.eventListRequests()
+               .constLast()
+               .value(QStringLiteral("calendarIds"))
                .toArray(),
-           (QJsonArray{QStringLiteral("local-default"),
-                       QStringLiteral("secondary")}));
+           (QJsonArray{QStringLiteral("local-default"), QStringLiteral("secondary")}));
   const qsizetype beforeHide = daemon.eventListRequests().size();
   controller.setCalendarVisibility(QStringLiteral("secondary"), false);
   QTRY_VERIFY(daemon.eventListRequests().size() > beforeHide);
-  QCOMPARE(daemon.eventListRequests().constLast().value(QStringLiteral("calendarIds"))
+  QCOMPARE(daemon.eventListRequests()
+               .constLast()
+               .value(QStringLiteral("calendarIds"))
                .toArray(),
            QJsonArray{QStringLiteral("local-default")});
 
@@ -739,7 +746,9 @@ void AppControllerTest::requestsOnlyVisibleCalendars() {
 
   controller.setCalendarVisibility(QStringLiteral("secondary"), true);
   QTRY_VERIFY(daemon.eventListRequests().size() > beforeEmptyRange);
-  QCOMPARE(daemon.eventListRequests().constLast().value(QStringLiteral("calendarIds"))
+  QCOMPARE(daemon.eventListRequests()
+               .constLast()
+               .value(QStringLiteral("calendarIds"))
                .toArray(),
            QJsonArray{QStringLiteral("secondary")});
   QTRY_COMPARE(controller.eventsModel()->rowCount(), 3);
@@ -750,7 +759,9 @@ void AppControllerTest::requestsOnlyVisibleCalendars() {
   QCOMPARE(daemon.eventListRequests().size(), beforeActiveSet);
   controller.setCalendarVisibility(QStringLiteral("local-default"), true);
   QTRY_VERIFY(daemon.eventListRequests().size() > beforeActiveSet);
-  QCOMPARE(daemon.eventListRequests().constLast().value(QStringLiteral("calendarIds"))
+  QCOMPARE(daemon.eventListRequests()
+               .constLast()
+               .value(QStringLiteral("calendarIds"))
                .toArray(),
            QJsonArray{QStringLiteral("local-default")});
 }
@@ -809,9 +820,9 @@ void AppControllerTest::notificationsReloadOnlyWhatChanged() {
 
 void AppControllerTest::activityListsLoadAndRefreshIndependently() {
   FakeDaemon daemon(0);
-  daemon.setOperations(QJsonArray{
-      QJsonObject{{QStringLiteral("id"), 11},
-                  {QStringLiteral("state"), QStringLiteral("blocked")}}});
+  daemon.setOperations(
+      QJsonArray{QJsonObject{{QStringLiteral("id"), 11},
+                             {QStringLiteral("state"), QStringLiteral("blocked")}}});
   daemon.setConflicts(QJsonArray{
       QJsonObject{{QStringLiteral("id"), 12},
                   {QStringLiteral("strategy"), QStringLiteral("keep_remote")}}});
@@ -819,25 +830,34 @@ void AppControllerTest::activityListsLoadAndRefreshIndependently() {
   AppController controller;
   QTRY_COMPARE(controller.operationsModel()->rowCount(), 1);
   QTRY_COMPARE(controller.conflictsModel()->rowCount(), 1);
-  QCOMPARE(controller.operations().constFirst().toMap().value(QStringLiteral("state"))
-               .toString(), QStringLiteral("blocked"));
-  QCOMPARE(controller.conflicts().constFirst().toMap().value(QStringLiteral("id"))
-               .toInt(), 12);
+  QCOMPARE(controller.operations()
+               .constFirst()
+               .toMap()
+               .value(QStringLiteral("state"))
+               .toString(),
+           QStringLiteral("blocked"));
+  QCOMPARE(
+      controller.conflicts().constFirst().toMap().value(QStringLiteral("id")).toInt(),
+      12);
   QVERIFY(daemon.subscribedTopics().contains(QStringLiteral("operations")));
   QVERIFY(daemon.subscribedTopics().contains(QStringLiteral("conflicts")));
   settledMethods(daemon);
 
-  daemon.setOperations(QJsonArray{
-      QJsonObject{{QStringLiteral("id"), 11},
-                  {QStringLiteral("state"), QStringLiteral("pending")}},
-      QJsonObject{{QStringLiteral("id"), 13},
-                  {QStringLiteral("state"), QStringLiteral("blocked")}}});
+  daemon.setOperations(
+      QJsonArray{QJsonObject{{QStringLiteral("id"), 11},
+                             {QStringLiteral("state"), QStringLiteral("pending")}},
+                 QJsonObject{{QStringLiteral("id"), 13},
+                             {QStringLiteral("state"), QStringLiteral("blocked")}}});
   daemon.clearMethods();
   daemon.broadcast(QStringLiteral("operations.changed"));
   QCOMPARE(settledMethods(daemon), QStringList{QStringLiteral("outbox.list")});
   QCOMPARE(controller.operationsModel()->rowCount(), 2);
-  QCOMPARE(controller.operations().constFirst().toMap().value(QStringLiteral("state"))
-               .toString(), QStringLiteral("pending"));
+  QCOMPARE(controller.operations()
+               .constFirst()
+               .toMap()
+               .value(QStringLiteral("state"))
+               .toString(),
+           QStringLiteral("pending"));
   QCOMPARE(controller.conflictsModel()->rowCount(), 1);
 
   daemon.setConflicts({});

@@ -2959,12 +2959,11 @@ class DatabaseTest final : public QObject {
              qPrintable(error));
     Event master = makeRemoteEvent(QStringLiteral("local-default"),
                                    QStringLiteral("old-until"), 0);
-    master.recurrenceRule =
-        QStringLiteral("RRULE:FREQ=DAILY;UNTIL=20260203T080000Z");
+    master.recurrenceRule = QStringLiteral("RRULE:FREQ=DAILY;UNTIL=20260203T080000Z");
     QVERIFY2(db.applyRemoteEvent(master, &error), qPrintable(error));
     QSqlQuery stored(calendarConnection());
-    QVERIFY(stored.exec(QStringLiteral(
-        "SELECT series_until_utc FROM events WHERE id='old-until'")));
+    QVERIFY(stored.exec(
+        QStringLiteral("SELECT series_until_utc FROM events WHERE id='old-until'")));
     QVERIFY(stored.next());
     QVERIFY(!stored.value(0).isNull());
     QVERIFY(stored.value(0).toString() < QStringLiteral("2026-02-07"));
@@ -3023,8 +3022,8 @@ class DatabaseTest final : public QObject {
     const auto at = [](int day, int hour = 8) {
       return QDateTime(QDate(2026, 8, day), QTime(hour, 0), QTimeZone::UTC);
     };
-    Event finished = makeRemoteEvent(QStringLiteral("local-default"),
-                                     QStringLiteral("finished"), 0);
+    Event finished =
+        makeRemoteEvent(QStringLiteral("local-default"), QStringLiteral("finished"), 0);
     finished.startUtc = at(1);
     finished.endUtc = at(1, 9);
     finished.recurrenceRule = QStringLiteral("FREQ=DAILY;COUNT=3");
@@ -3042,14 +3041,13 @@ class DatabaseTest final : public QObject {
     range.id = QStringLiteral("shifted-range");
     range.remoteId = QStringLiteral("remote-shifted-range");
     range.recurrenceRule.clear();
-    range.recurrenceId =
-        QStringLiteral("RANGE=THISANDFUTURE:20260803T080000Z");
+    range.recurrenceId = QStringLiteral("RANGE=THISANDFUTURE:20260803T080000Z");
     range.startUtc = at(10);
     range.endUtc = at(10, 9);
     QVERIFY2(db.applyRemoteEvent(range, &error), qPrintable(error));
 
-    Event infinite = makeRemoteEvent(QStringLiteral("local-default"),
-                                     QStringLiteral("infinite"), 0);
+    Event infinite =
+        makeRemoteEvent(QStringLiteral("local-default"), QStringLiteral("infinite"), 0);
     infinite.startUtc = at(1);
     infinite.endUtc = at(1, 9);
     infinite.recurrenceRule = QStringLiteral("FREQ=DAILY");
@@ -3101,8 +3099,9 @@ class DatabaseTest final : public QObject {
     const auto movedWindow = db.eventsBetween(at(10, 0), at(11, 0));
     QVERIFY(std::any_of(movedWindow.cbegin(), movedWindow.cend(),
                         [&moved](const Event& event) { return event.id == moved.id; }));
-    QVERIFY(std::none_of(movedWindow.cbegin(), movedWindow.cend(),
-                        [&range](const Event& event) { return event.id == range.id; }));
+    QVERIFY(
+        std::none_of(movedWindow.cbegin(), movedWindow.cend(),
+                     [&range](const Event& event) { return event.id == range.id; }));
     QSqlQuery bound(calendarConnection());
     QVERIFY(bound.exec(QStringLiteral(
         "SELECT series_until_utc,series_until_date FROM events WHERE id='infinite'")));
@@ -3162,14 +3161,13 @@ class DatabaseTest final : public QObject {
     floating.recurrenceRule = QStringLiteral("FREQ=DAILY;COUNT=2");
     QVERIFY2(db.applyRemoteEvent(floating, &error), qPrintable(error));
     QSqlQuery bounds(calendarConnection());
-    QVERIFY(bounds.exec(QStringLiteral(
-        "SELECT series_until_utc,series_until_date FROM events "
-        "WHERE id='floating-date-bound'")));
+    QVERIFY(bounds.exec(
+        QStringLiteral("SELECT series_until_utc,series_until_date FROM events "
+                       "WHERE id='floating-date-bound'")));
     QVERIFY(bounds.next());
     QVERIFY(bounds.value(0).isNull());
     QVERIFY(!bounds.value(1).isNull());
-    const QDateTime second(QDate(2026, 3, 8), QTime(9, 30),
-                           QTimeZone::LocalTime);
+    const QDateTime second(QDate(2026, 3, 8), QTime(9, 30), QTimeZone::LocalTime);
     QCOMPARE(db.eventsBetween(second.toUTC(), second.toUTC().addSecs(1)).size(), 1);
     const QDateTime later(QDate(2026, 3, 13), QTime(9, 0), QTimeZone::LocalTime);
     QVERIFY(db.eventsBetween(later.toUTC(), later.toUTC().addSecs(1)).isEmpty());
@@ -3215,8 +3213,8 @@ class DatabaseTest final : public QObject {
         QStringLiteral("downgrade-%1")
             .arg(QUuid::createUuid().toString(QUuid::WithoutBraces));
     {
-      QSqlDatabase raw = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"),
-                                                  connectionName);
+      QSqlDatabase raw =
+          QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), connectionName);
       raw.setDatabaseName(path);
       QVERIFY(raw.open());
       {
@@ -3231,12 +3229,12 @@ class DatabaseTest final : public QObject {
                    qPrintable(sql.lastError().text()));
         }
         for (const QString& name :
-             {QStringLiteral("series_until_utc"),
-              QStringLiteral("series_until_date"),
+             {QStringLiteral("series_until_utc"), QStringLiteral("series_until_date"),
               QStringLiteral("original_start_utc"),
               QStringLiteral("original_start_date")}) {
-          QVERIFY2(sql.exec(QStringLiteral("ALTER TABLE events DROP COLUMN %1").arg(name)),
-                   qPrintable(sql.lastError().text()));
+          QVERIFY2(
+              sql.exec(QStringLiteral("ALTER TABLE events DROP COLUMN %1").arg(name)),
+              qPrintable(sql.lastError().text()));
         }
         QVERIFY(sql.exec(QStringLiteral("PRAGMA user_version = 2")));
       }
@@ -3250,20 +3248,18 @@ class DatabaseTest final : public QObject {
     QHash<QString, QPair<QVariant, QVariant>> values;
     {
       QSqlQuery bounds(calendarConnection());
-      QVERIFY(bounds.exec(QStringLiteral(
-          "SELECT id,series_until_utc,series_until_date FROM events "
-          "WHERE id LIKE 'upgrade-%' ORDER BY id")));
+      QVERIFY(bounds.exec(
+          QStringLiteral("SELECT id,series_until_utc,series_until_date FROM events "
+                         "WHERE id LIKE 'upgrade-%' ORDER BY id")));
       while (bounds.next()) {
-        values.insert(bounds.value(0).toString(),
-                      {bounds.value(1), bounds.value(2)});
+        values.insert(bounds.value(0).toString(), {bounds.value(1), bounds.value(2)});
       }
     }
     QCOMPARE(values.size(), 4);
     QCOMPARE(values.value(count.id).first.toString(),
              QStringLiteral("2026-02-03T09:00:00.000Z"));
     QVERIFY(!values.value(until.id).first.isNull());
-    QCOMPARE(values.value(allDay.id).second.toString(),
-             QStringLiteral("2026-02-03"));
+    QCOMPARE(values.value(allDay.id).second.toString(), QStringLiteral("2026-02-03"));
     QVERIFY(values.value(allDay.id).first.isNull());
     {
       QSqlQuery original(calendarConnection());

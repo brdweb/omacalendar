@@ -107,8 +107,8 @@ void IcsServiceTest::preservesCompleteRecurrenceAcrossFeedRefreshAndImport() {
     ics::IcsService service(&database);
     for (const QString& revision : {QStringLiteral("one"), QStringLiteral("two")}) {
       ChunkedSyncApply::Request batch;
-      QVERIFY2(service.prepareFeed(subscription, payload, revision, {}, &batch,
-                                   &error), qPrintable(error));
+      QVERIFY2(service.prepareFeed(subscription, payload, revision, {}, &batch, &error),
+               qPrintable(error));
       ChunkedSyncApply apply(&database);
       bool completed = false;
       bool succeeded = false;

@@ -774,8 +774,8 @@ void IcsService::beginFetch(const std::shared_ptr<FetchContext>& context,
         }
         ChunkedSyncApply::Request batch;
         QString applyError;
-        if (!prepareFeed(context->subscription, context->body, etag, modified,
-                         &batch, &applyError)) {
+        if (!prepareFeed(context->subscription, context->body, etag, modified, &batch,
+                         &applyError)) {
           finishFetch(context, QStringLiteral("invalid_calendar"), applyError);
           return;
         }
@@ -849,12 +849,11 @@ QString IcsService::remoteIdentity(const Event& event) {
 bool IcsService::prepareFeed(const IcsSubscription& subscription,
                              const QByteArray& payload, const QString& etag,
                              const QString& lastModified,
-                             ChunkedSyncApply::Request* batch,
-                             QString* errorMessage) {
+                             ChunkedSyncApply::Request* batch, QString* errorMessage) {
   caldav::ICalendarParseResult parsed = caldav::ICalendarCodec::parse(payload);
-  const QByteArray upperPayload =
-      parsed.error.code == QStringLiteral("no_events") ? payload.toUpper()
-                                                        : QByteArray{};
+  const QByteArray upperPayload = parsed.error.code == QStringLiteral("no_events")
+                                      ? payload.toUpper()
+                                      : QByteArray{};
   const bool emptyCalendar = parsed.error.code == QStringLiteral("no_events") &&
                              upperPayload.contains("BEGIN:VCALENDAR") &&
                              upperPayload.contains("END:VCALENDAR");

@@ -3,8 +3,8 @@
 #include <QHash>
 #include <QObject>
 #include <QSet>
-#include <QTimer>
 #include <QThreadPool>
+#include <QTimer>
 #include <memory>
 
 #include "core/database.h"

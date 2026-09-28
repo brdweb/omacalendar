@@ -1625,8 +1625,8 @@ void CalDavSync::applyCalendarResponse(SyncJob* job, const DavResponse& response
               finish(job, parsed.errorCode, parsed.errorMessage);
               return;
             }
-            consumeCalendarResponse(job, std::move(parsed.resources),
-                                    parsed.syncToken, fullSync);
+            consumeCalendarResponse(job, std::move(parsed.resources), parsed.syncToken,
+                                    fullSync);
           });
   watcher->setFuture(QtConcurrent::run(&m_parsePool, [body = response.body]() {
     ParsedCalendarResponse result;
@@ -1642,8 +1642,7 @@ void CalDavSync::applyCalendarResponse(SyncJob* job, const DavResponse& response
   }));
 }
 
-void CalDavSync::consumeCalendarResponse(SyncJob* job,
-                                         QList<CalDavResource> resources,
+void CalDavSync::consumeCalendarResponse(SyncJob* job, QList<CalDavResource> resources,
                                          const QString& responseSyncToken,
                                          const bool fullSync) {
   QString budgetCode;
@@ -1756,9 +1755,9 @@ void CalDavSync::parseNextResource(SyncJob* job,
       finish(job, decoded.error.code, decoded.error.message);
       return;
     }
-    state->providerResources.append(
-        {job->currentCalendar.id, resourceId, resource.etag,
-         QStringLiteral("text/calendar"), resource.calendarData});
+    state->providerResources.append({job->currentCalendar.id, resourceId, resource.etag,
+                                     QStringLiteral("text/calendar"),
+                                     resource.calendarData});
     for (Event& event : decoded.events) {
       state->observedThisAndFuture =
           state->observedThisAndFuture ||
@@ -1809,13 +1808,11 @@ void CalDavSync::parseNextResource(SyncJob* job,
     batch.replaceCoverage = job->replaceCoverage;
   }
   const QString newSyncToken =
-      !state->responseSyncToken.isEmpty()
-          ? state->responseSyncToken
-          : state->fullSync
-                ? job->currentCalendar.capabilities
-                      .value(QStringLiteral("serverSyncToken"))
-                      .toString()
-                : QString();
+      !state->responseSyncToken.isEmpty() ? state->responseSyncToken
+      : state->fullSync
+          ? job->currentCalendar.capabilities.value(QStringLiteral("serverSyncToken"))
+                .toString()
+          : QString();
   // A bounded hydration cannot advance the collection cursor or CTag:
   // changes outside its range still require a collection-wide pass.
   if (!job->hydrationSync && !newSyncToken.isEmpty()) {
@@ -1842,34 +1839,33 @@ void CalDavSync::parseNextResource(SyncJob* job,
               job->changedCalendarIds.append(calendarId);
             }
           });
-  apply->start(std::move(batch),
-               [this, accountId, job, apply](const bool succeeded,
-                                             const QString& error) {
-                 apply->deleteLater();
-                 if (m_jobs.value(accountId) != job) {
-                   return;
-                 }
-                 job->apply = nullptr;
-                 if (!succeeded) {
-                   finish(job, QStringLiteral("database_error"), error);
-                   return;
-                 }
-                 if (!job->changedCalendarIds.contains(job->currentCalendar.id)) {
-                   job->changedCalendarIds.append(job->currentCalendar.id);
-                 }
-                 if (job->hydrationSync) {
-                   QList<RangeSyncRequest>& pending = m_pendingHydrations[accountId];
-                   if (!pending.isEmpty() &&
-                       pending.first().calendarId == job->hydrationRequest.calendarId &&
-                       pending.first().startUtc == job->hydrationRequest.startUtc &&
-                       pending.first().endUtc == job->hydrationRequest.endUtc) {
-                     pending.removeFirst();
-                   }
-                   syncNextHydration(job);
-                 } else {
-                   syncNextCalendar(job);
-                 }
-               });
+  apply->start(std::move(batch), [this, accountId, job, apply](const bool succeeded,
+                                                               const QString& error) {
+    apply->deleteLater();
+    if (m_jobs.value(accountId) != job) {
+      return;
+    }
+    job->apply = nullptr;
+    if (!succeeded) {
+      finish(job, QStringLiteral("database_error"), error);
+      return;
+    }
+    if (!job->changedCalendarIds.contains(job->currentCalendar.id)) {
+      job->changedCalendarIds.append(job->currentCalendar.id);
+    }
+    if (job->hydrationSync) {
+      QList<RangeSyncRequest>& pending = m_pendingHydrations[accountId];
+      if (!pending.isEmpty() &&
+          pending.first().calendarId == job->hydrationRequest.calendarId &&
+          pending.first().startUtc == job->hydrationRequest.startUtc &&
+          pending.first().endUtc == job->hydrationRequest.endUtc) {
+        pending.removeFirst();
+      }
+      syncNextHydration(job);
+    } else {
+      syncNextCalendar(job);
+    }
+  });
 }
 
 void CalDavSync::drainOutbox(SyncJob* job) {

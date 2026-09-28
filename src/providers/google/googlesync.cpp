@@ -1287,7 +1287,8 @@ void GoogleSync::startEventPage(SyncJob* job, const QString& pageToken) {
         currentJob->readRetryAttempts = 0;
         const QJsonArray items = response.body.value(QStringLiteral("items")).toArray();
         const QString calendarId = currentJob->currentCalendar.id;
-        const QJsonArray defaults = calendarDefaultReminders(currentJob->currentCalendar);
+        const QJsonArray defaults =
+            calendarDefaultReminders(currentJob->currentCalendar);
         const QString nextPage =
             response.body.value(QStringLiteral("nextPageToken")).toString();
         const QString nextSync =
@@ -1304,14 +1305,14 @@ void GoogleSync::startEventPage(SyncJob* job, const QString& pageToken) {
                     }
                   }
                 });
-        watcher->setFuture(QtConcurrent::run(
-            &m_mappingPool, [items, calendarId, defaults]() {
+        watcher->setFuture(
+            QtConcurrent::run(&m_mappingPool, [items, calendarId, defaults]() {
               QList<Event> events;
               events.reserve(items.size());
               for (const QJsonValue& value : items) {
                 if (value.isObject()) {
-                  events.append(eventFromGoogleJson(value.toObject(), calendarId,
-                                                    defaults));
+                  events.append(
+                      eventFromGoogleJson(value.toObject(), calendarId, defaults));
                 }
               }
               return events;
@@ -1367,42 +1368,39 @@ void GoogleSync::stageEventPage(SyncJob* job, QList<Event> events,
   connect(apply, &ChunkedSyncApply::chunkCommitted, this,
           [this, accountId, generation](const QString& calendarId) {
             SyncJob* active = activeJob(accountId, generation);
-            if (active != nullptr &&
-                !active->changedCalendarIds.contains(calendarId)) {
+            if (active != nullptr && !active->changedCalendarIds.contains(calendarId)) {
               active->changedCalendarIds.append(calendarId);
             }
           });
-  apply->start(
-      std::move(batch),
-      [this, accountId, generation, apply](const bool succeeded,
-                                           const QString& applyError) {
-        SyncJob* active = activeJob(accountId, generation);
-        apply->deleteLater();
-        if (active == nullptr) {
-          return;
-        }
-        active->apply = nullptr;
-        if (!succeeded) {
-          finish(active, QStringLiteral("database_error"), applyError);
-          return;
-        }
-        if (active->eventFullSync &&
-            !active->changedCalendarIds.contains(active->currentCalendar.id)) {
-          active->changedCalendarIds.append(active->currentCalendar.id);
-        }
-        if (active->hydrationSync) {
-          QList<RangeSyncRequest>& pending = m_pendingHydrations[accountId];
-          if (!pending.isEmpty() &&
-              pending.first().calendarId == active->hydrationRequest.calendarId &&
-              pending.first().startUtc == active->hydrationRequest.startUtc &&
-              pending.first().endUtc == active->hydrationRequest.endUtc) {
-            pending.removeFirst();
-          }
-          syncNextHydration(active);
-        } else {
-          syncNextCalendar(active);
-        }
-      });
+  apply->start(std::move(batch), [this, accountId, generation, apply](
+                                     const bool succeeded, const QString& applyError) {
+    SyncJob* active = activeJob(accountId, generation);
+    apply->deleteLater();
+    if (active == nullptr) {
+      return;
+    }
+    active->apply = nullptr;
+    if (!succeeded) {
+      finish(active, QStringLiteral("database_error"), applyError);
+      return;
+    }
+    if (active->eventFullSync &&
+        !active->changedCalendarIds.contains(active->currentCalendar.id)) {
+      active->changedCalendarIds.append(active->currentCalendar.id);
+    }
+    if (active->hydrationSync) {
+      QList<RangeSyncRequest>& pending = m_pendingHydrations[accountId];
+      if (!pending.isEmpty() &&
+          pending.first().calendarId == active->hydrationRequest.calendarId &&
+          pending.first().startUtc == active->hydrationRequest.startUtc &&
+          pending.first().endUtc == active->hydrationRequest.endUtc) {
+        pending.removeFirst();
+      }
+      syncNextHydration(active);
+    } else {
+      syncNextCalendar(active);
+    }
+  });
 }
 
 void GoogleSync::drainOutbox(SyncJob* job) {

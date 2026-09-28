@@ -1459,17 +1459,18 @@ bool Database::migrateSeriesBounds(QString* errorMessage) {
     }
     return false;
   }
-  for (const QString& sql : {
-           QStringLiteral("ALTER TABLE events ADD COLUMN series_until_utc TEXT"),
-           QStringLiteral("ALTER TABLE events ADD COLUMN series_until_date TEXT"),
-           QStringLiteral("ALTER TABLE events ADD COLUMN original_start_utc TEXT"),
-           QStringLiteral("ALTER TABLE events ADD COLUMN original_start_date TEXT")}) {
+  for (const QString& sql :
+       {QStringLiteral("ALTER TABLE events ADD COLUMN series_until_utc TEXT"),
+        QStringLiteral("ALTER TABLE events ADD COLUMN series_until_date TEXT"),
+        QStringLiteral("ALTER TABLE events ADD COLUMN original_start_utc TEXT"),
+        QStringLiteral("ALTER TABLE events ADD COLUMN original_start_date TEXT")}) {
     if (!execute(sql, errorMessage)) {
       m_database.rollback();
       return false;
     }
   }
-  if (!repairSeriesBounds(errorMessage) || !ensureReadPerformanceIndexes(errorMessage) ||
+  if (!repairSeriesBounds(errorMessage) ||
+      !ensureReadPerformanceIndexes(errorMessage) ||
       !execute(QStringLiteral("PRAGMA user_version = 3"), errorMessage)) {
     m_database.rollback();
     return false;
@@ -4051,7 +4052,8 @@ QList<Event> Database::eventsBetweenInternal(const QDateTime& startUtc,
       "e.transparency,e.visibility,e.recurrence_rule,e.recurrence_id,e.sequence,"
       "e.organizer_json,e.attendees_json,e.reminders_json,e.raw_payload,e.raw_format,"
       "e.dirty,e.deleted,e.local_revision,e.sync_state,e.created_at,e.updated_at");
-  const QString sql = QStringLiteral(R"SQL(
+  const QString sql =
+      QStringLiteral(R"SQL(
     SELECT * FROM (
       SELECT %4 FROM events AS e
       WHERE e.deleted=0 AND e.all_day=0
@@ -4128,8 +4130,7 @@ QList<Event> Database::eventsBetweenInternal(const QDateTime& startUtc,
     ) AS bounded_events
     ORDER BY all_day DESC, COALESCE(NULLIF(start_utc,''), start_date), id
   )SQL")
-                          .arg(invitedOnly, calendarClause, recurringInvitationFilter,
-                               columns);
+          .arg(invitedOnly, calendarClause, recurringInvitationFilter, columns);
 
   QSqlQuery query(m_database);
   query.prepare(sql);
@@ -4165,8 +4166,8 @@ QList<Event> Database::eventsBetweenInternal(const QDateTime& startUtc,
   QSet<QString> knownMasters;
   for (const Event& candidate : std::as_const(candidates)) {
     if (candidate.recurrenceId.isEmpty() && !candidate.recurrenceRule.isEmpty()) {
-      knownMasters.insert(parentIdentity(QStringLiteral("uid"), candidate.calendarId,
-                                         candidate.uid));
+      knownMasters.insert(
+          parentIdentity(QStringLiteral("uid"), candidate.calendarId, candidate.uid));
       if (!candidate.remoteId.isEmpty()) {
         knownMasters.insert(parentIdentity(QStringLiteral("google"),
                                            candidate.calendarId, candidate.remoteId));
@@ -4183,11 +4184,10 @@ QList<Event> Database::eventsBetweenInternal(const QDateTime& startUtc,
     QString googleParent;
     if (exception.rawFormat == QStringLiteral("google-json") &&
         !exception.rawPayload.isEmpty()) {
-      googleParent =
-          QJsonDocument::fromJson(exception.rawPayload.toUtf8())
-              .object()
-              .value(QStringLiteral("recurringEventId"))
-              .toString();
+      googleParent = QJsonDocument::fromJson(exception.rawPayload.toUtf8())
+                         .object()
+                         .value(QStringLiteral("recurringEventId"))
+                         .toString();
     }
     const QString identity = parentIdentity(
         googleParent.isEmpty() ? QStringLiteral("uid") : QStringLiteral("google"),
@@ -4197,12 +4197,12 @@ QList<Event> Database::eventsBetweenInternal(const QDateTime& startUtc,
     }
     checkedParents.insert(identity);
     QSqlQuery parent(m_database);
-    parent.prepare(
-        QStringLiteral("SELECT %1 FROM events AS e WHERE e.calendar_id=? "
-                       "AND e.recurrence_rule<>'' AND e.recurrence_id='' "
-                       "AND e.deleted=0 AND %2=? LIMIT 1")
-            .arg(columns, googleParent.isEmpty() ? QStringLiteral("e.uid")
-                                                  : QStringLiteral("e.remote_id")));
+    parent.prepare(QStringLiteral("SELECT %1 FROM events AS e WHERE e.calendar_id=? "
+                                  "AND e.recurrence_rule<>'' AND e.recurrence_id='' "
+                                  "AND e.deleted=0 AND %2=? LIMIT 1")
+                       .arg(columns, googleParent.isEmpty()
+                                         ? QStringLiteral("e.uid")
+                                         : QStringLiteral("e.remote_id")));
     parent.addBindValue(exception.calendarId);
     parent.addBindValue(googleParent.isEmpty() ? exception.uid : googleParent);
     if (!parent.exec()) {
@@ -4216,19 +4216,18 @@ QList<Event> Database::eventsBetweenInternal(const QDateTime& startUtc,
       if (!hydrateProviderResource(&master, errorMessage)) {
         return {};
       }
-      knownMasters.insert(parentIdentity(QStringLiteral("uid"), master.calendarId,
-                                         master.uid));
+      knownMasters.insert(
+          parentIdentity(QStringLiteral("uid"), master.calendarId, master.uid));
       if (!master.remoteId.isEmpty()) {
-        knownMasters.insert(parentIdentity(QStringLiteral("google"),
-                                           master.calendarId, master.remoteId));
+        knownMasters.insert(parentIdentity(QStringLiteral("google"), master.calendarId,
+                                           master.remoteId));
       }
       candidates.append(std::move(master));
     }
   }
   m_expansionCache.invalidateIfChanged(changeRevision());
-  const RecurrenceExpansionResult expansion =
-      RecurrenceExpander::expand(candidates, startUtc, endUtc, 10000, 100000,
-                                 &m_expansionCache);
+  const RecurrenceExpansionResult expansion = RecurrenceExpander::expand(
+      candidates, startUtc, endUtc, 10000, 100000, &m_expansionCache);
   if (expansion.truncated) {
     if (errorMessage != nullptr) {
       *errorMessage =

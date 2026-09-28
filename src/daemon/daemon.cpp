@@ -1547,10 +1547,8 @@ QJsonValue Daemon::onStatsDailyCounts(const QJsonObject& params, ipc::Error* err
   const QString endText = params.value(QStringLiteral("end")).toString();
   const QDate start = QDate::fromString(startText, Qt::ISODate);
   const QDate end = QDate::fromString(endText, Qt::ISODate);
-  if (!start.isValid() || !end.isValid() ||
-      start.toString(Qt::ISODate) != startText ||
-      end.toString(Qt::ISODate) != endText || start >= end ||
-      start.daysTo(end) > 366) {
+  if (!start.isValid() || !end.isValid() || start.toString(Qt::ISODate) != startText ||
+      end.toString(Qt::ISODate) != endText || start >= end || start.daysTo(end) > 366) {
     if (error != nullptr) {
       *error = {QStringLiteral("invalid_params"),
                 QStringLiteral("start and end must be ISO dates within 366 days"),
@@ -1575,8 +1573,8 @@ QJsonValue Daemon::onStatsDailyCounts(const QJsonObject& params, ipc::Error* err
     zoneId = params.value(QStringLiteral("timeZone")).toString();
   } else {
     QString dbError;
-    zoneId = m_database.setting(QStringLiteral("displayTimeZone"), {}, &dbError)
-                 .toString();
+    zoneId =
+        m_database.setting(QStringLiteral("displayTimeZone"), {}, &dbError).toString();
     if (!dbError.isEmpty()) {
       if (error != nullptr) {
         *error = {QStringLiteral("database_error"), dbError, false};
@@ -1605,8 +1603,8 @@ QJsonValue Daemon::onStatsDailyCounts(const QJsonObject& params, ipc::Error* err
     if (dbError.isEmpty()) {
       QJsonObject counts;
       for (const Event& event : events) {
-        const QDate first = event.allDay ? event.startDate
-                                        : event.startUtc.toTimeZone(zone).date();
+        const QDate first =
+            event.allDay ? event.startDate : event.startUtc.toTimeZone(zone).date();
         const QDate last = event.allDay
                                ? event.endDate.addDays(-1)
                                : event.endUtc.addMSecs(-1).toTimeZone(zone).date();

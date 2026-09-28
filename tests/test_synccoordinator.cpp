@@ -28,8 +28,8 @@ Event remoteEvent(const QString& calendarId, const int index) {
   event.uid = QStringLiteral("uid-%1@example.test").arg(index);
   event.etag = QStringLiteral("new-etag");
   event.summary = QStringLiteral("Remote event %1").arg(index);
-  event.startUtc = QDateTime(QDate(2026, 9, 1), QTime(8, 0), QTimeZone::UTC)
-                       .addSecs(index * 3600);
+  event.startUtc =
+      QDateTime(QDate(2026, 9, 1), QTime(8, 0), QTimeZone::UTC).addSecs(index * 3600);
   event.endUtc = event.startUtc.addSecs(1800);
   event.startTimeZone = QStringLiteral("UTC");
   event.endTimeZone = QStringLiteral("UTC");
@@ -227,8 +227,9 @@ class SyncCoordinatorTest final : public QObject {
     QVERIFY(directory.isValid());
     Database database;
     QString error;
-    QVERIFY2(database.open(directory.filePath(QStringLiteral("calendar.sqlite3")),
-                           &error), qPrintable(error));
+    QVERIFY2(
+        database.open(directory.filePath(QStringLiteral("calendar.sqlite3")), &error),
+        qPrintable(error));
     const Calendar calendar = remoteCalendar(&database, QStringLiteral("large-sync"));
     QVERIFY(!calendar.id.isEmpty());
     Event prior = remoteEvent(calendar.id, 40);
@@ -244,23 +245,22 @@ class SyncCoordinatorTest final : public QObject {
     }
     QStringList tokensAtCommit;
     bool editSucceeded = false;
-    connect(&apply, &ChunkedSyncApply::chunkCommitted, this,
-            [&](const QString&) {
-              tokensAtCommit.append(database.calendar(calendar.id).syncToken);
-              if (tokensAtCommit.size() == 1) {
-                Calendar preferences = database.calendar(calendar.id);
-                preferences.enabled = false;
-                Event local = database.eventByRemoteId(calendar.id,
-                                                        QStringLiteral("remote-40"));
-                local.summary = QStringLiteral("Edited while sync applies");
-                editSucceeded =
-                    database.upsertCalendar(preferences, &error) &&
-                    database.saveLocalEvent(
-                        &local, OutboxOperation::Update, &error,
-                        QStringLiteral("chunked-local-edit"), QStringLiteral("series"),
-                        QStringLiteral("none"), local.localRevision);
-              }
-            });
+    connect(&apply, &ChunkedSyncApply::chunkCommitted, this, [&](const QString&) {
+      tokensAtCommit.append(database.calendar(calendar.id).syncToken);
+      if (tokensAtCommit.size() == 1) {
+        Calendar preferences = database.calendar(calendar.id);
+        preferences.enabled = false;
+        Event local =
+            database.eventByRemoteId(calendar.id, QStringLiteral("remote-40"));
+        local.summary = QStringLiteral("Edited while sync applies");
+        editSucceeded =
+            database.upsertCalendar(preferences, &error) &&
+            database.saveLocalEvent(&local, OutboxOperation::Update, &error,
+                                    QStringLiteral("chunked-local-edit"),
+                                    QStringLiteral("series"), QStringLiteral("none"),
+                                    local.localRevision);
+      }
+    });
     bool completed = false;
     bool succeeded = false;
     apply.start(std::move(batch), [&](bool ok, const QString& message) {
@@ -271,9 +271,9 @@ class SyncCoordinatorTest final : public QObject {
     QTRY_VERIFY_WITH_TIMEOUT(completed, 10000);
     QVERIFY2(succeeded, qPrintable(error));
     QVERIFY2(editSucceeded, qPrintable(error));
-    QCOMPARE(tokensAtCommit, (QStringList{QStringLiteral("old-token"),
-                                          QStringLiteral("old-token"),
-                                          QStringLiteral("new-token")}));
+    QCOMPARE(tokensAtCommit,
+             (QStringList{QStringLiteral("old-token"), QStringLiteral("old-token"),
+                          QStringLiteral("new-token")}));
     const Calendar after = database.calendar(calendar.id);
     QVERIFY(!after.enabled);
     QCOMPARE(after.syncToken, QStringLiteral("new-token"));
@@ -290,8 +290,9 @@ class SyncCoordinatorTest final : public QObject {
     QVERIFY(directory.isValid());
     Database database;
     QString error;
-    QVERIFY2(database.open(directory.filePath(QStringLiteral("calendar.sqlite3")),
-                           &error), qPrintable(error));
+    QVERIFY2(
+        database.open(directory.filePath(QStringLiteral("calendar.sqlite3")), &error),
+        qPrintable(error));
     const Calendar calendar = remoteCalendar(&database, QStringLiteral("retry-sync"));
     QVERIFY(!calendar.id.isEmpty());
     ChunkedSyncApply::Request batch;
@@ -341,8 +342,9 @@ class SyncCoordinatorTest final : public QObject {
     QVERIFY(directory.isValid());
     Database database;
     QString error;
-    QVERIFY2(database.open(directory.filePath(QStringLiteral("calendar.sqlite3")),
-                           &error), qPrintable(error));
+    QVERIFY2(
+        database.open(directory.filePath(QStringLiteral("calendar.sqlite3")), &error),
+        qPrintable(error));
     const Calendar calendar = remoteCalendar(&database, QStringLiteral("range-sync"));
     QVERIFY(!calendar.id.isEmpty());
     const QDateTime start(QDate(2026, 1, 1), QTime(0, 0), QTimeZone::UTC);
@@ -358,11 +360,9 @@ class SyncCoordinatorTest final : public QObject {
     }
     ChunkedSyncApply apply(&database);
     QList<bool> coverageAtCommit;
-    connect(&apply, &ChunkedSyncApply::chunkCommitted, this,
-            [&](const QString&) {
-              coverageAtCommit.append(
-                  database.isSyncRangeCovered(calendar.id, start, end));
-            });
+    connect(&apply, &ChunkedSyncApply::chunkCommitted, this, [&](const QString&) {
+      coverageAtCommit.append(database.isSyncRangeCovered(calendar.id, start, end));
+    });
     bool completed = false;
     bool succeeded = false;
     apply.start(std::move(batch), [&](bool ok, const QString& message) {
@@ -380,8 +380,9 @@ class SyncCoordinatorTest final : public QObject {
     QVERIFY(directory.isValid());
     Database database;
     QString error;
-    QVERIFY2(database.open(directory.filePath(QStringLiteral("calendar.sqlite3")),
-                           &error), qPrintable(error));
+    QVERIFY2(
+        database.open(directory.filePath(QStringLiteral("calendar.sqlite3")), &error),
+        qPrintable(error));
     Account account;
     account.id = QStringLiteral("ics-sync-account");
     account.provider = ProviderKind::Ics;
@@ -412,10 +413,9 @@ class SyncCoordinatorTest final : public QObject {
     }
     ChunkedSyncApply apply(&database);
     QStringList validators;
-    connect(&apply, &ChunkedSyncApply::chunkCommitted, this,
-            [&](const QString&) {
-              validators.append(database.icsSubscription(account.id).etag);
-            });
+    connect(&apply, &ChunkedSyncApply::chunkCommitted, this, [&](const QString&) {
+      validators.append(database.icsSubscription(account.id).etag);
+    });
     bool completed = false;
     bool succeeded = false;
     apply.start(std::move(batch), [&](bool ok, const QString& message) {
@@ -425,8 +425,8 @@ class SyncCoordinatorTest final : public QObject {
     });
     QTRY_VERIFY_WITH_TIMEOUT(completed, 10000);
     QVERIFY2(succeeded, qPrintable(error));
-    QCOMPARE(validators, (QStringList{QStringLiteral("old-etag"),
-                                      QStringLiteral("new-etag")}));
+    QCOMPARE(validators,
+             (QStringList{QStringLiteral("old-etag"), QStringLiteral("new-etag")}));
     QCOMPARE(database.calendar(calendar.id).etag, QStringLiteral("new-etag"));
     QCOMPARE(database.eventsForCalendars({calendar.id}, &error).size(), 40);
   }

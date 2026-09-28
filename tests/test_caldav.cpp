@@ -155,27 +155,28 @@ class CalDavRangeFixture final : public QObject {
           "xmlns:c=\"urn:ietf:params:xml:ns:caldav\">");
       for (int index = 0; index < m_bulkEvents; ++index) {
         const QByteArray number = QByteArray::number(index);
-        const QByteArray event =
-            QByteArrayLiteral("BEGIN:VCALENDAR\r\nVERSION:2.0\r\n"
-                              "BEGIN:VEVENT\r\nUID:bulk-") +
-            number + QByteArrayLiteral(
-                         "@example.test\r\nDTSTAMP:20260901T000000Z\r\n"
-                         "DTSTART:20260901T090000Z\r\n"
-                         "DTEND:20260901T093000Z\r\n"
-                         "SUMMARY:Bulk fixture\r\nEND:VEVENT\r\n"
-                         "END:VCALENDAR\r\n");
-        body += QByteArrayLiteral("<d:response><d:href>/calendar/bulk-") +
-                number + QByteArrayLiteral(
-                             ".ics</d:href><d:propstat><d:prop>"
-                             "<d:getetag>\"v1\"</d:getetag>"
-                             "<c:calendar-data><![CDATA[") +
-                event + QByteArrayLiteral(
-                            "]]></c:calendar-data></d:prop>"
-                            "<d:status>HTTP/1.1 200 OK</d:status>"
-                            "</d:propstat></d:response>");
+        const QByteArray event = QByteArrayLiteral(
+                                     "BEGIN:VCALENDAR\r\nVERSION:2.0\r\n"
+                                     "BEGIN:VEVENT\r\nUID:bulk-") +
+                                 number +
+                                 QByteArrayLiteral(
+                                     "@example.test\r\nDTSTAMP:20260901T000000Z\r\n"
+                                     "DTSTART:20260901T090000Z\r\n"
+                                     "DTEND:20260901T093000Z\r\n"
+                                     "SUMMARY:Bulk fixture\r\nEND:VEVENT\r\n"
+                                     "END:VCALENDAR\r\n");
+        body += QByteArrayLiteral("<d:response><d:href>/calendar/bulk-") + number +
+                QByteArrayLiteral(
+                    ".ics</d:href><d:propstat><d:prop>"
+                    "<d:getetag>\"v1\"</d:getetag>"
+                    "<c:calendar-data><![CDATA[") +
+                event +
+                QByteArrayLiteral(
+                    "]]></c:calendar-data></d:prop>"
+                    "<d:status>HTTP/1.1 200 OK</d:status>"
+                    "</d:propstat></d:response>");
       }
-      return body + QByteArrayLiteral(
-                        "<d:sync-token>token-1</d:sync-token>");
+      return body + QByteArrayLiteral("<d:sync-token>token-1</d:sync-token>");
     }
     return QByteArrayLiteral(
                "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"

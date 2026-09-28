@@ -410,8 +410,8 @@ void AppController::refreshParts(const int parts) {
       emit accountsChanged();
     });
   }
-  m_scopeRequestsInFlight += ((parts & RefreshCalendars) != 0) +
-                             ((parts & RefreshCalendarSets) != 0);
+  m_scopeRequestsInFlight +=
+      ((parts & RefreshCalendars) != 0) + ((parts & RefreshCalendarSets) != 0);
   if ((parts & RefreshCalendars) != 0) {
     send(
         QStringLiteral("calendars.list"), {},
@@ -422,7 +422,8 @@ void AppController::refreshParts(const int parts) {
           emit calendarsChanged();
           finishScopeRequest();
         },
-        false, [this](const QJsonObject&) {
+        false,
+        [this](const QJsonObject&) {
           finishScopeRequest();
           return false;
         });
@@ -444,7 +445,8 @@ void AppController::refreshParts(const int parts) {
           emit calendarSetsChanged();
           finishScopeRequest();
         },
-        false, [this](const QJsonObject&) {
+        false,
+        [this](const QJsonObject&) {
           finishScopeRequest();
           return false;
         });
@@ -568,8 +570,7 @@ QStringList AppController::visibleCalendarIds() const {
   if (m_activeCalendarSetId != QStringLiteral("all-calendars")) {
     for (const QVariant& value : m_calendarSets) {
       const QVariantMap calendarSet = value.toMap();
-      if (calendarSet.value(QStringLiteral("id")).toString() ==
-          m_activeCalendarSetId) {
+      if (calendarSet.value(QStringLiteral("id")).toString() == m_activeCalendarSetId) {
         const QVariantList ids =
             calendarSet.value(QStringLiteral("calendarIds")).toList();
         for (const QVariant& id : ids) {
@@ -602,8 +603,7 @@ void AppController::loadRange(const QDate& firstDate, const QDate& lastDate) {
   // A newer range or visibility scope supersedes pages still in flight.
   ++m_rangeGeneration;
   m_rangePages.clear();
-  if (!m_calendarsReady || !m_calendarSetsReady ||
-      m_scopeRequestsInFlight != 0) {
+  if (!m_calendarsReady || !m_calendarSetsReady || m_scopeRequestsInFlight != 0) {
     m_rangeNeedsReload = true;
     return;
   }

@@ -49,8 +49,7 @@ void ChunkedSyncApply::step() {
   const QList<Event> events = m_request.events.mid(m_eventIndex, eventCount);
   const QStringList deleted =
       m_request.deletedRemoteIds.mid(m_deletedIndex, deletedCount);
-  const QStringList pruned =
-      m_request.prunedRemoteIds.mid(m_prunedIndex, prunedCount);
+  const QStringList pruned = m_request.prunedRemoteIds.mid(m_prunedIndex, prunedCount);
   QList<ProviderResource> resources =
       m_request.resources.mid(m_resourceIndex, resourceCount);
   QSet<QString> includedResources;
@@ -88,9 +87,9 @@ void ChunkedSyncApply::step() {
     calendar.syncToken = m_request.calendar.syncToken;
     calendar.lastSyncAt = m_request.calendar.lastSyncAt;
     calendar.etag = m_request.calendar.etag;
-    for (const QString& key : {QStringLiteral("syncedCtag"),
-                               QStringLiteral("thisAndFuture"),
-                               QStringLiteral("thisAndFutureProven")}) {
+    for (const QString& key :
+         {QStringLiteral("syncedCtag"), QStringLiteral("thisAndFuture"),
+          QStringLiteral("thisAndFutureProven")}) {
       if (m_request.calendar.capabilities.contains(key)) {
         calendar.capabilities.insert(key, m_request.calendar.capabilities.value(key));
       }
