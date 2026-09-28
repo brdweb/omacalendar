@@ -5130,6 +5130,33 @@ bool Database::snoozeReminderAt(const qint64 id, const int minutes,
   return bumpChangeRevision(errorMessage);
 }
 
+bool Database::snoozeReminderUntil(const qint64 id, const QDateTime& until,
+                                   const QDateTime& now, QString* errorMessage) {
+  if (!until.isValid() || until <= now || until > now.addDays(1)) {
+    if (errorMessage != nullptr) {
+      *errorMessage = QStringLiteral("Snooze must end within the next day");
+    }
+    return false;
+  }
+  QSqlQuery query(m_database);
+  query.prepare(QStringLiteral(R"SQL(
+    UPDATE reminder_jobs SET state='snoozed',snoozed_until=?,claimed_at='',
+      claim_token='',lease_expires_at='',delivered_at=''
+    WHERE id=? AND state<>'dismissed'
+  )SQL"));
+  query.addBindValue(isoUtc(until));
+  query.addBindValue(id);
+  if (!query.exec() || query.numRowsAffected() == 0) {
+    if (errorMessage != nullptr) {
+      *errorMessage = query.lastError().isValid()
+                          ? sqlError(query, QStringLiteral("snooze reminder"))
+                          : QStringLiteral("Reminder not found");
+    }
+    return false;
+  }
+  return bumpChangeRevision(errorMessage);
+}
+
 bool Database::dismissReminder(const qint64 id, QString* errorMessage) {
   QSqlQuery query(m_database);
   query.prepare(QStringLiteral(R"SQL(

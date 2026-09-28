@@ -61,6 +61,21 @@ QString invitationDigestFingerprint(QStringList memberFingerprints,
          QString::fromLatin1(hash.result().toHex());
 }
 
+// Only absolute http(s) links with a host may be opened from a notification,
+// as in the desktop app.
+QUrl meetingUrl(const QString& value) {
+  if (value.isEmpty() || value != value.trimmed()) {
+    return {};
+  }
+  const QUrl url(value, QUrl::StrictMode);
+  const QString scheme = url.scheme().toLower();
+  if (!url.isValid() || url.isRelative() || url.host().isEmpty() ||
+      (scheme != QStringLiteral("http") && scheme != QStringLiteral("https"))) {
+    return {};
+  }
+  return url;
+}
+
 }  // namespace
 
 FreedesktopNotificationBackend::FreedesktopNotificationBackend(QObject* parent)
@@ -74,6 +89,17 @@ FreedesktopNotificationBackend::FreedesktopNotificationBackend(QObject* parent)
       QStringLiteral("/org/freedesktop/Notifications"),
       QStringLiteral("org.freedesktop.Notifications"), QStringLiteral("ActionInvoked"),
       this, SLOT(onActionInvoked(uint, QString)));
+  if (m_interface->isValid()) {
+    auto* watcher = new QDBusPendingCallWatcher(
+        m_interface->asyncCall(QStringLiteral("GetCapabilities")), this);
+    connect(watcher, &QDBusPendingCallWatcher::finished, this, [this, watcher]() {
+      const QDBusPendingReply<QStringList> reply = *watcher;
+      if (!reply.isError()) {
+        m_supportsActions = reply.value().contains(QStringLiteral("actions"));
+      }
+      watcher->deleteLater();
+    });
+  }
 }
 
 FreedesktopNotificationBackend::~FreedesktopNotificationBackend() = default;
@@ -89,13 +115,21 @@ void FreedesktopNotificationBackend::send(const CalendarNotification& notificati
                        });
     return;
   }
+  QStringList actions = notification.actions;
+  if (!m_supportsActions) {
+    const qsizetype defaultIndex = actions.indexOf(QStringLiteral("default"));
+    actions =
+        defaultIndex >= 0 && defaultIndex % 2 == 0 && defaultIndex + 1 < actions.size()
+            ? QStringList{actions.at(defaultIndex), actions.at(defaultIndex + 1)}
+            : QStringList{};
+  }
   const QVariantList arguments{
       QStringLiteral("OmaCalendar"),
       uint(0),
       QString::fromLatin1(kDesktopEntry),
       notification.summary,
       notification.body,
-      notification.actions,
+      actions,
       notification.hints,
       notification.timeoutMilliseconds,
   };
@@ -371,8 +405,14 @@ bool ReminderScheduler::deliver(const ReminderJob& reminder) {
   pending.fingerprint = QStringLiteral("reminder:") + reminder.fingerprint;
   pending.deliveryToken = deliveryToken;
   pending.leaseExpiresAt = leaseExpiresAt;
+  pending.joinUrl = meetingUrl(event.conferenceUrl);
+  if (!event.allDay) {
+    const QDateTime occurrence = dateTimeFromIso(reminder.occurrenceId);
+    pending.occurrenceStart = occurrence.isValid() ? occurrence : event.startUtc;
+  }
   m_pending.insert(deliveryToken, pending);
-  CalendarNotification notification = reminderNotification(event, reminder);
+  CalendarNotification notification =
+      reminderNotification(event, reminder, pending.joinUrl, pending.occurrenceStart);
   notification.deliveryToken = deliveryToken;
   m_backend->send(notification);
   return true;
@@ -604,7 +644,8 @@ void ReminderScheduler::deliverInvitation(const Event& event, const bool changed
 }
 
 CalendarNotification ReminderScheduler::reminderNotification(
-    const Event& event, const ReminderJob& reminder) const {
+    const Event& event, const ReminderJob& reminder, const QUrl& joinUrl,
+    const QDateTime& occurrenceStart) const {
   CalendarNotification notification;
   notification.fingerprint = QStringLiteral("reminder:") + reminder.fingerprint;
   const QString privacy = notificationPrivacy(m_database);
@@ -624,14 +665,21 @@ CalendarNotification ReminderScheduler::reminderNotification(
   } else {
     notification.body = QStringLiteral("An event is starting soon");
   }
-  notification.actions = {
-      QStringLiteral("default"),  QStringLiteral("Open"),
-      QStringLiteral("snooze5"),  QStringLiteral("Snooze 5 min"),
-      QStringLiteral("snooze10"), QStringLiteral("Snooze 10 min"),
-      QStringLiteral("snooze30"), QStringLiteral("Snooze 30 min"),
-      QStringLiteral("snooze60"), QStringLiteral("Snooze 1 hour"),
-      QStringLiteral("dismiss"),  QStringLiteral("Dismiss"),
-  };
+  notification.actions = {QStringLiteral("default"), QStringLiteral("Open")};
+  if (joinUrl.isValid()) {
+    notification.actions << QStringLiteral("join") << QStringLiteral("Join meeting");
+  }
+  notification.actions << QStringLiteral("snooze5") << QStringLiteral("Snooze 5 min")
+                       << QStringLiteral("snooze10") << QStringLiteral("Snooze 10 min");
+  // Until start only makes sense while the start is still a minute away.
+  if (occurrenceStart.isValid() && occurrenceStart > now().addSecs(60) &&
+      occurrenceStart <= now().addDays(1)) {
+    notification.actions << QStringLiteral("snoozeStart")
+                         << QStringLiteral("Remind at start");
+  }
+  notification.actions << QStringLiteral("snooze30") << QStringLiteral("Snooze 30 min")
+                       << QStringLiteral("snooze60") << QStringLiteral("Snooze 1 hour")
+                       << QStringLiteral("dismiss") << QStringLiteral("Dismiss");
   notification.hints = {
       {QStringLiteral("desktop-entry"), QString::fromLatin1(kDesktopEntry)},
       {QStringLiteral("category"), QStringLiteral("x-omacalendar.reminder")},
@@ -789,8 +837,17 @@ void ReminderScheduler::onActionInvoked(const uint notificationId,
   }
   const PendingDelivery delivery = iterator.value();
   bool changed = false;
-  if (action.startsWith(QStringLiteral("snooze")) &&
+  if (action == QStringLiteral("snoozeStart") &&
       delivery.kind == DeliveryKind::Reminder) {
+    changed = m_database->snoozeReminderUntil(delivery.reminderId,
+                                              delivery.occurrenceStart, now());
+  } else if (action == QStringLiteral("join") &&
+             delivery.kind == DeliveryKind::Reminder) {
+    if (m_linkOpener && delivery.joinUrl.isValid()) {
+      m_linkOpener(delivery.joinUrl);
+    }
+  } else if (action.startsWith(QStringLiteral("snooze")) &&
+             delivery.kind == DeliveryKind::Reminder) {
     bool ok = false;
     const int minutes = action.sliced(6).toInt(&ok);
     changed = ok && m_database->snoozeReminderAt(delivery.reminderId, minutes, now());

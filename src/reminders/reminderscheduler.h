@@ -54,6 +54,9 @@ class FreedesktopNotificationBackend final : public NotificationBackend {
 
  private:
   QDBusInterface* m_interface = nullptr;
+  // From GetCapabilities; servers without "actions" get only the default
+  // action, which clicking the notification still triggers.
+  bool m_supportsActions = true;
 };
 
 class ReminderScheduler final : public QObject {
@@ -95,6 +98,10 @@ class ReminderScheduler final : public QObject {
     QString fingerprint;
     QString deliveryToken;
     QDateTime leaseExpiresAt;
+    // Reminders only: the validated meeting link behind "Join", and the
+    // occurrence start behind "Snooze until start".
+    QUrl joinUrl;
+    QDateTime occurrenceStart;
     // Digest members only: per-event fingerprints claimed for the digest.
     QStringList memberFingerprints;
     QStringList memberEventIds;
@@ -108,7 +115,8 @@ class ReminderScheduler final : public QObject {
   void scanInvitations(const QStringList& calendarIds);
   void deliverInvitation(const Event& event, bool changed, const QString& fingerprint);
   [[nodiscard]] CalendarNotification reminderNotification(
-      const Event& event, const ReminderJob& reminder) const;
+      const Event& event, const ReminderJob& reminder, const QUrl& joinUrl,
+      const QDateTime& occurrenceStart) const;
   [[nodiscard]] CalendarNotification invitationNotification(
       const Event& event, bool changed, const QString& fingerprint) const;
   [[nodiscard]] CalendarNotification invitationDigestNotification(
