@@ -231,7 +231,7 @@ void ProviderTest::googleOAuthLoopbackConfiguration() {
   QVERIFY(sync.isConfigured());
   QCOMPARE(database.account(existing.id).authStatus,
            QStringLiteral("reauthorization_required"));
-  QCOMPARE(database.setting(QStringLiteral("google.oauth.scopeVersion")).toInt(), 2);
+  QCOMPARE(database.setting(QStringLiteral("google.oauth.scopeVersion")).toInt(), 3);
   QSignalSpy authorizationUrl(&sync, &google::GoogleSync::authorizationUrlReady);
 
   const auto googleAccountCount = [&database]() {
@@ -284,6 +284,8 @@ void ProviderTest::googleOAuthLoopbackConfiguration() {
       QStringLiteral("https://www.googleapis.com/auth/calendar.calendars")));
   QVERIFY(scopes.contains(QStringLiteral(
       "https://www.googleapis.com/auth/calendar.calendarlist.readonly")));
+  QVERIFY(scopes.contains(
+      QStringLiteral("https://www.googleapis.com/auth/calendar.freebusy")));
 
   sync.cancelAuthorization(accountId);
   QVERIFY(database.account(accountId).id.isEmpty());

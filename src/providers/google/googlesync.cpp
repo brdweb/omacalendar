@@ -22,7 +22,7 @@ namespace {
 
 constexpr auto kClientIdSetting = "google.oauth.clientId";
 constexpr auto kOAuthScopeVersionSetting = "google.oauth.scopeVersion";
-constexpr int kOAuthScopeVersion = 2;
+constexpr int kOAuthScopeVersion = 3;
 constexpr auto kCalendarListToken = "calendarList.syncToken";
 
 quint64 stableJitterKey(const QString& value) {
@@ -633,7 +633,7 @@ bool GoogleSync::restoreAccounts(QString* errorMessage) {
           statusObject(QStringLiteral("reauthorization_required"),
                        QStringLiteral("oauth_scope_upgrade"),
                        QStringLiteral("Reauthorize this Google account to grant "
-                                      "calendar-management access"));
+                                      "calendar-management and free/busy access"));
       m_status.insert(account.id, value);
       emit accountChanged(account.id);
       emit syncStatusChanged(account.id, value);
