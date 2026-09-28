@@ -120,7 +120,8 @@ QuickAddDraft parseQuickAdd(const QString& input, const QDate& today) {
     const QString interval =
         match.captured(1).isEmpty() ? QString() : QStringLiteral(";INTERVAL=2");
     if (unit == QStringLiteral("weekday")) {
-      draft.recurrenceRule = QStringLiteral("FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR");
+      draft.recurrenceRule = QStringLiteral("FREQ=WEEKLY") + interval +
+                             QStringLiteral(";BYDAY=MO,TU,WE,TH,FR");
     } else if (unit == QStringLiteral("day")) {
       draft.recurrenceRule = QStringLiteral("FREQ=DAILY") + interval;
     } else if (unit == QStringLiteral("week")) {

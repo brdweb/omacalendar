@@ -30,6 +30,9 @@ void QuickAddTest::parsesEverydayPhrases_data() {
   QTest::newRow("repeat with duration")
       << "Standup every weekday 9am 15m" << "Standup" << QDate() << 540 << 15 << false
       << QDate() << "FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR" << QString();
+  QTest::newRow("every other weekday")
+      << "Review every other weekday 4pm" << "Review" << QDate() << 960 << 0 << false
+      << QDate() << "FREQ=WEEKLY;INTERVAL=2;BYDAY=MO,TU,WE,TH,FR" << QString();
   QTest::newRow("all-day span")
       << "Trip to Denver Oct 3-6" << "Trip to Denver" << QDate(2026, 10, 3) << -1 << 0
       << true << QDate(2026, 10, 7) << QString() << QString();

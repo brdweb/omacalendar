@@ -283,6 +283,9 @@ Dialog {
                     && !App.isValidTimeZone(selectedTimeZone()))
                 return qsTr("Enter a valid IANA time zone.")
         }
+        // Commit a typed address first: an entry left pending while
+        // suggestions showed would otherwise be dropped on save unchecked.
+        attendeeEditor.commitInput()
         const attendeeError = attendeeEditor.validationError()
         if (attendeeError)
             return attendeeError

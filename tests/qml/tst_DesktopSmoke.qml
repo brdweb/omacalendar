@@ -663,6 +663,25 @@ Item {
             compare(saved[1].partstat, "ACCEPTED")
         }
 
+        function test_editor_blocks_a_pending_invalid_guest() {
+            const editor = createTemporaryObject(editorFactory, scene)
+            editorSaveSpy.target = editor
+            editorSaveSpy.clear()
+            editor.openDraft({"title": "Planning", "startMinute": 540,
+                              "durationMinutes": 30}, new Date(2026, 8, 28))
+            tryCompare(editor, "opened", true)
+            const input = findChild(scene.Window.window.contentItem, "attendeeInput")
+            verify(input !== null)
+            // Suggestions on screen keep editingFinished from committing.
+            input.parent.suggestions = [{"email": "bogus@example.com"}]
+            input.text = "bogus"
+            editor.submit()
+            compare(editorSaveSpy.count, 0, "a rejected guest address blocks saving")
+            verify(editor.validationError.indexOf("bogus") >= 0)
+            verify(editor.opened)
+            editor.close()
+        }
+
         function test_provider_markup_remains_literal() {
             const marker = "<b>literal & event text</b>"
             const location = "<img src='file:///etc/passwd'>"
