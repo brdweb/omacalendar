@@ -1,5 +1,6 @@
 import QtQuick
 import QtQuick.Window
+import QtQuick.Controls
 import QtTest
 import OmaCalendar
 import "../../src/app/qml/views" as Views
@@ -25,6 +26,22 @@ Item {
     Component { id: mutationConfirmationFactory; Components.MutationConfirmationDialog {} }
     Component { id: activityFactory; Components.ActivityPanel {} }
     Component { id: sidebarFactory; Components.CalendarSidebar {} }
+    Component { id: quickAddFactory; Components.QuickAddDialog {} }
+    Component { id: conflictMergeFactory; Components.ConflictMergeDialog {} }
+    Component { id: icsImportFactory; Components.IcsImportDialog {} }
+    Component { id: icsExportFactory; Components.IcsExportDialog {} }
+    // Dialogs hand focus back through the window's content item, so the
+    // focus test runs in an ApplicationWindow like the app's.
+    Component {
+        id: focusWindowFactory
+        ApplicationWindow {
+            property alias anchor: anchorInput
+            width: 900
+            height: 700
+            visible: true
+            TextInput { id: anchorInput; width: 100; height: 20 }
+        }
+    }
     Component { id: settingsFactory; Components.AccountSettingsDrawer {} }
 
     Component {
@@ -459,6 +476,86 @@ Item {
             compare(panel.mode, "conflicts", "a conflicts request is kept, not reset to search")
             panel.mode = "sync"
             compare(panel.mode, "sync")
+        }
+
+        function test_theme_text_meets_contrast() {
+            const pairs = [[Theme.text, Theme.background], [Theme.text, Theme.surface],
+                           [Theme.text, Theme.surfaceAlt], [Theme.text, Theme.darkBackground],
+                           [Theme.mutedText, Theme.background],
+                           [Theme.mutedText, Theme.surface],
+                           [Theme.accentText, Theme.accent]]
+            for (let index = 0; index < pairs.length; ++index) {
+                const ratio = Theme.contrastRatio(pairs[index][0], pairs[index][1])
+                verify(ratio >= 4.5, "token pair " + index + " reads at " + ratio.toFixed(2))
+            }
+
+            // Whatever the calendar colour, tint and theme, event text reads.
+            const calendarColors = ["#ffffff", "#ffff00", "#00ff00", "#000000", "#1a1b26",
+                                    "#7aa2f7", "#f7768e", "#808080"]
+            const backgrounds = [Theme.background, "#fafafa", "#000000", "#ffffff"]
+            const opacities = [0.13, 0.22, 0.28, 0.34, 0.9]
+            for (let c = 0; c < calendarColors.length; ++c) {
+                for (let b = 0; b < backgrounds.length; ++b) {
+                    for (let o = 0; o < opacities.length; ++o) {
+                        const fill = Theme.blend(Qt.color(calendarColors[c]), opacities[o],
+                                                 Qt.color(backgrounds[b]))
+                        for (const preferred of [Theme.text, Theme.mutedText]) {
+                            const ratio = Theme.contrastRatio(
+                                        Theme.readableText(fill, preferred), fill)
+                            verify(ratio >= 4.5, calendarColors[c] + " at " + opacities[o]
+                                   + " over " + backgrounds[b] + ": " + ratio.toFixed(2))
+                        }
+                    }
+                }
+            }
+            compare(Theme.readableText(Theme.background, Theme.text), Theme.text,
+                    "a readable preferred colour is kept")
+
+            const chip = createTemporaryObject(eventChipFactory, scene, {
+                "width": 200, "selected": true, "showTime": true, "timeText": "09:00",
+                "eventData": Object.assign({}, representativeEvents()[0],
+                                           {"calendarColor": "#ffffff"})})
+            const summary = findChild(chip, "eventChipSummary")
+            verify(Theme.contrastRatio(summary.color, chip.fillColor) >= 4.5)
+            const block = createTemporaryObject(timelineEventFactory, scene, {
+                "width": 160, "height": 60, "selected": true,
+                "eventData": Object.assign({}, representativeEvents()[0],
+                                           {"calendarColor": "#ffffff"})})
+            verify(Theme.contrastRatio(findChild(block, "timelineEventSummary").color,
+                                       block.fillColor) >= 4.5)
+        }
+
+        function test_dialogs_trap_and_restore_focus() {
+            const openers = [
+                [editorFactory, function(dialog) { dialog.openNew(new Date(2026, 8, 28), 540) }],
+                [quickAddFactory, function(dialog) { dialog.openEmpty() }],
+                [mutationConfirmationFactory, function(dialog) {
+                    dialog.openFor(representativeEvents()[0], "Apply change",
+                                   {"kind": "save"}, {}, true) }],
+                [conflictMergeFactory, function(dialog) {
+                    dialog.openFor({"id": "conflict", "localEvent": representativeEvents()[0],
+                                    "remoteEvent": representativeEvents()[0]}) }],
+                [icsImportFactory, function(dialog) { dialog.open() }],
+                [icsExportFactory, function(dialog) { dialog.open() }]
+            ]
+            const focusWindow = createTemporaryObject(focusWindowFactory, testCase)
+            tryCompare(focusWindow, "visible", true)
+            focusWindow.requestActivate()
+            const anchor = focusWindow.anchor
+            for (let index = 0; index < openers.length; ++index) {
+                anchor.forceActiveFocus()
+                tryVerify(function() { return anchor.activeFocus }, 1000)
+                const dialog = createTemporaryObject(openers[index][0],
+                                                     focusWindow.contentItem)
+                openers[index][1](dialog)
+                tryCompare(dialog, "opened", true)
+                verify(!anchor.activeFocus, "dialog " + index + " takes focus")
+                verify(dialog.modal, "dialog " + index + " blocks the window behind it")
+                dialog.close()
+                tryCompare(dialog, "opened", false)
+                tryVerify(function() { return anchor.activeFocus }, 1000,
+                          "dialog " + index + " returns focus")
+            }
         }
 
         function test_editor_keeps_recurrence_rules() {

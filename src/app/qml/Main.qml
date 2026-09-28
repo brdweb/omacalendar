@@ -940,6 +940,75 @@ ApplicationWindow {
         context: Qt.ApplicationShortcut
         onActivated: window.openKeyboardSelection()
     }
+    // Keyboard move and resize for the selected timed event, matching drag:
+    // 15-minute steps, a day at a time sideways, and the same recurrence
+    // scope prompt.
+    Shortcut {
+        sequence: "Alt+Up"
+        enabled: window.navigationShortcutsEnabled() && window.canNudgeSelection()
+        context: Qt.ApplicationShortcut
+        onActivated: window.nudgeSelectedEvent(-15, 0, 0)
+    }
+    Shortcut {
+        sequence: "Alt+Down"
+        enabled: window.navigationShortcutsEnabled() && window.canNudgeSelection()
+        context: Qt.ApplicationShortcut
+        onActivated: window.nudgeSelectedEvent(15, 0, 0)
+    }
+    Shortcut {
+        sequence: "Alt+Shift+Up"
+        enabled: window.navigationShortcutsEnabled() && window.canNudgeSelection()
+        context: Qt.ApplicationShortcut
+        onActivated: window.nudgeSelectedEvent(0, -15, 0)
+    }
+    Shortcut {
+        sequence: "Alt+Shift+Down"
+        enabled: window.navigationShortcutsEnabled() && window.canNudgeSelection()
+        context: Qt.ApplicationShortcut
+        onActivated: window.nudgeSelectedEvent(0, 15, 0)
+    }
+    Shortcut {
+        sequence: "Alt+Left"
+        enabled: window.navigationShortcutsEnabled() && window.canNudgeSelection()
+        context: Qt.ApplicationShortcut
+        onActivated: window.nudgeSelectedEvent(0, 0, -1)
+    }
+    Shortcut {
+        sequence: "Alt+Right"
+        enabled: window.navigationShortcutsEnabled() && window.canNudgeSelection()
+        context: Qt.ApplicationShortcut
+        onActivated: window.nudgeSelectedEvent(0, 0, 1)
+    }
+
+    // Screen readers hear the view and period after navigation settles, once
+    // the period's events have loaded.
+    Item {
+        id: announcer
+        objectName: "announcer"
+        property string lastAnnouncement: ""
+        property bool pending: false
+        Accessible.role: Accessible.StaticText
+        Accessible.name: lastAnnouncement
+    }
+    Timer {
+        id: announceTimer
+        interval: 350
+        onTriggered: {
+            announcer.pending = false
+            window.announce(window.viewAnnouncement())
+        }
+    }
+    onCurrentViewChanged: window.queueViewAnnouncement()
+    onVisibleEventsChanged: {
+        if (announcer.pending)
+            announceTimer.restart()
+    }
+    Connections {
+        target: App
+        ignoreUnknownSignals: true
+        function onSelectedDateChanged() { window.queueViewAnnouncement() }
+    }
+
     Shortcut {
         sequence: "Delete"
         enabled: window.navigationShortcutsEnabled()
@@ -1507,7 +1576,7 @@ ApplicationWindow {
         }
         const start = eventStart(value)
         const end = eventEnd(value)
-        if (sameDate(start, dateValue))
+        if (Theme.sameDate(start, dateValue))
             return
         const duration = end - start
         const updated = Object.assign({}, value)
@@ -1676,6 +1745,108 @@ ApplicationWindow {
                 ++count
         }
         return count
+    }
+
+    function queueViewAnnouncement() {
+        announcer.pending = true
+        announceTimer.restart()
+    }
+
+    function announce(message) {
+        if (!message)
+            return
+        announcer.lastAnnouncement = message
+        // Accessible.announce is available from Qt 6.8.
+        if (typeof announcer.Accessible.announce === "function")
+            announcer.Accessible.announce(message)
+    }
+
+    // [start, end) of the period the current view shows.
+    function periodBounds() {
+        const day = new Date(App.selectedDate.getFullYear(), App.selectedDate.getMonth(),
+                             App.selectedDate.getDate())
+        if (currentView === "day")
+            return {"start": day, "end": new Date(day.getFullYear(), day.getMonth(),
+                                                  day.getDate() + 1)}
+        if (currentView === "week") {
+            const start = startOfWeek(day)
+            return {"start": start, "end": new Date(start.getFullYear(), start.getMonth(),
+                                                    start.getDate() + 7)}
+        }
+        if (currentView === "agenda")
+            return {"start": day, "end": new Date(day.getFullYear(), day.getMonth(),
+                                                  day.getDate() + agendaDayCount)}
+        if (currentView === "year")
+            return {"start": new Date(day.getFullYear(), 0, 1),
+                    "end": new Date(day.getFullYear() + 1, 0, 1)}
+        return {"start": new Date(day.getFullYear(), day.getMonth(), 1),
+                "end": new Date(day.getFullYear(), day.getMonth() + 1, 1)}
+    }
+
+    // For example "Week view, September 28–October 4, 12 events".
+    function viewAnnouncement() {
+        const bounds = periodBounds()
+        let count = 0
+        for (let index = 0; index < visibleEvents.length; ++index) {
+            const value = visibleEvents[index]
+            if (eventStart(value) < bounds.end && eventEnd(value) > bounds.start)
+                ++count
+        }
+        const labels = {"agenda": qsTr("Agenda"), "day": qsTr("Day view"),
+                        "week": qsTr("Week view"), "month": qsTr("Month view"),
+                        "year": qsTr("Year view")}
+        const period = currentView === "agenda"
+                ? qsTr("from %1").arg(Qt.formatDate(bounds.start, "dddd, MMMM d"))
+                : currentView === "day"
+                  ? Qt.formatDate(bounds.start, "dddd, MMMM d") : periodTitle()
+        return qsTr("%1, %2, %n event(s)", "", count).arg(labels[currentView] || "")
+                .arg(period)
+    }
+
+    function canNudgeSelection() {
+        return currentView !== "year" && Boolean(selectedEvent && selectedEvent.id)
+                && eventEditable(selectedEvent)
+    }
+
+    // Moves the selected event by minutes and days, or changes its length by
+    // resizeMinutes, through the same path as dragging it.
+    function nudgeSelectedEvent(minutes, resizeMinutes, days) {
+        const value = selectedEvent
+        if (!canNudgeSelection())
+            return
+        const start = eventStart(value)
+        const end = eventEnd(value)
+        const title = value.summary || qsTr("Untitled event")
+        const multiDay = value.allDay || !Theme.sameDate(start, new Date(end.getTime() - 1))
+        if (multiDay) {
+            if (days === 0)
+                return
+            const target = new Date(start.getFullYear(), start.getMonth(),
+                                    start.getDate() + days)
+            moveEventToDate(value, target)
+            announce(qsTr("%1 moved to %2").arg(title)
+                     .arg(Qt.formatDate(target, "dddd, MMMM d")))
+            return
+        }
+        const duration = Math.round((end - start) / 60000)
+        const nextDuration = Math.max(15, duration + resizeMinutes)
+        if (resizeMinutes !== 0 && nextDuration === duration)
+            return
+        const moved = new Date(start.getFullYear(), start.getMonth(), start.getDate() + days,
+                               start.getHours(), start.getMinutes() + minutes)
+        rescheduleEvent(value, new Date(moved.getFullYear(), moved.getMonth(), moved.getDate()),
+                        moved.getHours() * 60 + moved.getMinutes(), nextDuration)
+        if (resizeMinutes !== 0) {
+            const movedEnd = new Date(moved.getTime() + nextDuration * 60000)
+            announce(qsTr("%1 now ends at %2").arg(title)
+                     .arg(Theme.formatTime(movedEnd, String(preferences.timeFormat
+                                                            || "system"))))
+        } else {
+            announce(qsTr("%1 moved to %2").arg(title)
+                     .arg(Qt.formatDate(moved, "ddd MMM d") + " "
+                          + Theme.formatTime(moved, String(preferences.timeFormat
+                                                           || "system"))))
+        }
     }
 
     function navigationShortcutsEnabled() {
