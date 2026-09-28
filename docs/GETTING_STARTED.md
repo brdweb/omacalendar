@@ -29,6 +29,9 @@ is started on demand by its systemd socket.
 - On a Google calendar, tick **Add Google Meet video conferencing** in the
   event editor to create a video call. Attachments on an event are listed under
   its notes and open in the browser.
+- **Tasks** in the sidebar (Ctrl+Shift+T) lists your to-dos by when they are
+  due. Add one by typing its title, tick it off when done, or click it to set
+  notes and a due date. Open tasks also appear in the agenda on their due day.
 - **Print** (Ctrl+P) saves the current day, week, agenda or month as a PDF,
   either as a list of events by day or as month grids.
 

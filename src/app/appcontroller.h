@@ -42,6 +42,11 @@ class AppController final : public QObject {
   Q_PROPERTY(QVariantList calendarSets READ calendarSets NOTIFY calendarSetsChanged)
   Q_PROPERTY(QVariantList invitations READ invitations NOTIFY invitationsChanged)
   Q_PROPERTY(QVariantList conflicts READ conflicts NOTIFY conflictsChanged)
+  // Task lists and every task in them (open and completed). tasksSupported
+  // is false while connected to a daemon without tasks.* methods.
+  Q_PROPERTY(QVariantList taskLists READ taskLists NOTIFY tasksChanged)
+  Q_PROPERTY(QVariantList tasks READ tasks NOTIFY tasksChanged)
+  Q_PROPERTY(bool tasksSupported READ tasksSupported NOTIFY tasksChanged)
   Q_PROPERTY(QVariantList operations READ operations NOTIFY operationsChanged)
   Q_PROPERTY(QVariantList searchResults READ searchResults NOTIFY searchResultsChanged)
   Q_PROPERTY(
@@ -91,6 +96,9 @@ class AppController final : public QObject {
   [[nodiscard]] QVariantList calendarSets() const;
   [[nodiscard]] QVariantList invitations() const;
   [[nodiscard]] QVariantList conflicts() const;
+  [[nodiscard]] QVariantList taskLists() const;
+  [[nodiscard]] QVariantList tasks() const;
+  [[nodiscard]] bool tasksSupported() const;
   [[nodiscard]] QVariantList operations() const;
   [[nodiscard]] QVariantList searchResults() const;
   [[nodiscard]] PresentationListModel* accountsModel();
@@ -133,6 +141,14 @@ class AppController final : public QObject {
                                        const QString& recurrenceId,
                                        qint64 expectedLocalRevision);
   Q_INVOKABLE void markInvitationSeen(const QString& eventId);
+  // task holds title, notes, dueDate (yyyy-MM-dd or ""), completed and, for
+  // a new task, listId (the device-only list when omitted).
+  Q_INVOKABLE void createTask(const QVariantMap& task);
+  // task holds id plus the fields to change.
+  Q_INVOKABLE void updateTask(const QVariantMap& task);
+  Q_INVOKABLE void setTaskCompleted(const QString& taskId, bool completed);
+  Q_INVOKABLE void removeTask(const QString& taskId);
+  Q_INVOKABLE void setTaskListEnabled(const QString& listId, bool enabled);
   Q_INVOKABLE void resolveConflict(const QString& conflictId, const QString& strategy,
                                    const QVariantMap& mergedDraft = {});
   Q_INVOKABLE void retryOperation(const QString& operationId);
@@ -237,6 +253,7 @@ class AppController final : public QObject {
   void calendarSetsChanged();
   void invitationsChanged();
   void conflictsChanged();
+  void tasksChanged();
   void operationsChanged();
   void searchResultsChanged();
   void preferencesChanged();
@@ -335,7 +352,8 @@ class AppController final : public QObject {
     RefreshEvents = 1 << 6,
     RefreshOperations = 1 << 7,
     RefreshConflicts = 1 << 8,
-    RefreshAll = (1 << 9) - 1,
+    RefreshTasks = 1 << 9,
+    RefreshAll = (1 << 10) - 1,
   };
 
   // The daemon's default events.list page size. Pages shrink when a response
@@ -356,6 +374,12 @@ class AppController final : public QObject {
   QVariantList m_calendarSets;
   QVariantList m_invitations;
   QVariantList m_conflicts;
+  QVariantList m_taskLists;
+  QVariantList m_tasks;
+  bool m_tasksSupported = true;
+  void loadTasks();
+  void subscribe(bool includeTasks);
+  void sendTaskMutation(const QString& method, const QJsonObject& params);
   QVariantList m_operations;
   QVariantList m_searchResults;
   PresentationListModel m_accountsModel;

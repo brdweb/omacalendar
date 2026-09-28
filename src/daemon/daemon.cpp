@@ -211,7 +211,8 @@ QJsonArray subscriptionTopics(const QJsonObject& params,
       QStringLiteral("events"),      QStringLiteral("google"),
       QStringLiteral("invitations"), QStringLiteral("operations"),
       QStringLiteral("reminders"),   QStringLiteral("sync"),
-      QStringLiteral("system"),      QStringLiteral("widget"),
+      QStringLiteral("system"),      QStringLiteral("tasks"),
+      QStringLiteral("widget"),
   };
   QJsonArray normalized;
   QSet<QString> seen;
@@ -494,6 +495,7 @@ int Daemon::connectedClients() const { return m_server.clientCount(); }
 QStringList Daemon::methods() const { return m_router.methods(); }
 
 void Daemon::registerHandlers() {
+  registerTaskHandlers();
   m_router.registerHandler(QStringLiteral("system.ping"),
                            [this](const QJsonObject& params, ipc::Error* error) {
                              return onSystemPing(params, error);

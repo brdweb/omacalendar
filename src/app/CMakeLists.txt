@@ -26,6 +26,7 @@ qt_add_qml_module(omacalendar
     qml/DateRange.js
     qml/EventIndex.js
     qml/RecurrenceRule.js
+    qml/TaskGroups.js
     qml/Main.qml
     qml/Theme.qml
     qml/components/AppButton.qml
@@ -59,6 +60,8 @@ qt_add_qml_module(omacalendar
     qml/components/SettingsCalendarsTab.qml
     qml/components/SettingsPreferencesTab.qml
     qml/components/StatusBadge.qml
+    qml/components/TaskEditor.qml
+    qml/components/TasksPanel.qml
     qml/components/TimelineCanvas.qml
     qml/components/TimelineEvent.qml
     qml/components/UndoToast.qml

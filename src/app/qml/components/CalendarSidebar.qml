@@ -20,6 +20,10 @@ Rectangle {
     property var eventCountForDate: function(dateValue) { return 0 }
     property var calendarIsVisible: function(calendarId) { return true }
     property int invitationCount: 0
+    // Hidden when the calendar service has no tasks.
+    property bool tasksAvailable: false
+    // Open tasks due today or earlier.
+    property int dueTaskCount: 0
     property int conflictCount: 0
     property int failedOperationCount: 0
     property var accounts: []
@@ -386,6 +390,29 @@ Rectangle {
                 }
             }
 
+            ItemDelegate {
+                objectName: "sidebarTasks"
+                Layout.fillWidth: true
+                implicitHeight: 38
+                visible: root.tasksAvailable
+                text: qsTr("Tasks")
+                onClicked: root.panelRequested("tasks")
+                contentItem: RowLayout {
+                    Text { textFormat: Text.PlainText; text: "☐"; color: Theme.mutedText }
+                    Text {
+                        textFormat: Text.PlainText
+                        Layout.fillWidth: true
+                        text: qsTr("Tasks")
+                        color: Theme.text
+                        font.pixelSize: Theme.smallFontSize
+                    }
+                    StatusBadge {
+                        visible: root.dueTaskCount > 0
+                        text: String(root.dueTaskCount)
+                        tone: "warning"
+                    }
+                }
+            }
             ItemDelegate {
                 Layout.fillWidth: true
                 implicitHeight: 38

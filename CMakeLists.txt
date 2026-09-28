@@ -108,6 +108,7 @@ qt_standard_project_setup(REQUIRES 6.9)
 
 add_library(omacalendar_core STATIC
   src/core/database.cpp
+  src/core/databasetasks.cpp
   src/core/database.h
   src/core/domain.cpp
   src/core/freebusy.cpp
@@ -121,6 +122,8 @@ add_library(omacalendar_core STATIC
   src/core/recurrenceexpander.h
   src/core/secretstore.cpp
   src/core/secretstore.h
+  src/core/tasks.cpp
+  src/core/tasks.h
   src/core/widgeteventquery.cpp
   src/core/widgeteventquery.h
 )
@@ -203,6 +206,7 @@ target_link_libraries(omacalendar_sync
 add_executable(omacalendard
   src/daemon/daemon.cpp
   src/daemon/daemon.h
+  src/daemon/daemontasks.cpp
   src/daemon/invitationclassification.cpp
   src/daemon/invitationclassification.h
   src/daemon/main.cpp

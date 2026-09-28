@@ -83,6 +83,13 @@ class FakeDaemon final : public QObject {
     m_settings.insert(key, value);
   }
 
+  void setTasks(const QJsonArray& lists, const QJsonArray& tasks) {
+    m_taskLists = lists;
+    m_tasks = tasks;
+  }
+  void setTasksSupported(const bool supported) { m_tasksSupported = supported; }
+  [[nodiscard]] int subscribeCount() const { return m_subscribeCount; }
+
   // Reported as events.list coverage, like a range still being hydrated.
   void setCoverage(const QJsonObject& coverage) { m_coverage = coverage; }
 
@@ -109,6 +116,17 @@ class FakeDaemon final : public QObject {
       m_methods.append(method);
       if (method == QStringLiteral("system.subscribe")) {
         m_subscribedTopics = params.value(QStringLiteral("topics")).toArray();
+        ++m_subscribeCount;
+        if (!m_tasksSupported && m_subscribedTopics.contains(QStringLiteral("tasks"))) {
+          m_subscribedTopics = {};
+          response.remove(QStringLiteral("result"));
+          response.insert(
+              QStringLiteral("error"),
+              QJsonObject{{QStringLiteral("code"), QStringLiteral("invalid_params")},
+                          {QStringLiteral("message"),
+                           QStringLiteral("Unsupported subscription topic: tasks")},
+                          {QStringLiteral("retryable"), false}});
+        }
       }
       if (method == QStringLiteral("settings.getMany")) {
         if (m_settingsGetManySupported) {
@@ -173,6 +191,25 @@ class FakeDaemon final : public QObject {
                 {QStringLiteral("code"), QStringLiteral("conflict")},
                 {QStringLiteral("message"), QStringLiteral("The event changed")},
                 {QStringLiteral("retryable"), false}});
+      } else if (method == QStringLiteral("taskLists.list") ||
+                 method == QStringLiteral("tasks.list")) {
+        if (!m_tasksSupported) {
+          response.remove(QStringLiteral("result"));
+          response.insert(
+              QStringLiteral("error"),
+              QJsonObject{{QStringLiteral("code"), QStringLiteral("method_not_found")},
+                          {QStringLiteral("message"), QStringLiteral("Unknown method")},
+                          {QStringLiteral("retryable"), false}});
+        } else if (method == QStringLiteral("taskLists.list")) {
+          response.insert(QStringLiteral("result"),
+                          QJsonObject{{QStringLiteral("lists"), m_taskLists}});
+        } else {
+          response.insert(QStringLiteral("result"),
+                          QJsonObject{{QStringLiteral("tasks"), m_tasks}});
+        }
+      } else if (method.startsWith(QStringLiteral("tasks.")) ||
+                 method.startsWith(QStringLiteral("taskLists."))) {
+        m_mutations.append({method, params});
       } else if (method == QStringLiteral("freebusy.query")) {
         m_mutations.append({method, params});
         response.insert(
@@ -307,6 +344,10 @@ class FakeDaemon final : public QObject {
   int m_revision = 10;
   QHash<QString, QJsonObject> m_syncStatuses;
   QJsonObject m_coverage;
+  QJsonArray m_taskLists;
+  QJsonArray m_tasks;
+  bool m_tasksSupported = true;
+  int m_subscribeCount = 0;
   QJsonArray m_calendars{
       QJsonObject{{QStringLiteral("id"), QStringLiteral("local-default")},
                   {QStringLiteral("enabled"), true}},
@@ -362,6 +403,8 @@ class AppControllerTest final : public QObject {
   void freeBusyAnswersMergeAndFindASlot();
   void pdfExportValidatesItsRequest();
   void pdfExportWaitsForHydration();
+  void tasksLoadRefreshAndMutate();
+  void subscriptionFallsBackWithoutTasks();
 
  private:
   QTemporaryDir m_xdgRoot;
@@ -626,6 +669,70 @@ void AppControllerTest::pdfExportWaitsForHydration() {
   daemon.broadcast(QStringLiteral("events.changed"));
   QTRY_COMPARE(pdfRequests(), 2);
   QVERIFY(!QFile::exists(path));
+}
+
+void AppControllerTest::tasksLoadRefreshAndMutate() {
+  FakeDaemon daemon(0);
+  QVERIFY(daemon.listen());
+  daemon.setTasks(
+      {QJsonObject{{QStringLiteral("id"), QStringLiteral("local-tasks")},
+                   {QStringLiteral("name"), QStringLiteral("Tasks")}}},
+      {QJsonObject{{QStringLiteral("id"), QStringLiteral("task-1")},
+                   {QStringLiteral("listId"), QStringLiteral("local-tasks")},
+                   {QStringLiteral("title"), QStringLiteral("Water plants")}}});
+  AppController controller;
+  QSignalSpy changed(&controller, &AppController::tasksChanged);
+  QTRY_VERIFY(controller.connected());
+  QTRY_COMPARE(controller.tasks().size(), 1);
+  QCOMPARE(controller.taskLists().size(), 1);
+  QVERIFY(controller.tasksSupported());
+  QVERIFY(daemon.subscribedTopics().contains(QStringLiteral("tasks")));
+
+  // A change notification reloads the tasks.
+  daemon.setTasks({QJsonObject{{QStringLiteral("id"), QStringLiteral("local-tasks")}}},
+                  {});
+  daemon.clearMethods();
+  daemon.broadcast(QStringLiteral("tasks.changed"),
+                   {{QStringLiteral("listIds"), QJsonArray{"local-tasks"}}});
+  QTRY_VERIFY(controller.tasks().isEmpty());
+  QVERIFY(!daemon.methods().contains(QStringLiteral("events.list")));
+
+  controller.createTask({{QStringLiteral("title"), QStringLiteral("Buy milk")}});
+  controller.setTaskCompleted(QStringLiteral("task-1"), true);
+  controller.updateTask({{QStringLiteral("id"), QStringLiteral("task-1")},
+                         {QStringLiteral("notes"), QStringLiteral("Oat")},
+                         {QStringLiteral("localRevision"), 4}});
+  controller.removeTask(QStringLiteral("task-1"));
+  QTRY_COMPARE(daemon.mutations().size(), 4);
+  const auto mutations = daemon.mutations();
+  QCOMPARE(mutations.at(0).first, QStringLiteral("tasks.create"));
+  QCOMPARE(mutations.at(0).second.value("task").toObject().value("title").toString(),
+           QStringLiteral("Buy milk"));
+  QCOMPARE(mutations.at(1).second.value("task").toObject().value("completed").toBool(),
+           true);
+  QCOMPARE(mutations.at(2).second.value("expectedLocalRevision").toInteger(), 4);
+  QCOMPARE(mutations.at(3).first, QStringLiteral("tasks.remove"));
+
+  // An older daemon without tasks hides them instead of reporting an error.
+  daemon.setTasksSupported(false);
+  daemon.broadcast(QStringLiteral("tasks.changed"));
+  QTRY_VERIFY(!controller.tasksSupported());
+  QVERIFY(controller.lastError().isEmpty());
+}
+
+void AppControllerTest::subscriptionFallsBackWithoutTasks() {
+  FakeDaemon daemon(0);
+  daemon.setTasksSupported(false);
+  QVERIFY(daemon.listen());
+  AppController controller;
+  QTRY_VERIFY(controller.connected());
+  // An older daemon refuses the tasks topic; the controller subscribes to
+  // everything else so other notifications keep arriving.
+  QTRY_COMPARE(daemon.subscribeCount(), 2);
+  QTRY_VERIFY(daemon.subscribedTopics().contains(QStringLiteral("events")));
+  QVERIFY(!daemon.subscribedTopics().contains(QStringLiteral("tasks")));
+  QTRY_VERIFY(!controller.tasksSupported());
+  QVERIFY(controller.lastError().isEmpty());
 }
 
 void AppControllerTest::browserGoogleFlowRejectsEmptyClientId() {

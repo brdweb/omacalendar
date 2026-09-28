@@ -485,7 +485,7 @@ bool Database::migrate(QString* errorMessage) {
            ensureSyncCoverageSchema(errorMessage) &&
            ensureProviderResourcesSchema(errorMessage) &&
            repairInclusiveAllDayEndDates(errorMessage) &&
-           migrateSeriesBounds(errorMessage);
+           migrateSeriesBounds(errorMessage) && ensureTaskSchema(errorMessage);
   }
   if (schemaVersion() == kCurrentSchemaVersion) {
     return ensureOutboxMoveSchema(errorMessage) &&
@@ -494,7 +494,8 @@ bool Database::migrate(QString* errorMessage) {
            ensureSyncCoverageSchema(errorMessage) &&
            ensureProviderResourcesSchema(errorMessage) &&
            ensureReadPerformanceIndexes(errorMessage) &&
-           repairInclusiveAllDayEndDates(errorMessage);
+           repairInclusiveAllDayEndDates(errorMessage) &&
+           ensureTaskSchema(errorMessage);
   }
   if (!m_database.transaction()) {
     if (errorMessage != nullptr) {
@@ -880,7 +881,7 @@ bool Database::migrate(QString* errorMessage) {
          ensureSyncCoverageSchema(errorMessage) &&
          ensureProviderResourcesSchema(errorMessage) &&
          ensureReadPerformanceIndexes(errorMessage) &&
-         repairInclusiveAllDayEndDates(errorMessage);
+         repairInclusiveAllDayEndDates(errorMessage) && ensureTaskSchema(errorMessage);
 }
 
 bool Database::ensureOutboxMoveSchema(QString* errorMessage) {

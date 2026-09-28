@@ -15,6 +15,8 @@ SQLite database so views work offline.
   providers.
 - ICS content from subscriptions or files selected by the user.
 - Event details entered locally, including guests and reminders.
+- Tasks: titles, notes, due dates and completion. Tasks in the built-in
+  "Tasks" list stay on the device.
 - Omarchy theme/configuration needed for appearance and optional widget
   activation.
 

@@ -34,6 +34,8 @@ Item {
     Component { id: icsImportFactory; Components.IcsImportDialog {} }
     Component { id: icsExportFactory; Components.IcsExportDialog {} }
     Component { id: pdfExportFactory; Components.PdfExportDialog {} }
+    Component { id: tasksPanelFactory; Components.TasksPanel {} }
+    Component { id: taskEditorFactory; Components.TaskEditor {} }
     // Dialogs hand focus back through the window's content item, so the
     // focus test runs in an ApplicationWindow like the app's.
     Component {
@@ -758,6 +760,130 @@ Item {
                     "an answer for a different lookup is not shown")
             editor.submit()
             verify(!("addConference" in saveSpy.signalArguments[1][0]))
+            editor.close()
+        }
+
+        function test_tasks_panel_groups_adds_and_completes() {
+            const today = new Date()
+            const key = function(offset) {
+                return Qt.formatDate(new Date(today.getFullYear(), today.getMonth(),
+                                              today.getDate() + offset), "yyyy-MM-dd")
+            }
+            const panel = createTemporaryObject(tasksPanelFactory, scene, {
+                "taskLists": [{"id": "local-tasks", "name": "Tasks", "color": "#9ece6a"},
+                              {"id": "work", "name": "Work", "color": "#7aa2f7",
+                               "readOnly": true}],
+                "tasks": [
+                    {"id": "late", "listId": "local-tasks", "title": "Pay rent",
+                     "dueDate": key(-1)},
+                    {"id": "now", "listId": "work", "title": "Send report",
+                     "dueDate": key(0)},
+                    {"id": "done", "listId": "local-tasks", "title": "Old",
+                     "completed": true}]})
+            const created = createTemporaryObject(signalSpyFactory, testCase, {
+                "target": panel, "signalName": "createRequested"})
+            const completed = createTemporaryObject(signalSpyFactory, testCase, {
+                "target": panel, "signalName": "completionRequested"})
+            panel.open()
+            tryCompare(panel, "opened", true)
+            compare(panel.rows.map(function(row) {
+                return row.kind === "header" ? row.key : row.task.id
+            }), ["overdue", "late", "today", "now"], "completed tasks stay hidden")
+
+            const content = scene.Window.window.contentItem
+            const field = findChild(content, "addTaskField")
+            field.text = "Buy milk"
+            field.accepted()
+            compare(created.count, 1)
+            compare(created.signalArguments[0][0].title, "Buy milk")
+            compare(created.signalArguments[0][0].listId, "local-tasks",
+                    "new tasks go into a writable list")
+            compare(field.text, "")
+
+            const box = findChild(content, "taskDone-late")
+            verify(box !== null)
+            box.toggle()
+            box.toggled()
+            compare(completed.count, 1)
+            compare(completed.signalArguments[0][0], "late")
+            compare(completed.signalArguments[0][1], true)
+
+            panel.showCompleted = true
+            compare(panel.rows[panel.rows.length - 1].task.id, "done")
+            panel.close()
+        }
+
+        function test_agenda_lists_tasks_due_that_day() {
+            const agenda = createTemporaryObject(agendaFactory, scene, {
+                "width": 600, "height": 500, "currentDate": new Date(2026, 9, 5),
+                "dayCount": 3, "events": [],
+                "taskLists": [{"id": "local-tasks", "name": "Tasks"}],
+                "tasks": [{"id": "due", "listId": "local-tasks", "title": "File taxes",
+                           "dueDate": "2026-10-06"},
+                          {"id": "done", "listId": "local-tasks", "title": "Old",
+                           "dueDate": "2026-10-06", "completed": true}]})
+            const completion = createTemporaryObject(signalSpyFactory, testCase, {
+                "target": agenda, "signalName": "taskCompletionRequested"})
+            const activated = createTemporaryObject(signalSpyFactory, testCase, {
+                "target": agenda, "signalName": "taskActivated"})
+            const row = findChild(agenda, "agendaTask-due")
+            verify(row !== null, "an open task shows on its due day")
+            verify(findChild(agenda, "agendaTask-done") === null,
+                   "completed tasks are not listed")
+            row.clicked()
+            compare(activated.count, 1)
+            row.contentItem.children[0].toggle()
+            row.contentItem.children[0].toggled()
+            compare(completion.count, 1)
+            compare(completion.signalArguments[0][0], "due")
+        }
+
+        function test_task_editor_validates_and_saves() {
+            const editor = createTemporaryObject(taskEditorFactory, scene, {
+                "taskLists": [{"id": "local-tasks", "name": "Tasks"},
+                              {"id": "shared", "name": "Shared", "readOnly": true}]})
+            const saved = createTemporaryObject(signalSpyFactory, testCase, {
+                "target": editor, "signalName": "saveRequested"})
+            const removed = createTemporaryObject(signalSpyFactory, testCase, {
+                "target": editor, "signalName": "removeRequested"})
+            const content = scene.Window.window.contentItem
+            editor.openNew("local-tasks", "")
+            tryCompare(editor, "opened", true)
+            findChild(content, "taskTitle").text = "Renew passport"
+            findChild(content, "taskDue").text = "2026-02-30"
+            editor.submit()
+            compare(saved.count, 0, "an impossible date is refused")
+            verify(editor.validationError.length > 0)
+            findChild(content, "taskDue").text = "2026-10-15"
+            editor.submit()
+            compare(saved.count, 1)
+            compare(saved.signalArguments[0][0].listId, "local-tasks")
+            compare(saved.signalArguments[0][0].dueDate, "2026-10-15")
+
+            editor.openExisting({"id": "task-9", "listId": "local-tasks",
+                                 "title": "Call Sam", "localRevision": 3})
+            tryCompare(editor, "opened", true)
+            findChild(content, "taskDone").checked = true
+            editor.submit()
+            compare(saved.count, 2)
+            const update = saved.signalArguments[1][0]
+            compare(update.id, "task-9")
+            compare(update.completed, true)
+            compare(update.localRevision, 3)
+            verify(!("listId" in update), "edits never move a task")
+
+            editor.openExisting({"id": "task-9", "listId": "local-tasks", "title": "x"})
+            tryCompare(editor, "opened", true)
+            const remove = findChild(content, "taskDelete")
+            remove.clicked()
+            compare(removed.count, 0, "deleting needs a second click")
+            remove.clicked()
+            compare(removed.count, 1)
+
+            editor.openExisting({"id": "task-2", "listId": "shared", "title": "Theirs"})
+            tryCompare(editor, "opened", true)
+            verify(editor.readOnly)
+            verify(!findChild(content, "taskSave").enabled)
             editor.close()
         }
 
