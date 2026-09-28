@@ -23,6 +23,7 @@ Rectangle {
     property int conflictCount: 0
     property int failedOperationCount: 0
     property bool connected: false
+    property bool showWeekNumbers: false
 
     signal dateSelected(date dateValue)
     signal monthChanged(date dateValue)
@@ -81,6 +82,7 @@ Rectangle {
 
         DayOfWeekRow {
             Layout.fillWidth: true
+            Layout.leftMargin: root.showWeekNumbers ? 22 : 0
             locale: Qt.locale()
             delegate: Text {
                 textFormat: Text.PlainText
@@ -93,21 +95,45 @@ Rectangle {
             }
         }
 
-        MonthGrid {
-            id: miniMonth
+        RowLayout {
             Layout.fillWidth: true
-            Layout.preferredHeight: 214
-            month: root.monthDate.getMonth()
-            year: root.monthDate.getFullYear()
-            locale: Qt.locale()
-            delegate: MonthCell {
-                required property var model
-                date: model.date
+            spacing: 0
+
+            WeekNumberColumn {
+                objectName: "miniWeekNumbers"
+                visible: root.showWeekNumbers
+                Layout.preferredWidth: 22
+                Layout.preferredHeight: 214
                 month: miniMonth.month
-                selected: root.sameDate(model.date, root.currentDate)
-                isToday: root.sameDate(model.date, new Date())
-                eventCount: root.eventCountForDate(model.date)
-                onClicked: root.dateSelected(model.date)
+                year: miniMonth.year
+                locale: miniMonth.locale
+                delegate: Text {
+                    required property int weekNumber
+                    textFormat: Text.PlainText
+                    text: weekNumber
+                    color: Theme.mutedText
+                    horizontalAlignment: Text.AlignHCenter
+                    verticalAlignment: Text.AlignVCenter
+                    font.pixelSize: Theme.microFontSize
+                }
+            }
+
+            MonthGrid {
+                id: miniMonth
+                Layout.fillWidth: true
+                Layout.preferredHeight: 214
+                month: root.monthDate.getMonth()
+                year: root.monthDate.getFullYear()
+                locale: Qt.locale()
+                delegate: MonthCell {
+                    required property var model
+                    date: model.date
+                    month: miniMonth.month
+                    selected: root.sameDate(model.date, root.currentDate)
+                    isToday: root.sameDate(model.date, new Date())
+                    eventCount: root.eventCountForDate(model.date)
+                    onClicked: root.dateSelected(model.date)
+                }
             }
         }
 

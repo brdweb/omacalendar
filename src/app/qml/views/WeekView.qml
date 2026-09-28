@@ -7,6 +7,7 @@ import QtQuick.Layouts
 import OmaCalendar
 import "../components"
 import "../EventIndex.js" as EventIndex
+import "../DateRange.js" as DateRange
 
 Item {
     id: root
@@ -17,6 +18,7 @@ Item {
     readonly property var eventIndex: EventIndex.build(events)
     property string selectedEventReference: ""
     property int firstDayOfWeek: 1
+    property bool showWeekNumbers: false
     property int firstHour: 0
     property int lastHour: 24
     property int workDayStart: 8
@@ -36,6 +38,9 @@ Item {
     signal eventTimeChanged(var eventData, date dateValue,
                             int startMinute, int durationMinutes)
     signal eventDateChanged(var eventData, date dateValue)
+    signal eventAllDayRequested(var eventData, date dateValue)
+    // The all-day column a timed event is being dragged over, or -1.
+    property int allDayHoverIndex: -1
 
     readonly property date weekStart: startOfWeek(currentDate)
 
@@ -60,7 +65,22 @@ Item {
             height: 55
             spacing: 0
 
-            Item { Layout.preferredWidth: 58 }
+            Text {
+                objectName: "weekNumberLabel"
+                Layout.preferredWidth: 58
+                Layout.fillHeight: true
+                textFormat: Text.PlainText
+                text: root.showWeekNumbers
+                      ? qsTr("W%1").arg(DateRange.rowWeekNumber(root.weekStart)) : ""
+                color: Theme.mutedText
+                horizontalAlignment: Text.AlignHCenter
+                verticalAlignment: Text.AlignVCenter
+                font.pixelSize: Theme.smallFontSize
+                font.weight: Font.DemiBold
+                Accessible.name: root.showWeekNumbers
+                                 ? qsTr("Week %1").arg(DateRange.rowWeekNumber(root.weekStart))
+                                 : ""
+            }
             Repeater {
                 model: 7
                 delegate: ItemDelegate {
@@ -120,6 +140,8 @@ Item {
             anchors.right: parent.right
             anchors.top: dayHeaders.bottom
             height: 66
+            // A chip dragged out of the lane stays drawn above the timeline.
+            z: root.headerDragActive ? 10 : 0
             color: Theme.darkBackground
             border.color: Theme.divider
             RowLayout {
@@ -152,12 +174,24 @@ Item {
                             border.color: Theme.divider
                         }
                         DropArea {
+                            id: headerDrop
                             objectName: "weekHeaderDrop-" + allDayColumn.index
                             anchors.fill: parent
                             z: 1
                             keys: ["omacalendar-event"]
                             onDropped: drop => root.dropHeaderEvent(
                                                    drop, allDayColumn.dateValue)
+                        }
+                        Rectangle {
+                            objectName: "weekHeaderDropPreview-" + allDayColumn.index
+                            anchors.fill: parent
+                            anchors.margins: 1
+                            visible: headerDrop.containsDrag
+                                     || root.allDayHoverIndex === allDayColumn.index
+                            color: Theme.alpha(Theme.accent, 0.16)
+                            border.color: Theme.accent
+                            border.width: 2
+                            z: 2
                         }
                         Column {
                             anchors.fill: parent
@@ -381,6 +415,49 @@ Item {
                                                            durationMinutes)
                             }
 
+                            DropArea {
+                                id: timelineDrop
+                                objectName: "weekTimelineDrop-" + dayTimeline.index
+                                anchors.fill: parent
+                                z: 3
+                                keys: ["omacalendar-event"]
+                                readonly property int previewMinute:
+                                    root.snapMinute(drag.y / root.pixelsPerHour * 60
+                                                    + root.firstHour * 60)
+                                onDropped: drop => root.dropOnTimeline(
+                                                   drop, dayTimeline.dateValue,
+                                                   timelineDrop.previewMinute)
+                                // Drop preview: where a chip from the all-day
+                                // lane will start, at the default length.
+                                Rectangle {
+                                    objectName: "weekTimelineDropPreview-" + dayTimeline.index
+                                    visible: timelineDrop.containsDrag
+                                    x: 3
+                                    width: parent.width - 6
+                                    y: (timelineDrop.previewMinute / 60 - root.firstHour)
+                                       * root.pixelsPerHour
+                                    height: root.defaultDurationMinutes / 60 * root.pixelsPerHour
+                                    radius: Theme.radiusSM
+                                    color: Theme.alpha(Theme.accent, 0.2)
+                                    border.color: Theme.accent
+                                    border.width: 2
+                                    // Bottom edge: the dragged chip covers the top.
+                                    Text {
+                                        anchors.left: parent.left
+                                        anchors.bottom: parent.bottom
+                                        anchors.margins: 5
+                                        textFormat: Text.PlainText
+                                        text: Qt.formatTime(new Date(2000, 0, 1,
+                                                                     Math.floor(timelineDrop.previewMinute / 60),
+                                                                     timelineDrop.previewMinute % 60),
+                                                            root.hourPattern())
+                                        color: Theme.text
+                                        font.pixelSize: Theme.microFontSize
+                                        font.weight: Font.DemiBold
+                                    }
+                                }
+                            }
+
                             Repeater {
                                 model: dayTimeline.dayEvents
                                 delegate: TimelineEvent {
@@ -411,6 +488,23 @@ Item {
                                     editable: root.eventEditable(modelData)
                                     horizontalRescheduleEnabled: true
                                     dayWidth: dayTimeline.width
+                                    allDayDropY: weekFlick.contentY
+                                    onOverAllDayAreaChanged: root.allDayHoverIndex = overAllDayArea
+                                        ? dayTimeline.index + snappedDayOffset : -1
+                                    onSnappedDayOffsetChanged: {
+                                        if (overAllDayArea)
+                                            root.allDayHoverIndex = dayTimeline.index
+                                                    + snappedDayOffset
+                                    }
+                                    onAllDayRequested: (value, dayOffset) => {
+                                        root.allDayHoverIndex = -1
+                                        if (root.eventEditable(value))
+                                            root.eventAllDayRequested(
+                                                        value,
+                                                        root.targetDateForMove(
+                                                            dayTimeline.index,
+                                                            dayOffset))
+                                    }
                                     selected: root.eventReference(modelData)
                                               === root.selectedEventReference
                                     startMinute: startValue
@@ -551,6 +645,21 @@ Item {
         const draggedEvent = drop.source ? drop.source["eventData"] : null
         if (draggedEvent && requestDateChange(draggedEvent, dateValue))
             drop.acceptProposedAction()
+    }
+
+    // A chip from the all-day lane dropped on a day's timeline becomes a
+    // timed event there; all-day events take the default length.
+    function dropOnTimeline(drop, dateValue, startMinute) {
+        const draggedEvent = drop.source ? drop.source["eventData"] : null
+        if (!draggedEvent || !eventEditable(draggedEvent))
+            return
+        const duration = draggedEvent.allDay
+                ? defaultDurationMinutes
+                : Math.max(15, Math.round((eventEnd(draggedEvent)
+                                           - eventStart(draggedEvent)) / 60000))
+        eventTimeChanged(draggedEvent, dateValue, startMinute, duration)
+        drop.acceptProposedAction()
+        headerDragActive = false
     }
 
     function dropHeaderEventByDays(drop, days) {

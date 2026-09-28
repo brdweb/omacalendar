@@ -102,7 +102,8 @@ AppController::AppController(QObject* parent) : QObject(parent) {
       {QStringLiteral("defaultCalendarId"), QStringLiteral("local-default")},
       {QStringLiteral("notificationPrivacy"), QStringLiteral("generic")},
       {QStringLiteral("currentView"), QStringLiteral("month")},
-      {QStringLiteral("widgetConsentDecision"), QStringLiteral("")}};
+      {QStringLiteral("widgetConsentDecision"), QStringLiteral("")},
+      {QStringLiteral("showWeekNumbers"), false}};
   m_client.setAutoReconnect(true);
   connect(&m_client, &ipc::IpcClient::connectedChanged, this, [this]() {
     emit connectedChanged();
@@ -491,7 +492,8 @@ QStringList AppController::preferenceKeys() {
           QStringLiteral("workDayEnd"),        QStringLiteral("timeFormat"),
           QStringLiteral("displayTimeZone"),   QStringLiteral("defaultDuration"),
           QStringLiteral("defaultCalendarId"), QStringLiteral("notificationPrivacy"),
-          QStringLiteral("currentView"),       QStringLiteral("widgetConsentDecision")};
+          QStringLiteral("currentView"),       QStringLiteral("widgetConsentDecision"),
+          QStringLiteral("showWeekNumbers")};
 }
 
 void AppController::markPreferencesLoaded() {

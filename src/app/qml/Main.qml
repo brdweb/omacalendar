@@ -101,6 +101,9 @@ ApplicationWindow {
     readonly property int firstDayOfWeek:
         configuredFirstDayOfWeek === 0
         ? Number(Qt.locale().firstDayOfWeek) : configuredFirstDayOfWeek
+    // Stored settings round-trip as JSON, so accept a boolean or its text.
+    readonly property bool showWeekNumbers: preferences.showWeekNumbers === true
+                                            || preferences.showWeekNumbers === "true"
     readonly property int currentViewIndex: viewIndex(currentView)
     readonly property var latestSyncDate: latestCalendarSync()
 
@@ -310,6 +313,7 @@ ApplicationWindow {
             monthDate: window.visibleMonth
             calendars: window.sidebarCalendars
             calendarSets: window.calendarSets
+            showWeekNumbers: window.showWeekNumbers
             calendarsModel: null
             calendarSetsModel: window.appValue("calendarSetsModel", null)
             activeSetId: window.activeCalendarSetId
@@ -476,6 +480,7 @@ ApplicationWindow {
                                     events: window.visibleEvents
                                     selectedEventReference: window.selectedEventReference
                                     firstDayOfWeek: window.firstDayOfWeek
+                                    showWeekNumbers: window.showWeekNumbers
                                     workDayStart: Number(window.preferences.workDayStart || 8)
                                     workDayEnd: Number(window.preferences.workDayEnd || 18)
                                     defaultDurationMinutes:
@@ -497,6 +502,9 @@ ApplicationWindow {
                                     onEventDateChanged: (value, dateValue) =>
                                                             window.moveEventToDate(value,
                                                                                    dateValue)
+                                    onEventAllDayRequested: (value, dateValue) =>
+                                                                window.moveEventToAllDay(value,
+                                                                                         dateValue)
                                 }
                             }
                         }
@@ -509,6 +517,7 @@ ApplicationWindow {
                                     events: window.visibleEvents
                                     selectedEventReference: window.selectedEventReference
                                     firstDayOfWeek: window.firstDayOfWeek
+                                    showWeekNumbers: window.showWeekNumbers
                                     timeFormat: String(window.preferences.timeFormat || "system")
                                     onEventActivated: value => window.openEvent(value)
                                     onDateSelected: dateValue => window.selectDate(dateValue)
@@ -1443,13 +1452,42 @@ ApplicationWindow {
                                dateValue.getDate(), Math.floor(startMinute / 60),
                                startMinute % 60)
         updated.allDay = false
-        updated.startUtc = utcForDisplayedWall(start, value.timeKind)
+        if (value.allDay) {
+            // Leaving the all-day lane: the event takes the display zone.
+            updated.timeKind = "zoned"
+            updated.startTimeZone = String(preferences.displayTimeZone
+                                           || App.systemTimeZoneId || "UTC")
+            updated.endTimeZone = updated.startTimeZone
+        }
+        updated.startUtc = utcForDisplayedWall(start, updated.timeKind)
         if (!updated.startUtc)
             return
         updated.endUtc = new Date(new Date(updated.startUtc).getTime()
                                   + durationMinutes * 60000).toISOString()
         updated.startDate = ""
         updated.endDate = ""
+        updated.localRevision = revision
+        submitInteractionMutation(updated, value)
+    }
+
+    // A timed event dropped on the all-day lane becomes a one-day all-day
+    // event on that date.
+    function moveEventToAllDay(value, dateValue) {
+        if (!eventEditable(value) || value.allDay)
+            return
+        const revision = Number(value.localRevision)
+        if (!isFinite(revision) || revision < 0) {
+            console.warn("Cannot move event without a local revision")
+            return
+        }
+        const updated = Object.assign({}, value)
+        updated.allDay = true
+        updated.timeKind = "all_day"
+        updated.startDate = Qt.formatDate(dateValue, "yyyy-MM-dd")
+        updated.endDate = Qt.formatDate(new Date(dateValue.getFullYear(), dateValue.getMonth(),
+                                                 dateValue.getDate() + 1), "yyyy-MM-dd")
+        updated.startUtc = ""
+        updated.endUtc = ""
         updated.localRevision = revision
         submitInteractionMutation(updated, value)
     }

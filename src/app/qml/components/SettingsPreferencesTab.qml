@@ -49,6 +49,13 @@ ScrollView {
                     onActivated: index => tab.drawer.preferenceChanged(
                                      "firstDayOfWeek", [0, 1, 7][index])
                 }
+                AppCheckBox {
+                    objectName: "showWeekNumbers"
+                    text: qsTr("Show week numbers")
+                    checked: tab.drawer.preferences.showWeekNumbers === true
+                             || tab.drawer.preferences.showWeekNumbers === "true"
+                    onToggled: tab.drawer.preferenceChanged("showWeekNumbers", checked)
+                }
                 AppComboBox {
                     id: displayTimeZoneBox
                     objectName: "displayTimeZone"

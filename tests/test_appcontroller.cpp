@@ -899,7 +899,8 @@ void AppControllerTest::preferencesFallBackWithoutGetMany() {
   QTRY_VERIFY(controller.preferencesLoaded());
   QStringList methods = settledMethods(daemon);
   QCOMPARE(methods.count(QStringLiteral("settings.getMany")), 1);
-  QCOMPARE(methods.count(QStringLiteral("settings.get")), 10);
+  // One fallback read per preference key, including showWeekNumbers.
+  QCOMPARE(methods.count(QStringLiteral("settings.get")), 11);
   QCOMPARE(controller.preferences().value(QStringLiteral("timeFormat")).toString(),
            QStringLiteral("24h"));
   QVERIFY2(controller.lastError().isEmpty(), qPrintable(controller.lastError()));
@@ -909,7 +910,7 @@ void AppControllerTest::preferencesFallBackWithoutGetMany() {
   daemon.broadcast(QStringLiteral("calendars.changed"));
   methods = settledMethods(daemon);
   QCOMPARE(methods.count(QStringLiteral("settings.getMany")), 0);
-  QCOMPARE(methods.count(QStringLiteral("settings.get")), 10);
+  QCOMPARE(methods.count(QStringLiteral("settings.get")), 11);
 }
 
 void AppControllerTest::contactSuggestionsAreRelayed() {

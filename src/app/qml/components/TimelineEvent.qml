@@ -40,6 +40,13 @@ Control {
     signal activated(var eventData)
     signal rescheduleRequested(var eventData, int startMinute,
                                int durationMinutes, int dayOffset)
+    // Dropping above allDayDropY (in the parent's coordinates, typically the
+    // top of the visible timeline) asks to make the event all-day instead.
+    property real allDayDropY: NaN
+    signal allDayRequested(var eventData, int dayOffset)
+    readonly property bool overAllDayArea: moveArea.pressed && editable
+                                           && !isNaN(allDayDropY)
+                                           && y + pressY + moveDelta < allDayDropY
 
     readonly property color eventColor: eventData.calendarColor
                                         || eventData.color || Theme.accent
@@ -283,6 +290,14 @@ Control {
         moveDeltaX = horizontalDelta
         moveDelta = verticalDelta
         const click = Math.abs(horizontalDelta) < 4 && Math.abs(verticalDelta) < 4
+        if (!click && editable && !isNaN(allDayDropY)
+                && y + pressY + verticalDelta < allDayDropY) {
+            const allDayOffset = snappedDayOffset
+            moveDeltaX = 0
+            moveDelta = 0
+            allDayRequested(eventData, allDayOffset)
+            return
+        }
         const absoluteStart = startMinute + snappedMoveMinutes
         const dayOffset = snappedDayOffset + Math.floor(absoluteStart / 1440)
         const nextStart = normalizedMinute(absoluteStart)

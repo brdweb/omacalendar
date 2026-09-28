@@ -19,3 +19,22 @@ function includeMonthGrid(rangeStart, rangeEnd, monthDate, firstDayOfWeek) {
         "end": gridEnd > rangeEnd ? gridEnd : rangeEnd
     }
 }
+
+// ISO 8601 week number: weeks start on Monday and week 1 holds the year's
+// first Thursday.
+function isoWeekNumber(dateValue) {
+    const day = new Date(Date.UTC(dateValue.getFullYear(), dateValue.getMonth(),
+                                  dateValue.getDate()))
+    const weekday = day.getUTCDay() || 7
+    day.setUTCDate(day.getUTCDate() + 4 - weekday)
+    const yearStart = new Date(Date.UTC(day.getUTCFullYear(), 0, 1))
+    return Math.ceil(((day - yearStart) / 86400000 + 1) / 7)
+}
+
+// The ISO week shown for a seven-day row that starts on rowStart. The row's
+// Thursday decides, so Sunday-first rows label the week most of them share.
+function rowWeekNumber(rowStart) {
+    const thursday = new Date(rowStart.getFullYear(), rowStart.getMonth(),
+                              rowStart.getDate() + (4 - rowStart.getDay() + 7) % 7)
+    return isoWeekNumber(thursday)
+}

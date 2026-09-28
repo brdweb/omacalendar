@@ -9,6 +9,20 @@ TestCase {
         return Qt.formatDate(value, "yyyy-MM-dd")
     }
 
+    function test_iso_week_numbers() {
+        compare(DateRange.isoWeekNumber(new Date(2026, 0, 1)), 1, "Thursday starts week 1")
+        compare(DateRange.isoWeekNumber(new Date(2027, 0, 1)), 53, "2026 has 53 weeks")
+        compare(DateRange.isoWeekNumber(new Date(2024, 11, 30)), 1, "late December can be week 1")
+        compare(DateRange.isoWeekNumber(new Date(2026, 8, 28)), 40)
+        compare(DateRange.isoWeekNumber(new Date(2026, 9, 4)), 40, "Sunday ends the ISO week")
+    }
+
+    function test_row_week_number_follows_the_rows_thursday() {
+        compare(DateRange.rowWeekNumber(new Date(2026, 8, 28)), 40, "Monday-first row")
+        compare(DateRange.rowWeekNumber(new Date(2026, 8, 27)), 40, "Sunday-first row")
+        compare(DateRange.rowWeekNumber(new Date(2026, 11, 27)), 53)
+    }
+
     function test_week_range_includes_entire_sidebar_month() {
         const range = DateRange.includeMonthGrid(
                         new Date(2026, 8, 19), new Date(2026, 8, 29),

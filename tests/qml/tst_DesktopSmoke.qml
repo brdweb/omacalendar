@@ -342,6 +342,71 @@ Item {
                     (fresh.workDayStart - 1) * fresh.pixelsPerHour)
         }
 
+        function test_week_numbers_and_year_heat_map() {
+            const month = createTemporaryObject(monthFactory, scene, {
+                "width": 900, "height": 700, "currentDate": new Date(2026, 8, 15),
+                "firstDayOfWeek": 1, "events": [], "visible": true})
+            wait(0)
+            const firstWeek = findChild(month, "monthWeekNumber-0")
+            verify(firstWeek !== null)
+            verify(!firstWeek.visible, "week numbers are off by default")
+            month.showWeekNumbers = true
+            tryCompare(firstWeek, "visible", true)
+            compare(firstWeek.text, "36", "the grid opens on Monday August 31")
+            compare(findChild(month, "monthWeekNumber-5").text, "41")
+
+            const week = createTemporaryObject(weekFactory, scene, {
+                "width": 900, "height": 700, "currentDate": new Date(2026, 8, 30),
+                "firstDayOfWeek": 1, "showWeekNumbers": true, "events": [],
+                "visible": true})
+            wait(0)
+            compare(findChild(week, "weekNumberLabel").text, "W40")
+
+            const year = createTemporaryObject(yearFactory, scene, {
+                "width": 1100, "height": 800, "currentDate": scene.referenceDate,
+                "events": representativeEvents(), "visible": true})
+            wait(0)
+            verify(findChild(year, "yearHeatLegend") !== null)
+            compare([0, 1, 2, 3, 4, 5, 6, 40].map(year.heatLevel),
+                    [0, 1, 2, 2, 3, 3, 4, 4])
+        }
+
+        function test_drag_between_all_day_lane_and_timeline() {
+            const allDay = representativeEvents().filter(function(value) {
+                return value.allDay })[0]
+            const timed = representativeEvents()[0]
+            const week = createTemporaryObject(weekFactory, scene, {
+                "width": 1000, "height": 700, "currentDate": scene.referenceDate,
+                "events": [timed, allDay], "visible": true})
+            wait(0)
+            const timeSpy = createTemporaryObject(signalSpyFactory, testCase, {
+                "target": week, "signalName": "eventTimeChanged"})
+            let accepted = false
+            week.dropOnTimeline({"source": {"eventData": allDay},
+                                 "acceptProposedAction": function() { accepted = true }},
+                                week.weekStart, 600)
+            compare(timeSpy.count, 1)
+            verify(accepted)
+            compare(timeSpy.signalArguments[0][2], 600)
+            compare(timeSpy.signalArguments[0][3], week.defaultDurationMinutes,
+                    "an all-day event takes the default length")
+
+            const timelineEvent = createTemporaryObject(timelineEventFactory, scene, {
+                "eventData": timed, "width": 120, "height": 60, "y": 500,
+                "startMinute": 540, "durationMinutes": 60, "allDayDropY": 300})
+            const allDaySpy = createTemporaryObject(signalSpyFactory, testCase, {
+                "target": timelineEvent, "signalName": "allDayRequested"})
+            const rescheduleSpy = createTemporaryObject(signalSpyFactory, testCase, {
+                "target": timelineEvent, "signalName": "rescheduleRequested"})
+            timelineEvent.pressY = 10
+            timelineEvent.commitMove(0, -150)
+            compare(allDaySpy.count, 0, "a move that stays in the timeline")
+            compare(rescheduleSpy.count, 1)
+            timelineEvent.commitMove(0, -260)
+            compare(allDaySpy.count, 1, "released above the timeline top")
+            compare(rescheduleSpy.count, 1)
+        }
+
         function test_editor_keeps_recurrence_rules() {
             const rules = ["FREQ=WEEKLY;INTERVAL=2;BYDAY=MO,WE;COUNT=5",
                            "FREQ=MONTHLY;BYDAY=3MO",
