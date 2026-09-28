@@ -213,8 +213,10 @@ class AppController final : public QObject {
   void refreshWidgetStatus();
   void processPendingDeepLink();
   void applyDisplayTimes(QVariantList* events) const;
+  [[nodiscard]] QStringList visibleCalendarIds() const;
   void requestRangePage(quint64 generation, int offset, int limit);
   void refreshParts(int parts);
+  void finishScopeRequest();
   void scheduleRefresh(int parts);
   [[nodiscard]] static int refreshPartsForNotification(const QString& event);
   void loadPreferences();
@@ -230,7 +232,9 @@ class AppController final : public QObject {
     RefreshInvitations = 1 << 4,
     RefreshPreferences = 1 << 5,
     RefreshEvents = 1 << 6,
-    RefreshAll = (1 << 7) - 1,
+    RefreshOperations = 1 << 7,
+    RefreshConflicts = 1 << 8,
+    RefreshAll = (1 << 9) - 1,
   };
 
   // The daemon's default events.list page size. Pages shrink when a response
@@ -266,6 +270,11 @@ class AppController final : public QObject {
   QDate m_rangeEnd;
   quint64 m_rangeGeneration = 0;
   QVariantList m_rangePages;
+  QStringList m_visibleCalendarIds;
+  bool m_calendarsReady = false;
+  bool m_calendarSetsReady = false;
+  bool m_rangeNeedsReload = false;
+  int m_scopeRequestsInFlight = 0;
   QString m_statusText = QStringLiteral("Connecting to calendar service…");
   QString m_lastError;
   int m_activeRequests = 0;

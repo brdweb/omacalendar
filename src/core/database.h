@@ -10,6 +10,7 @@
 #include <functional>
 
 #include "core/domain.h"
+#include "core/recurrenceexpander.h"
 
 namespace omacalendar {
 
@@ -104,14 +105,15 @@ class Database final {
   bool removeRemoteEvent(const QString& calendarId, const QString& remoteId,
                          const QString& remotePayload = {},
                          QString* errorMessage = nullptr, bool* conflicted = nullptr);
-  // Commits one provider response as a unit. A parse/database failure rolls
-  // back every upsert, deletion, calendar token, and conflict discovered in
-  // the batch, leaving the previous cache usable.
+  // A response may be spread across independently committed chunks. Intermediate
+  // chunks leave sync state and coverage unchanged; only the final chunk
+  // publishes the cursor and prunes orphaned provider resources.
   bool applyRemoteSyncBatch(const Calendar& calendar, const QList<Event>& events,
                             const QStringList& deletedRemoteIds,
                             const QStringList& prunedRemoteIds = {},
                             QString* errorMessage = nullptr,
-                            const QList<ProviderResource>& providerResources = {});
+                            const QList<ProviderResource>& providerResources = {},
+                            bool finalizeCalendar = true);
   // Commits a bounded replacement and its completed coverage marker in one
   // savepoint. Failed parsing/database work therefore cannot make an
   // uncovered range look complete after restart.
@@ -177,6 +179,12 @@ class Database final {
                                            const QDateTime& endUtc,
                                            const QStringList& calendarIds = {},
                                            QString* errorMessage = nullptr) const;
+  // The 366-day statistics window can legitimately contain more than the
+  // agenda's 10,000 occurrences. Keep the same expansion semantics with a
+  // larger, still bounded, yearly budget.
+  [[nodiscard]] QList<Event> dailyCountEventsBetween(
+      const QDateTime& startUtc, const QDateTime& endUtc,
+      const QStringList& calendarIds = {}, QString* errorMessage = nullptr) const;
   // Invitation reads deliberately stay daemon-private. They apply the same
   // recurrence semantics as eventsBetween(), but discard unrelated bounded
   // rows before decoding them from SQLite.
@@ -349,6 +357,8 @@ class Database final {
   bool ensureProviderResourcesSchema(QString* errorMessage);
   bool ensureReadPerformanceIndexes(QString* errorMessage);
   bool repairInclusiveAllDayEndDates(QString* errorMessage);
+  bool migrateSeriesBounds(QString* errorMessage);
+  bool repairSeriesBounds(QString* errorMessage);
   bool archiveLegacyDatabase(const QString& path, QString* errorMessage);
   bool execute(const QString& sql, QString* errorMessage) const;
   bool bumpChangeRevision(QString* errorMessage = nullptr) const;
@@ -387,10 +397,13 @@ class Database final {
                                                    const QDateTime& endUtc,
                                                    const QStringList& calendarIds,
                                                    bool invitationsOnly,
+                                                   qsizetype maximumOccurrences,
+                                                   qsizetype maximumExpansionSteps,
                                                    QString* errorMessage) const;
 
   QString m_connectionName;
   QSqlDatabase m_database;
+  mutable RecurrenceExpansionCache m_expansionCache;
 };
 
 }  // namespace omacalendar

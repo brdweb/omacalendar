@@ -17,6 +17,7 @@
 #include "providers/caldav/caldavsync.h"
 #include "providers/caldav/caldavxml.h"
 #include "providers/caldav/icalcodec.h"
+#include "sync/chunkedsyncapply.h"
 
 using namespace omacalendar;
 
@@ -137,6 +138,7 @@ class CalDavRangeFixture final : public QObject {
   [[nodiscard]] bool probeResourceExists() const { return m_probeExists; }
   void failCleanupAfterCreate(bool fail) { m_failCleanupAfterCreate = fail; }
   [[nodiscard]] QByteArray lastPut() const { return m_lastPut; }
+  void setBulkEvents(const int count) { m_bulkEvents = count; }
 
  private:
   static QByteArray httpResponse(const QByteArray& status, const QByteArray& body,
@@ -148,6 +150,35 @@ class CalDavRangeFixture final : public QObject {
   }
 
   QByteArray multiStatusResource() const {
+    if (m_bulkEvents > 0) {
+      QByteArray body = QByteArrayLiteral(
+          "<?xml version=\"1.0\"?><d:multistatus xmlns:d=\"DAV:\" "
+          "xmlns:c=\"urn:ietf:params:xml:ns:caldav\">");
+      for (int index = 0; index < m_bulkEvents; ++index) {
+        const QByteArray number = QByteArray::number(index);
+        const QByteArray event = QByteArrayLiteral(
+                                     "BEGIN:VCALENDAR\r\nVERSION:2.0\r\n"
+                                     "BEGIN:VEVENT\r\nUID:bulk-") +
+                                 number +
+                                 QByteArrayLiteral(
+                                     "@example.test\r\nDTSTAMP:20260901T000000Z\r\n"
+                                     "DTSTART:20260901T090000Z\r\n"
+                                     "DTEND:20260901T093000Z\r\n"
+                                     "SUMMARY:Bulk fixture\r\nEND:VEVENT\r\n"
+                                     "END:VCALENDAR\r\n");
+        body += QByteArrayLiteral("<d:response><d:href>/calendar/bulk-") + number +
+                QByteArrayLiteral(
+                    ".ics</d:href><d:propstat><d:prop>"
+                    "<d:getetag>\"v1\"</d:getetag>"
+                    "<c:calendar-data><![CDATA[") +
+                event +
+                QByteArrayLiteral(
+                    "]]></c:calendar-data></d:prop>"
+                    "<d:status>HTTP/1.1 200 OK</d:status>"
+                    "</d:propstat></d:response>");
+      }
+      return body + QByteArrayLiteral("<d:sync-token>token-1</d:sync-token>");
+    }
     return QByteArrayLiteral(
                "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
                "<d:multistatus xmlns:d=\"DAV:\" "
@@ -312,6 +343,7 @@ class CalDavRangeFixture final : public QObject {
   bool m_loseProbeCreateAck = false;
   bool m_staleProbeWasSeeded = false;
   int m_probePutCount = 0;
+  int m_bulkEvents = 0;
   int m_probeDeleteCount = 0;
 };
 
@@ -515,6 +547,8 @@ class CalDavHardeningTest final : public QObject {
   void multigetBatchesAreBounded();
   void syncBudgetDeduplicatesAndCapsWork();
   void inlineCalendarResponsesRespectBudgets();
+  void providerCoalescesNotificationAcrossChunks();
+  void disconnectDuringChunkedApplyAllowsReconnect();
   void futureRangeProbeCleansUpOnBudgetFailure();
   void readResourceUsesCalendarMultiGetReport();
   void scheduleReplyHeaderIsExplicit();
@@ -1465,6 +1499,88 @@ void CalDavHardeningTest::inlineCalendarResponsesRespectBudgets() {
     QVERIFY(database.eventsForCalendars({calendars.first().id}).isEmpty());
     qputenv("PATH", originalPath);
   }
+}
+
+void CalDavHardeningTest::providerCoalescesNotificationAcrossChunks() {
+  QTemporaryDir helperDirectory;
+  QByteArray originalPath;
+  QVERIFY(installFastSecretTool(&helperDirectory, &originalPath));
+  const auto restorePath = qScopeGuard([&]() { qputenv("PATH", originalPath); });
+  CalDavRangeFixture server;
+  server.setBulkEvents(70);
+  QVERIFY(server.listen());
+  Database database;
+  QString error;
+  QVERIFY2(database.open(QStringLiteral(":memory:"), &error), qPrintable(error));
+  caldav::CalDavSync sync(&database);
+  QSignalSpy notifications(&sync, &Provider::eventsChanged);
+  const QString accountId = setupRangeAccount(&server, &database, &sync, &error);
+  QVERIFY2(!accountId.isEmpty(), qPrintable(error));
+  const Calendar calendar = database.calendars(accountId).first();
+  QCOMPARE(database.eventsForCalendars({calendar.id}, &error).size(), 70);
+  QCOMPARE(notifications.count(), 1);
+  QCOMPARE(notifications.at(0).at(0).toStringList(), QStringList{calendar.id});
+}
+
+void CalDavHardeningTest::disconnectDuringChunkedApplyAllowsReconnect() {
+  QTemporaryDir helperDirectory;
+  QByteArray originalPath;
+  QVERIFY(installFastSecretTool(&helperDirectory, &originalPath));
+  const auto restorePath = qScopeGuard([&]() { qputenv("PATH", originalPath); });
+  CalDavRangeFixture server;
+  server.setBulkEvents(70);
+  QVERIFY(server.listen());
+  Database database;
+  QString error;
+  QVERIFY2(database.open(QStringLiteral(":memory:"), &error), qPrintable(error));
+  caldav::CalDavSync sync(&database);
+  const QString accountId = setupRangeAccount(&server, &database, &sync, &error);
+  QVERIFY2(!accountId.isEmpty(), qPrintable(error));
+  const Calendar calendar = database.calendars(accountId).first();
+  QCOMPARE(database.eventsForCalendars({calendar.id}).size(), 70);
+  QTest::qWait(20);  // Retire the initial apply's deferred deletion.
+
+  server.setBulkEvents(71);
+  bool disconnectedAfterCommit = false;
+  bool hookedApply = false;
+  QTimer watchApply;
+  connect(&watchApply, &QTimer::timeout, &sync, [&]() {
+    if (hookedApply) {
+      return;
+    }
+    auto* apply = sync.findChild<ChunkedSyncApply*>();
+    if (apply == nullptr) {
+      return;
+    }
+    hookedApply = true;
+    connect(apply, &ChunkedSyncApply::chunkCommitted, &sync, [&](const QString&) {
+      disconnectedAfterCommit = sync.disconnectAccount(accountId, false, &error);
+      watchApply.stop();
+    });
+  });
+  watchApply.start(0);
+  const QDateTime start(QDate(2023, 12, 31), QTime(0, 0), QTimeZone::UTC);
+  QVERIFY2(sync.syncRange({calendar.id, start, start.addYears(3)}, &error),
+           qPrintable(error));
+  QVERIFY2(
+      QTest::qWaitFor([&]() { return disconnectedAfterCommit; }, 5000),
+      qPrintable(
+          QStringLiteral("apply hooked=%1 status=%2 events=%3 error=%4")
+              .arg(hookedApply)
+              .arg(sync.status(accountId).value(QStringLiteral("state")).toString())
+              .arg(database.eventsForCalendars({calendar.id}).size())
+              .arg(error)));
+  QCOMPARE(database.account(accountId).authStatus, QStringLiteral("disconnected"));
+  QVERIFY2(sync.updateCredentials(accountId, QStringLiteral("fixture-user"),
+                                  QStringLiteral("fixture-password"), &error),
+           qPrintable(error));
+  QTRY_COMPARE_WITH_TIMEOUT(database.account(accountId).authStatus,
+                            QStringLiteral("connected"), 5000);
+  sync.syncAccount(accountId);
+  QTRY_COMPARE_WITH_TIMEOUT(
+      sync.status(accountId).value(QStringLiteral("state")).toString(),
+      QStringLiteral("idle"), 5000);
+  QCOMPARE(database.eventsForCalendars({calendar.id}).size(), 71);
 }
 
 void CalDavHardeningTest::futureRangeProbeCleansUpOnBudgetFailure() {

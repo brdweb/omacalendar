@@ -14,18 +14,31 @@ Versioning once public releases begin.
   events, applying one changed event drops from about 1.7 s to under 60 ms.
 - Change notifications reload only the lists they affect, and preferences
   load in one request. A delivered reminder no longer reloads anything.
+- The desktop app requests event pages only for calendars visible in the active
+  calendar set; hiding all calendars clears the view without an IPC query (#42).
 - The activity panel, settings and search lists update the rows that changed
   instead of rebuilding, so they keep their scroll position and focus.
 - The calendar database keeps temporary data in memory, uses a larger page
   cache and memory-mapped reads, and refreshes its query statistics on close.
+- Bound historical recurring-series reads by their last occurrence, with a
+  schema-3 backfill, indexed exception identities, and a revision-aware
+  per-series expansion cache (#41).
+- Remote sync responses commit in bounded chunks so widget IPC stays
+  responsive during large Google, CalDAV, and ICS imports; sync cursors and
+  coverage advance only after the last chunk, and notifications are coalesced.
 
 ### Added
 
 - The `settings.getMany` IPC method reads several settings in one request
   (see docs/IPC.md).
+- Add `stats.dailyCounts` for bounded local-day counts without transferring
+  full event DTOs (#43).
 - A report-only desktop view benchmark (see docs/PERFORMANCE.md).
 
 ### Fixed
+
+- Yearly `stats.dailyCounts` now accommodates realistic recurrence volumes
+  without silently truncating counts or rejecting valid 366-day ranges (#43).
 
 - The desktop app reads every page of a date range from the calendar
   service. Previously it showed only the first 500 events, so a busy year
@@ -35,6 +48,8 @@ Versioning once public releases begin.
 - The year view counts an event on every day it covers, matching the month
   and agenda views, instead of only on its start date, so multi-day events
   and overnight events no longer leave their later days looking empty.
+- The activity panel loads queued operations and conflicts on connection, then
+  refreshes each list when its daemon notification arrives (#64).
 
 ## [1.1.1] - 2026-09-22
 

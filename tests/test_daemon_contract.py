@@ -28,7 +28,7 @@ from typing import Any
 
 PROTOCOL_MAJOR = 2
 PROTOCOL_MINOR = 1
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 
 class ContractError(AssertionError):
@@ -772,6 +772,61 @@ def run_account_lifecycle_contract(
             initial_range.get("coverage", {}).get("complete") is True,
             "initial CalDAV hydration did not record durable coverage",
         )
+        covered_counts = harness.call("stats.dailyCounts", {
+            "start": "2026-09-01", "end": "2026-09-08",
+            "calendarIds": [caldav_calendar_id], "timeZone": "UTC",
+        })
+        require(
+            covered_counts.get("coverage", {}).get("complete") is True
+            and covered_counts.get("counts", {}).get("2026-09-02") == 1,
+            "covered CalDAV daily counts lost coverage or cached events",
+        )
+        hydration_subscriber = JsonSocket(harness.socket_path)
+        try:
+            hydration_subscriber.send(
+                "stats-hydration-subscription", "system.subscribe",
+                {"topics": ["events"], "sinceRevision": 0},
+            )
+            hydration_subscriber.receive_matching(
+                lambda value: value.get("id") == "stats-hydration-subscription",
+                "statistics hydration subscription acknowledgement",
+            )
+            uncovered_counts = harness.call("stats.dailyCounts", {
+                "start": "2009-01-01", "end": "2009-02-01",
+                "calendarIds": [caldav_calendar_id], "timeZone": "UTC",
+            })
+            require(
+                uncovered_counts.get("counts") == {}
+                and uncovered_counts.get("coverage", {}).get("complete") is False
+                and uncovered_counts["coverage"].get("hydrationScheduled") is True
+                and caldav_calendar_id in uncovered_counts["coverage"].get(
+                    "uncoveredCalendarIds", []
+                ),
+                "uncovered daily counts did not expose pending CalDAV hydration",
+            )
+            hydrated = hydration_subscriber.receive_matching(
+                lambda value: value.get("event") == "events.changed"
+                and caldav_calendar_id in value.get("data", {}).get(
+                    "calendarIds", []
+                ),
+                "statistics hydration events.changed notification",
+                timeout=5.0,
+            )
+            require(hydrated.get("data", {}).get("revision") is not None,
+                    "hydration notification lacked a revision")
+            hydration_deadline = time.monotonic() + 5.0
+            while time.monotonic() < hydration_deadline:
+                covered_counts = harness.call("stats.dailyCounts", {
+                    "start": "2009-01-01", "end": "2009-02-01",
+                    "calendarIds": [caldav_calendar_id], "timeZone": "UTC",
+                })
+                if covered_counts.get("coverage", {}).get("complete") is True:
+                    break
+                time.sleep(0.05)
+            require(covered_counts.get("coverage", {}).get("complete") is True,
+                    "daily counts did not become complete after hydration")
+        finally:
+            hydration_subscriber.close()
         historical_params = {
             "start": "2010-01-01T00:00:00Z",
             "end": "2011-01-01T00:00:00Z",
@@ -1468,6 +1523,107 @@ def run_settings_get_many_contract(harness: DaemonHarness) -> None:
         assert_ipc_error(harness.call_error("settings.getMany", params), "invalid_params", context)
 
 
+def run_daily_counts_contract(harness: DaemonHarness) -> None:
+    def create(name: str, calendar_id: str, start: str, end: str) -> None:
+        harness.call(
+            "events.create",
+            {
+                "clientMutationId": f"contract-stats-{name}",
+                "recurrenceScope": "series",
+                "guestNotificationPolicy": "none",
+                "event": {
+                    "calendarId": calendar_id,
+                    "summary": name,
+                    "startUtc": start,
+                    "endUtc": end,
+                    "startTimeZone": "UTC",
+                    "endTimeZone": "UTC",
+                    "allDay": False,
+                    "timeKind": "zoned",
+                },
+            },
+        )
+
+    create("overnight", "contract-local", "2026-09-02T23:30:00Z",
+           "2026-09-03T00:30:00Z")
+    create("zone-shift", "contract-local", "2026-09-02T00:30:00Z",
+           "2026-09-02T01:30:00Z")
+    create("other-calendar", "local-default", "2026-09-04T12:00:00Z",
+           "2026-09-04T13:00:00Z")
+    params = {"start": "2026-09-01", "end": "2026-09-08",
+              "calendarIds": ["contract-local"], "timeZone": "UTC"}
+    expected = {
+        "2026-09-01": 1, "2026-09-02": 2, "2026-09-03": 2,
+        "2026-09-04": 1, "2026-09-05": 1, "2026-09-06": 1,
+        "2026-09-07": 1,
+    }
+    result = harness.call("stats.dailyCounts", params)
+    require(result.get("coverage", {}).get("complete") is True
+            and result.get("counts") == expected,
+            "covered daily counts disagreed with multi-day/all-day/recurring overlap")
+    require(harness.call("stats.dailyCounts", {**params, "start": "2026-09-04",
+                                               "end": "2026-09-05"}).get("counts") == {
+                                                   "2026-09-04": 1},
+            "exclusive range end or calendar filter was ignored")
+    require(harness.call("stats.dailyCounts", {**params, "timeZone":
+                                               "America/Los_Angeles"}).get(
+                                                   "counts", {}).get("2026-09-01") == 2,
+            "display time zone did not shift an event across midnight")
+    harness.call("settings.set", {"key": "displayTimeZone",
+                                  "value": "America/Los_Angeles"})
+    require(harness.call("stats.dailyCounts", {key: value for key, value in
+                                               params.items() if key != "timeZone"}) ==
+            harness.call("stats.dailyCounts", {**params, "timeZone":
+                                               "America/Los_Angeles"}),
+            "default display zone did not match the configured setting")
+    for invalid in (
+        {}, {"start": "2026-09-40", "end": "2026-09-08"},
+        {"start": "2026-09-08", "end": "2026-09-08"},
+        {"start": "2026-01-01", "end": "2027-01-03"},
+        {**params, "timeZone": "Not/A_Zone"},
+        {**params, "calendarIds": [4]},
+    ):
+        assert_ipc_error(harness.call_error("stats.dailyCounts", invalid),
+                         "invalid_params", f"stats.dailyCounts {invalid}")
+
+
+
+def run_yearly_daily_counts_contract(harness: DaemonHarness) -> None:
+    calendar_id = "contract-yearly-counts"
+    harness.call("calendars.upsert", {"calendar": {
+        "id": calendar_id, "accountId": "local-account",
+        "name": "Yearly count regression", "timeZone": "UTC", "enabled": True,
+    }})
+    # 30 daily series produce 10,980 occurrences in a leap year: this is a
+    # valid statistics result, not a truncated 10,000-occurrence agenda page.
+    for index in range(30):
+        harness.call("events.create", {
+            "clientMutationId": f"contract-yearly-count-{index}",
+            "recurrenceScope": "series",
+            "guestNotificationPolicy": "none",
+            "event": {
+                "calendarId": calendar_id, "summary": f"Daily {index}",
+                "startUtc": "2028-01-01T09:00:00Z",
+                "endUtc": "2028-01-01T10:00:00Z",
+                "startTimeZone": "UTC", "endTimeZone": "UTC",
+                "allDay": False, "timeKind": "zoned",
+                "recurrenceRule": "FREQ=DAILY;COUNT=366",
+            },
+        })
+    first = datetime(2028, 1, 1)
+    expected = {
+        (first + timedelta(days=offset)).date().isoformat(): 30
+        for offset in range(366)
+    }
+    result = harness.call("stats.dailyCounts", {
+        "start": "2028-01-01", "end": "2029-01-01",
+        "calendarIds": [calendar_id], "timeZone": "UTC",
+    })
+    require(result.get("coverage", {}).get("complete") is True
+            and result.get("counts") == expected,
+            "full leap-year daily counts lost, duplicated, or truncated occurrences")
+
+
 def run_contract(harness: DaemonHarness) -> None:
     require(not harness.database_path.exists(), "test did not begin with fresh state")
     harness.start()
@@ -1496,6 +1652,7 @@ def run_contract(harness: DaemonHarness) -> None:
         "events.undo",
         "settings.get",
         "settings.getMany",
+        "stats.dailyCounts",
     }
     methods = info.get("methods")
     require(isinstance(methods, list), "system.info methods is not an array")
@@ -1526,7 +1683,7 @@ def run_contract(harness: DaemonHarness) -> None:
     )
 
     schema, database_revision = read_schema(harness.database_path)
-    require(schema == SCHEMA_VERSION, "database PRAGMA user_version is not schema 2")
+    require(schema == SCHEMA_VERSION, "database PRAGMA user_version is not schema 3")
     require(database_revision == initial_revision, "database/API revision mismatch")
     run_settings_get_many_contract(harness)
     for owned_directory in (
@@ -1752,6 +1909,7 @@ def run_contract(harness: DaemonHarness) -> None:
             },
         },
     )
+    run_daily_counts_contract(harness)
 
     def reject_without_durable_mutation(
         method: str,
@@ -2332,6 +2490,7 @@ def run_contract(harness: DaemonHarness) -> None:
         == invitation_page.get("total", -1),
         "invitations.list bucket totals disagree with the reported total",
     )
+    run_yearly_daily_counts_contract(harness)
 
 
 def run_occurrence_patch_contract(harness: DaemonHarness) -> None:

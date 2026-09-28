@@ -101,7 +101,11 @@ resolution commits one version without exposing a blocking UI workflow.
 ## Synchronization algorithm
 
 1. Pull remote incremental changes for a calendar.
-2. Apply clean remote changes transactionally.
+2. Stage each complete provider response, then commit at most 32 upserts,
+   32 explicit deletions, and 32 pruned identities (plus their associated
+   provider resources) per main-thread transaction. Yield to the event loop
+   between transactions. Only the final transaction advances the calendar
+   sync token/CTag, completed range coverage, or ICS HTTP validators.
 3. Detect remote revisions that conflict with pending local mutations.
 4. Compare the local edit timestamp with the provider update timestamp and
    automatically keep the newer version. Ties and missing timestamps prefer
@@ -109,8 +113,21 @@ resolution commits one version without exposing a blocking UI workflow.
 5. Dispatch ready outbox operations in stable order.
 6. Persist provider acknowledgement and finish the operation in one
    transaction.
-7. Advance the monotonic change revision and broadcast compact entity-change
-   notifications to connected clients.
+7. Advance the monotonic change revision with each committed chunk and broadcast
+   one `events.changed` hint per provider sync, containing the union of affected
+   calendar IDs; failures after a partial commit also send the hint.
+
+The provider retains one active job per account throughout parsing, chunked
+apply, and outbox drain. A second sync of the same calendar cannot interleave;
+range hydration queues until the active job finishes. After a crash or failure,
+previously committed chunks are safe to replay against the unchanged token:
+remote upserts match stable provider identities, and repeated deletions of
+already-absent records are harmless. A local edit or outbox write made between
+chunks commits on the same database thread; the next remote chunk sees its
+dirty state and records a conflict instead of overwriting it. Calendar preference
+changes made during apply are preserved because the final cursor update reloads
+the current calendar row and merges only provider-owned sync metadata. Outbox
+dispatch follows the pull, not an intermediate chunk.
 
 If the process loses connectivity after the remote service accepted a write,
 the next attempt first resolves the remote UID/revision before repeating a
@@ -139,10 +156,23 @@ select network clients or inspect provider-owned metadata.
 
 ## Threading
 
-The daemon's QObject graph and SQLite connection run on the main daemon thread
-initially. Network operations are asynchronous. CPU-heavy recurrence expansion
-may use bounded worker tasks, but database access is returned to its owning
-thread. No nested event loops are used in provider production code.
+The daemon's QObject graph and writable SQLite connection stay on the main
+daemon thread. Network operations are asynchronous. Google JSON-to-domain
+mapping and large CalDAV XML responses run on dedicated single-worker pools;
+workers receive immutable value data and return DTOs to the provider's main
+thread, never accessing the database or main-thread QObjects. Provider commits
+and small CalDAV resource parses yield between bounded turns.
+
+libical 4's global error/timezone state and timezone cache synchronization
+depend on its compile-time `ICAL_SYNC_MODE`. We cannot assume every supported
+distribution builds it with pthread synchronization. Therefore iCalendar
+codec calls and recurrence expansion continue on the daemon thread rather
+than racing an independent libical worker with widget queries, mutation
+serialization, or another provider. Resource-level parsing is bounded by
+yielding between at most eight CalDAV resources; a single unusually large
+VCALENDAR or recurrence query still runs synchronously and requires a separately
+verified thread-safe libical deployment before it can be offloaded. No nested
+event loops are used in provider production code.
 
 ## Theme integration
 

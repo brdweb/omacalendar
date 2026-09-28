@@ -14,6 +14,7 @@
 #include <utility>
 
 #include "core/database.h"
+#include "core/recurrenceexpander.h"
 
 using namespace omacalendar;
 
@@ -123,6 +124,15 @@ void assertOwnerOnlyPermissions(const QString& path) {
   QCOMPARE(exposed, QFileDevice::Permissions{});
 }
 
+QSqlDatabase calendarConnection() {
+  for (const QString& name : QSqlDatabase::connectionNames()) {
+    if (name.startsWith(QStringLiteral("omacalendar-"))) {
+      return QSqlDatabase::database(name, false);
+    }
+  }
+  return {};
+}
+
 }  // namespace
 
 class DatabaseTest final : public QObject {
@@ -139,7 +149,7 @@ class DatabaseTest final : public QObject {
     QVERIFY(db.open(directory.filePath("store.sqlite"), &error));
     QVERIFY(db.isOpen());
     QCOMPARE(error, QString());
-    QCOMPARE(db.schemaVersion(), 2);
+    QCOMPARE(db.schemaVersion(), 3);
     const qint64 initialRevision = db.changeRevision();
     QVERIFY(db.setSetting("timezone", QStringLiteral("UTC"), &error));
     QVERIFY(db.changeRevision() > initialRevision);
@@ -183,7 +193,7 @@ class DatabaseTest final : public QObject {
     Database reopened;
     QVERIFY2(reopened.open(directory.filePath("store.sqlite"), &error),
              qPrintable(error));
-    QCOMPARE(reopened.schemaVersion(), 2);
+    QCOMPARE(reopened.schemaVersion(), 3);
   }
 
   void inclusiveAllDayEndDatesAreNormalizedOnWrite() {
@@ -283,7 +293,7 @@ class DatabaseTest final : public QObject {
     QCOMPARE(sameDay.first().endDate, QDate(2026, 9, 27));
   }
 
-  void schema2OpenIsRepeatableAndClean() {
+  void schema3OpenIsRepeatableAndClean() {
     QTemporaryDir directory;
     QVERIFY(directory.isValid());
     const QString path = directory.filePath(QStringLiteral("store.sqlite"));
@@ -291,12 +301,12 @@ class DatabaseTest final : public QObject {
     Database db;
     QString error;
     QVERIFY2(db.open(path, &error), qPrintable(error));
-    QCOMPARE(db.schemaVersion(), 2);
+    QCOMPARE(db.schemaVersion(), 3);
     const QList<Account> firstAccounts = db.accounts(&error);
     QCOMPARE(firstAccounts.size(), 1);
     QCOMPARE(firstAccounts.first().id, QStringLiteral("local-account"));
 
-    // Reopening the same database object must remain a clean schema-2 path.
+    // Reopening the same database object must remain a clean schema-3 path.
     QVERIFY2(db.open(path, &error), qPrintable(error));
     const QList<Account> secondAccounts = db.accounts(&error);
     QCOMPARE(secondAccounts.size(), 1);
@@ -305,7 +315,7 @@ class DatabaseTest final : public QObject {
     // Simulate daemon restart with a fresh process handle.
     Database reopened;
     QVERIFY2(reopened.open(path, &error), qPrintable(error));
-    QCOMPARE(reopened.schemaVersion(), 2);
+    QCOMPARE(reopened.schemaVersion(), 3);
     const QList<Account> thirdAccounts = reopened.accounts(&error);
     QCOMPARE(thirdAccounts.size(), 1);
     QCOMPARE(thirdAccounts.first().provider, ProviderKind::Local);
@@ -316,7 +326,7 @@ class DatabaseTest final : public QObject {
              0);
   }
 
-  void schema2RepairsDuplicateUnresolvedConflicts() {
+  void schema3RepairsDuplicateUnresolvedConflicts() {
     QTemporaryDir directory;
     QVERIFY(directory.isValid());
     const QString path = directory.filePath(QStringLiteral("store.sqlite"));
@@ -439,7 +449,7 @@ class DatabaseTest final : public QObject {
     }
     QSqlDatabase::removeDatabase(verifyConnectionName);
 
-    // The repair is safe to run on every schema-2 startup.
+    // The repair is safe to run on every schema-3 startup.
     QVERIFY2(db.open(path, &error), qPrintable(error));
     QCOMPARE(db.conflicts(true, &error).size(), 1);
     QCOMPARE(db.conflicts(false, &error).size(), 3);
@@ -633,7 +643,7 @@ class DatabaseTest final : public QObject {
     Database db;
     QString error;
     QVERIFY2(db.open(path, &error), qPrintable(error));
-    QCOMPARE(db.schemaVersion(), 2);
+    QCOMPARE(db.schemaVersion(), 3);
     const QList<Account> accounts = db.accounts(&error);
     QCOMPARE(accounts.size(), 1);
     QCOMPARE(accounts.first().provider, ProviderKind::Local);
@@ -763,7 +773,7 @@ class DatabaseTest final : public QObject {
     QVERIFY(QDir().rmdir(stagingPath));
     error.clear();
     QVERIFY2(db.open(path, &error), qPrintable(error));
-    QCOMPARE(db.schemaVersion(), 2);
+    QCOMPARE(db.schemaVersion(), 3);
     QCOMPARE(
         QDir(directory.path())
             .entryList({QStringLiteral("legacy.sqlite.pre-v2-*.backup")}, QDir::Files)
@@ -789,7 +799,7 @@ class DatabaseTest final : public QObject {
             "CREATE TABLE legacy_events(id TEXT PRIMARY KEY, title TEXT)")));
         QVERIFY(query.exec(
             QStringLiteral("INSERT INTO legacy_events VALUES('one','Keep me')")));
-        QVERIFY(query.exec(QStringLiteral("PRAGMA user_version = 3")));
+        QVERIFY(query.exec(QStringLiteral("PRAGMA user_version = 4")));
       }
       future.close();
     }
@@ -815,7 +825,7 @@ class DatabaseTest final : public QObject {
       QSqlQuery verifyQuery(verify);
       QVERIFY(verifyQuery.exec(QStringLiteral("PRAGMA user_version")));
       QVERIFY(verifyQuery.next());
-      QCOMPARE(verifyQuery.value(0).toInt(), 3);
+      QCOMPARE(verifyQuery.value(0).toInt(), 4);
       QVERIFY(verifyQuery.exec(
           QStringLiteral("SELECT title FROM legacy_events WHERE id='one'")));
       QVERIFY(verifyQuery.next());
@@ -2938,6 +2948,389 @@ class DatabaseTest final : public QObject {
     QVERIFY(db.eventByRemoteId(calendar.id, stale.remoteId, &error).id.isEmpty());
     QVERIFY(!db.eventByRemoteId(calendar.id, added.remoteId, &error).id.isEmpty());
     QVERIFY(db.changeRevision() > previousRevision);
+  }
+
+  void finishedUntilSeriesStayOutsideRange() {
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    Database db;
+    QString error;
+    QVERIFY2(db.open(directory.filePath(QStringLiteral("store.sqlite")), &error),
+             qPrintable(error));
+    Event master = makeRemoteEvent(QStringLiteral("local-default"),
+                                   QStringLiteral("old-until"), 0);
+    master.recurrenceRule = QStringLiteral("RRULE:FREQ=DAILY;UNTIL=20260203T080000Z");
+    QVERIFY2(db.applyRemoteEvent(master, &error), qPrintable(error));
+    QSqlQuery stored(calendarConnection());
+    QVERIFY(stored.exec(
+        QStringLiteral("SELECT series_until_utc FROM events WHERE id='old-until'")));
+    QVERIFY(stored.next());
+    QVERIFY(!stored.value(0).isNull());
+    QVERIFY(stored.value(0).toString() < QStringLiteral("2026-02-07"));
+
+    const QDateTime after(QDate(2026, 2, 8), QTime(0, 0), QTimeZone::UTC);
+    QVERIFY(db.eventsBetween(after, after.addDays(1)).isEmpty());
+    const QDateTime last(QDate(2026, 2, 3), QTime(8, 30), QTimeZone::UTC);
+    const QList<Event> overlap = db.eventsBetween(last, last.addSecs(1));
+    QCOMPARE(overlap.size(), 1);
+    QCOMPARE(overlap.first().id, master.id);
+  }
+
+  void countSeriesOverlapAndCacheInvalidation() {
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    Database db;
+    QString error;
+    QVERIFY2(db.open(directory.filePath(QStringLiteral("store.sqlite")), &error),
+             qPrintable(error));
+    Event master = makeRemoteEvent(QStringLiteral("local-default"),
+                                   QStringLiteral("count-series"), 0);
+    master.endUtc = master.startUtc.addSecs(4 * 3600);
+    master.recurrenceRule = QStringLiteral("FREQ=DAILY;COUNT=3");
+    QVERIFY2(db.applyRemoteEvent(master, &error), qPrintable(error));
+    const QDateTime last(QDate(2026, 2, 3), QTime(11, 59), QTimeZone::UTC);
+    QCOMPARE(db.eventsBetween(last, last.addSecs(60)).size(), 1);
+    const QDateTime boundary(QDate(2026, 2, 3), QTime(12, 0), QTimeZone::UTC);
+    QVERIFY(db.eventsBetween(boundary, boundary.addSecs(1)).isEmpty());
+    const QDateTime newDay(QDate(2026, 2, 4), QTime(8, 0), QTimeZone::UTC);
+    QVERIFY(db.eventsBetween(newDay, newDay.addSecs(3600)).isEmpty());
+
+    master.recurrenceRule = QStringLiteral("FREQ=DAILY;COUNT=4");
+    QVERIFY2(db.applyRemoteEvent(master, &error), qPrintable(error));
+    QCOMPARE(db.eventsBetween(newDay, newDay.addSecs(3600)).size(), 1);
+
+    Event cancelled = master;
+    cancelled.id = QStringLiteral("count-cancellation");
+    cancelled.remoteId = QStringLiteral("remote-count-cancellation");
+    cancelled.recurrenceRule.clear();
+    cancelled.recurrenceId = QStringLiteral("20260204T080000Z");
+    cancelled.startUtc = newDay;
+    cancelled.endUtc = newDay.addSecs(4 * 3600);
+    cancelled.status = QStringLiteral("cancelled");
+    cancelled.deleted = true;
+    QVERIFY2(db.applyRemoteEvent(cancelled, &error), qPrintable(error));
+    QVERIFY(db.eventsBetween(newDay, newDay.addSecs(3600)).isEmpty());
+  }
+
+  void zeroDurationCountSeriesAtFinalBoundary() {
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    Database db;
+    QString error;
+    QVERIFY2(db.open(directory.filePath(QStringLiteral("store.sqlite")), &error),
+             qPrintable(error));
+
+    Event timed = makeRemoteEvent(QStringLiteral("local-default"),
+                                  QStringLiteral("instant-series"), 0);
+    timed.endUtc = timed.startUtc;
+    timed.recurrenceRule = QStringLiteral("FREQ=DAILY;COUNT=3");
+    QVERIFY2(db.applyRemoteEvent(timed, &error), qPrintable(error));
+    const QDateTime last = timed.startUtc.addDays(2);
+    const QList<Event> atLast = db.eventsBetween(last, last.addSecs(1), {}, &error);
+    QVERIFY2(error.isEmpty(), qPrintable(error));
+    QCOMPARE(atLast.size(), 1);
+    QCOMPARE(atLast.first().uid, timed.uid);
+    QVERIFY(db.eventsBetween(last.addSecs(1), last.addSecs(2)).isEmpty());
+
+    Event floating = timed;
+    floating.id = QStringLiteral("floating-instant-series");
+    floating.remoteId = QStringLiteral("remote-floating-instant-series");
+    floating.uid = floating.id;
+    floating.timeKind = TimeKind::Floating;
+    QVERIFY2(db.applyRemoteEvent(floating, &error), qPrintable(error));
+    const QList<Event> floatingAtLast =
+        db.eventsBetween(last, last.addSecs(1), {}, &error);
+    QVERIFY2(error.isEmpty(), qPrintable(error));
+    QCOMPARE(floatingAtLast.size(), 2);
+    QVERIFY(std::any_of(
+        floatingAtLast.cbegin(), floatingAtLast.cend(),
+        [&floating](const Event& event) { return event.uid == floating.uid; }));
+
+    Event allDay = makeRemoteEvent(QStringLiteral("local-default"),
+                                   QStringLiteral("all-day-final-date"), 0);
+    allDay.allDay = true;
+    allDay.timeKind = TimeKind::AllDay;
+    allDay.startUtc = {};
+    allDay.endUtc = {};
+    allDay.startDate = QDate(2026, 2, 1);
+    allDay.endDate = QDate(2026, 2, 2);
+    allDay.recurrenceRule = QStringLiteral("FREQ=DAILY;COUNT=3");
+    QVERIFY2(db.applyRemoteEvent(allDay, &error), qPrintable(error));
+    const QDateTime finalDate(QDate(2026, 2, 3), QTime(0, 0), QTimeZone::UTC);
+    const QList<Event> onFinalDate =
+        db.eventsBetween(finalDate, finalDate.addDays(1), {}, &error);
+    QVERIFY2(error.isEmpty(), qPrintable(error));
+    QVERIFY(
+        std::any_of(onFinalDate.cbegin(), onFinalDate.cend(),
+                    [&allDay](const Event& event) { return event.uid == allDay.uid; }));
+    QVERIFY(db.eventsBetween(finalDate.addDays(1), finalDate.addDays(2)).isEmpty());
+  }
+
+  void mixedSeriesAndExceptionsMatchUnboundedExpansion() {
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    Database db;
+    QString error;
+    QVERIFY2(db.open(directory.filePath(QStringLiteral("store.sqlite")), &error),
+             qPrintable(error));
+    const auto at = [](int day, int hour = 8) {
+      return QDateTime(QDate(2026, 8, day), QTime(hour, 0), QTimeZone::UTC);
+    };
+    Event finished =
+        makeRemoteEvent(QStringLiteral("local-default"), QStringLiteral("finished"), 0);
+    finished.startUtc = at(1);
+    finished.endUtc = at(1, 9);
+    finished.recurrenceRule = QStringLiteral("FREQ=DAILY;COUNT=3");
+    QVERIFY2(db.applyRemoteEvent(finished, &error), qPrintable(error));
+
+    Event moved = finished;
+    moved.id = QStringLiteral("moved-into-range");
+    moved.remoteId = QStringLiteral("remote-moved-into-range");
+    moved.recurrenceRule.clear();
+    moved.recurrenceId = QStringLiteral("20260802T080000Z");
+    moved.startUtc = at(10);
+    moved.endUtc = at(10, 9);
+    QVERIFY2(db.applyRemoteEvent(moved, &error), qPrintable(error));
+    Event range = finished;
+    range.id = QStringLiteral("shifted-range");
+    range.remoteId = QStringLiteral("remote-shifted-range");
+    range.recurrenceRule.clear();
+    range.recurrenceId = QStringLiteral("RANGE=THISANDFUTURE:20260803T080000Z");
+    range.startUtc = at(10);
+    range.endUtc = at(10, 9);
+    QVERIFY2(db.applyRemoteEvent(range, &error), qPrintable(error));
+
+    Event infinite =
+        makeRemoteEvent(QStringLiteral("local-default"), QStringLiteral("infinite"), 0);
+    infinite.startUtc = at(1);
+    infinite.endUtc = at(1, 9);
+    infinite.recurrenceRule = QStringLiteral("FREQ=DAILY");
+    QVERIFY2(db.applyRemoteEvent(infinite, &error), qPrintable(error));
+    Event cancelled = infinite;
+    cancelled.id = QStringLiteral("cancelled-slot");
+    cancelled.remoteId = QStringLiteral("remote-cancelled-slot");
+    cancelled.recurrenceRule.clear();
+    cancelled.recurrenceId = QStringLiteral("20260811T080000Z");
+    cancelled.startUtc = at(11);
+    cancelled.endUtc = at(11, 9);
+    cancelled.deleted = true;
+    cancelled.status = QStringLiteral("cancelled");
+    QVERIFY2(db.applyRemoteEvent(cancelled, &error), qPrintable(error));
+
+    Event allDay = makeRemoteEvent(QStringLiteral("local-default"),
+                                   QStringLiteral("all-day-series"), 0);
+    allDay.allDay = true;
+    allDay.timeKind = TimeKind::AllDay;
+    allDay.startUtc = {};
+    allDay.endUtc = {};
+    allDay.startDate = QDate(2026, 8, 9);
+    allDay.endDate = QDate(2026, 8, 11);
+    allDay.recurrenceRule = QStringLiteral("FREQ=DAILY;COUNT=2");
+    QVERIFY2(db.applyRemoteEvent(allDay, &error), qPrintable(error));
+
+    QList<Event> unbounded;
+    for (const QString& uid : {finished.uid, infinite.uid, allDay.uid}) {
+      unbounded.append(db.eventsByUid(QStringLiteral("local-default"), uid, &error));
+    }
+    const QList<QPair<QDateTime, QDateTime>> windows{
+        {at(10, 0), at(12, 0)},
+        {at(3, 8), at(3, 9)},
+        {at(15, 0), at(16, 0)},
+    };
+    for (const auto& [start, end] : windows) {
+      const auto reference = RecurrenceExpander::expand(unbounded, start, end);
+      QVERIFY(!reference.truncated);
+      const QList<Event> actual = db.eventsBetween(start, end);
+      QCOMPARE(actual.size(), reference.occurrences.size());
+      for (qsizetype index = 0; index < actual.size(); ++index) {
+        QCOMPARE(actual.at(index).id, reference.occurrences.at(index).id);
+        QCOMPARE(actual.at(index).startUtc, reference.occurrences.at(index).startUtc);
+        QCOMPARE(actual.at(index).startDate, reference.occurrences.at(index).startDate);
+        QCOMPARE(actual.at(index).recurrenceId,
+                 reference.occurrences.at(index).recurrenceId);
+      }
+    }
+    const auto movedWindow = db.eventsBetween(at(10, 0), at(11, 0));
+    QVERIFY(std::any_of(movedWindow.cbegin(), movedWindow.cend(),
+                        [&moved](const Event& event) { return event.id == moved.id; }));
+    QVERIFY(
+        std::none_of(movedWindow.cbegin(), movedWindow.cend(),
+                     [&range](const Event& event) { return event.id == range.id; }));
+    QSqlQuery bound(calendarConnection());
+    QVERIFY(bound.exec(QStringLiteral(
+        "SELECT series_until_utc,series_until_date FROM events WHERE id='infinite'")));
+    QVERIFY(bound.next());
+    QVERIFY(bound.value(0).isNull());
+    QVERIFY(bound.value(1).isNull());
+  }
+
+  void localSeriesEditsRefreshFiniteBounds() {
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    Database db;
+    QString error;
+    QVERIFY2(db.open(directory.filePath(QStringLiteral("store.sqlite")), &error),
+             qPrintable(error));
+    Event master = makeLocalEvent(QStringLiteral("local-default"),
+                                  QStringLiteral("edited-series"));
+    master.recurrenceRule = QStringLiteral("FREQ=DAILY;COUNT=2");
+    QVERIFY2(db.saveLocalEvent(&master, OutboxOperation::Create, &error),
+             qPrintable(error));
+    const QDateTime oldSlot(QDate(2026, 3, 2), QTime(10, 0), QTimeZone::UTC);
+    QCOMPARE(db.eventsBetween(oldSlot, oldSlot.addSecs(3600)).size(), 1);
+
+    master.startUtc = master.startUtc.addDays(7);
+    master.endUtc = master.endUtc.addDays(7);
+    master.recurrenceRule = QStringLiteral("FREQ=DAILY;COUNT=3");
+    QVERIFY2(db.saveLocalEvent(&master, OutboxOperation::Update, &error),
+             qPrintable(error));
+    QVERIFY(db.eventsBetween(oldSlot, oldSlot.addSecs(3600)).isEmpty());
+    const QDateTime last(QDate(2026, 3, 10), QTime(11, 0), QTimeZone::UTC);
+    QCOMPARE(db.eventsBetween(last, last.addSecs(1)).size(), 1);
+    QSqlQuery bounds(calendarConnection());
+    bounds.prepare(QStringLiteral("SELECT series_until_utc FROM events WHERE id=?"));
+    bounds.addBindValue(master.id);
+    QVERIFY(bounds.exec());
+    QVERIFY(bounds.next());
+    QCOMPARE(bounds.value(0).toString(), QStringLiteral("2026-03-10T12:00:00.000Z"));
+  }
+
+  void floatingSeriesUseDateBoundsAcrossLocalDays() {
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    Database db;
+    QString error;
+    QVERIFY2(db.open(directory.filePath(QStringLiteral("store.sqlite")), &error),
+             qPrintable(error));
+    Event floating = makeRemoteEvent(QStringLiteral("local-default"),
+                                     QStringLiteral("floating-date-bound"), 0);
+    const QDateTime first(QDate(2026, 3, 7), QTime(9, 0), QTimeZone::LocalTime);
+    floating.startUtc = first.toUTC();
+    floating.endUtc = first.addSecs(3600).toUTC();
+    floating.startDate = floating.startUtc.date();
+    floating.endDate = floating.endUtc.date();
+    floating.startTimeZone.clear();
+    floating.endTimeZone.clear();
+    floating.timeKind = TimeKind::Floating;
+    floating.recurrenceRule = QStringLiteral("FREQ=DAILY;COUNT=2");
+    QVERIFY2(db.applyRemoteEvent(floating, &error), qPrintable(error));
+    QSqlQuery bounds(calendarConnection());
+    QVERIFY(bounds.exec(
+        QStringLiteral("SELECT series_until_utc,series_until_date FROM events "
+                       "WHERE id='floating-date-bound'")));
+    QVERIFY(bounds.next());
+    QVERIFY(bounds.value(0).isNull());
+    QVERIFY(!bounds.value(1).isNull());
+    const QDateTime second(QDate(2026, 3, 8), QTime(9, 30), QTimeZone::LocalTime);
+    QCOMPARE(db.eventsBetween(second.toUTC(), second.toUTC().addSecs(1)).size(), 1);
+    const QDateTime later(QDate(2026, 3, 13), QTime(9, 0), QTimeZone::LocalTime);
+    QVERIFY(db.eventsBetween(later.toUTC(), later.toUTC().addSecs(1)).isEmpty());
+  }
+
+  void schemaTwoUpgradeBackfillsRecurringBounds() {
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const QString path = directory.filePath(QStringLiteral("schema-two.sqlite"));
+    QString error;
+    Database db;
+    QVERIFY2(db.open(path, &error), qPrintable(error));
+    Event count = makeRemoteEvent(QStringLiteral("local-default"),
+                                  QStringLiteral("upgrade-count"), 0);
+    count.recurrenceRule = QStringLiteral("FREQ=DAILY;COUNT=3");
+    QVERIFY2(db.applyRemoteEvent(count, &error), qPrintable(error));
+    Event moved = count;
+    moved.id = QStringLiteral("upgrade-exception");
+    moved.remoteId = QStringLiteral("remote-upgrade-exception");
+    moved.recurrenceRule.clear();
+    moved.recurrenceId = QStringLiteral("20260202T080000Z");
+    moved.startUtc = moved.startUtc.addDays(4);
+    moved.endUtc = moved.endUtc.addDays(4);
+    QVERIFY2(db.applyRemoteEvent(moved, &error), qPrintable(error));
+    Event until = makeRemoteEvent(QStringLiteral("local-default"),
+                                  QStringLiteral("upgrade-until"), 0);
+    until.recurrenceRule = QStringLiteral("FREQ=DAILY;UNTIL=20260202T080000Z");
+    QVERIFY2(db.applyRemoteEvent(until, &error), qPrintable(error));
+    Event allDay = makeRemoteEvent(QStringLiteral("local-default"),
+                                   QStringLiteral("upgrade-date"), 0);
+    allDay.allDay = true;
+    allDay.timeKind = TimeKind::AllDay;
+    allDay.startUtc = {};
+    allDay.endUtc = {};
+    allDay.startDate = QDate(2026, 2, 1);
+    allDay.endDate = QDate(2026, 2, 2);
+    allDay.recurrenceRule = QStringLiteral("FREQ=DAILY;COUNT=2");
+    QVERIFY2(db.applyRemoteEvent(allDay, &error), qPrintable(error));
+    db.close();
+
+    // A schema-2 artifact has neither the storage columns nor their indexes.
+    const QString connectionName =
+        QStringLiteral("downgrade-%1")
+            .arg(QUuid::createUuid().toString(QUuid::WithoutBraces));
+    {
+      QSqlDatabase raw =
+          QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), connectionName);
+      raw.setDatabaseName(path);
+      QVERIFY(raw.open());
+      {
+        QSqlQuery sql(raw);
+        for (const QString& name :
+             {QStringLiteral("events_series_utc_bound_index"),
+              QStringLiteral("events_series_date_bound_index"),
+              QStringLiteral("events_series_floating_bound_index"),
+              QStringLiteral("events_exception_utc_index"),
+              QStringLiteral("events_exception_date_index")}) {
+          QVERIFY2(sql.exec(QStringLiteral("DROP INDEX %1").arg(name)),
+                   qPrintable(sql.lastError().text()));
+        }
+        for (const QString& name :
+             {QStringLiteral("series_until_utc"), QStringLiteral("series_until_date"),
+              QStringLiteral("original_start_utc"),
+              QStringLiteral("original_start_date")}) {
+          QVERIFY2(
+              sql.exec(QStringLiteral("ALTER TABLE events DROP COLUMN %1").arg(name)),
+              qPrintable(sql.lastError().text()));
+        }
+        QVERIFY(sql.exec(QStringLiteral("PRAGMA user_version = 2")));
+      }
+      raw.close();
+    }
+    QSqlDatabase::removeDatabase(connectionName);
+
+    Database upgraded;
+    QVERIFY2(upgraded.open(path, &error), qPrintable(error));
+    QCOMPARE(upgraded.schemaVersion(), 3);
+    QHash<QString, QPair<QVariant, QVariant>> values;
+    {
+      QSqlQuery bounds(calendarConnection());
+      QVERIFY(bounds.exec(
+          QStringLiteral("SELECT id,series_until_utc,series_until_date FROM events "
+                         "WHERE id LIKE 'upgrade-%' ORDER BY id")));
+      while (bounds.next()) {
+        values.insert(bounds.value(0).toString(), {bounds.value(1), bounds.value(2)});
+      }
+    }
+    QCOMPARE(values.size(), 4);
+    QCOMPARE(values.value(count.id).first.toString(),
+             QStringLiteral("2026-02-03T09:00:00.000Z"));
+    QVERIFY(!values.value(until.id).first.isNull());
+    QCOMPARE(values.value(allDay.id).second.toString(), QStringLiteral("2026-02-03"));
+    QVERIFY(values.value(allDay.id).first.isNull());
+    {
+      QSqlQuery original(calendarConnection());
+      QVERIFY(original.exec(QStringLiteral(
+          "SELECT original_start_utc FROM events WHERE id='upgrade-exception'")));
+      QVERIFY(original.next());
+      QCOMPARE(original.value(0).toString(),
+               QStringLiteral("2026-02-02T08:00:00.000Z"));
+    }
+    const QDateTime last(QDate(2026, 2, 3), QTime(8, 30), QTimeZone::UTC);
+    const auto occurrences = upgraded.eventsBetween(last, last.addSecs(1));
+    QVERIFY(std::any_of(occurrences.cbegin(), occurrences.cend(),
+                        [&count](const Event& event) { return event.id == count.id; }));
+    upgraded.close();
+    QVERIFY2(upgraded.open(path, &error), qPrintable(error));
+    QCOMPARE(upgraded.schemaVersion(), 3);
+    QCOMPARE(upgraded.eventsBetween(last, last.addSecs(1)).size(), occurrences.size());
   }
 
   void timedAllDayAndRangeInstancesPersist() {

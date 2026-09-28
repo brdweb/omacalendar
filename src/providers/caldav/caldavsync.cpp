@@ -1,10 +1,13 @@
 #include "providers/caldav/caldavsync.h"
 
 #include <QCryptographicHash>
+#include <QFutureWatcher>
 #include <QJsonArray>
+#include <QPointer>
 #include <QSet>
 #include <QTimeZone>
 #include <QUrl>
+#include <QtConcurrent>
 #include <algorithm>
 #include <limits>
 #include <memory>
@@ -12,11 +15,19 @@
 #include "core/domain.h"
 #include "providers/caldav/caldavxml.h"
 #include "providers/caldav/icalcodec.h"
+#include "sync/chunkedsyncapply.h"
 
 namespace omacalendar::caldav {
 namespace {
 
 constexpr auto kPasswordKind = "password";
+
+struct ParsedCalendarResponse final {
+  QList<CalDavResource> resources;
+  QString syncToken;
+  QString errorCode;
+  QString errorMessage;
+};
 
 bool isSyncBudgetError(const QString& errorCode) {
   return errorCode == QStringLiteral("sync_resource_limit") ||
@@ -273,6 +284,20 @@ struct CalDavSync::SyncJob final {
   bool futureProbeInProgress = false;
   bool cancelled = false;
   ResourceBudget resourceBudget;
+  QPointer<ChunkedSyncApply> apply;
+};
+
+struct CalDavSync::ParsedResponse final {
+  QString accountId;
+  QList<CalDavResource> resources;
+  qsizetype index = 0;
+  QString responseSyncToken;
+  bool fullSync = false;
+  QStringList deletedRemoteIds;
+  QList<Event> events;
+  QList<ProviderResource> providerResources;
+  QSet<QString> retainedRemoteIds;
+  bool observedThisAndFuture = false;
 };
 
 bool CalDavSync::ResourceBudget::deduplicateHrefs(const QUrl& calendarUrl,
@@ -381,6 +406,7 @@ CalDavSync::CalDavSync(Database* database, QObject* parent)
     : Provider(QStringLiteral("caldav"), ProviderKind::CalDav, parent),
       m_database(database),
       m_client(this) {
+  m_parsePool.setMaxThreadCount(1);
   m_pollTimer.setInterval(5 * 60 * 1000);
   connect(&m_pollTimer, &QTimer::timeout, this, &CalDavSync::syncAll);
   m_pollTimer.start();
@@ -713,6 +739,11 @@ bool CalDavSync::disconnectAccount(const QString& accountId,
     // the small job object alive until that callback returns, but prevent it
     // from touching an account that is being removed.
     job->cancelled = true;
+    if (job->apply) {
+      // No network callback remains once the chunked apply has started.
+      // cancel() suppresses its completion callback, so retire the job here.
+      finish(job);
+    }
   }
   m_client.forgetCredentials(accountId);
   m_loadedCredentials.remove(accountId);
@@ -1579,14 +1610,47 @@ void CalDavSync::applyCalendarResponse(SyncJob* job, const DavResponse& response
     finish(job, response.errorCode, response.errorMessage);
     return;
   }
-  const CalDavMultiStatusResult parsed = CalDavXml::parseMultiStatus(response.body);
-  if (!parsed.ok()) {
-    finish(job, parsed.error.code, parsed.error.message);
-    return;
-  }
+  const QString accountId = job->accountId;
+  auto* watcher = new QFutureWatcher<ParsedCalendarResponse>(this);
+  connect(watcher, &QFutureWatcherBase::finished, this,
+          [this, job, accountId, fullSync, watcher]() {
+            ParsedCalendarResponse parsed = watcher->future().takeResult();
+            watcher->deleteLater();
+            if (m_jobs.value(accountId) != job || m_shuttingDown) {
+              return;
+            }
+            if (job->cancelled) {
+              finish(job);
+              return;
+            }
+            if (!parsed.errorCode.isEmpty()) {
+              finish(job, parsed.errorCode, parsed.errorMessage);
+              return;
+            }
+            consumeCalendarResponse(job, std::move(parsed.resources), parsed.syncToken,
+                                    fullSync);
+          });
+  watcher->setFuture(QtConcurrent::run(&m_parsePool, [body = response.body]() {
+    ParsedCalendarResponse result;
+    const CalDavMultiStatusResult parsed = CalDavXml::parseMultiStatus(body);
+    if (!parsed.ok()) {
+      result.errorCode = parsed.error.code;
+      result.errorMessage = parsed.error.message;
+    } else {
+      result.resources = CalDavXml::resources(parsed);
+      result.syncToken = parsed.syncToken;
+    }
+    return result;
+  }));
+}
+
+void CalDavSync::consumeCalendarResponse(SyncJob* job, QList<CalDavResource> resources,
+                                         const QString& responseSyncToken,
+                                         const bool fullSync) {
+  QString budgetCode;
+  QString budgetMessage;
   const QUrl calendarUrl =
       CalDavClient::canonicalUrl(job->homeUrl, QUrl(job->currentCalendar.href));
-  QList<CalDavResource> resources = CalDavXml::resources(parsed);
   QStringList missingHrefs;
   for (const CalDavResource& resource : resources) {
     if (!job->resourceBudget.reserveResource(
@@ -1602,8 +1666,7 @@ void CalDavSync::applyCalendarResponse(SyncJob* job, const DavResponse& response
   if (!missingHrefs.isEmpty()) {
     fetchResourceBatches(
         job, calendarUrl, missingHrefs,
-        [this, job, resources = std::move(resources),
-         responseSyncToken = parsed.syncToken, fullSync,
+        [this, job, resources = std::move(resources), responseSyncToken, fullSync,
          calendarUrl](QList<CalDavResource> fetched, const QString& errorCode,
                       const QString& errorMessage) mutable {
           if (job->cancelled) {
@@ -1643,7 +1706,7 @@ void CalDavSync::applyCalendarResponse(SyncJob* job, const DavResponse& response
         });
     return;
   }
-  applyCalendarResources(job, resources, parsed.syncToken, fullSync);
+  applyCalendarResources(job, resources, responseSyncToken, fullSync);
 }
 
 void CalDavSync::applyCalendarResources(SyncJob* job,
@@ -1654,34 +1717,52 @@ void CalDavSync::applyCalendarResources(SyncJob* job,
     finish(job);
     return;
   }
+  auto state = std::make_shared<ParsedResponse>();
+  state->accountId = job->accountId;
+  state->resources = resources;
+  state->responseSyncToken = responseSyncToken;
+  state->fullSync = fullSync;
+  parseNextResource(job, std::move(state));
+}
+
+void CalDavSync::parseNextResource(SyncJob* job,
+                                   std::shared_ptr<ParsedResponse> state) {
+  if (m_jobs.value(state->accountId) != job || m_shuttingDown) {
+    return;
+  }
+  if (job->cancelled) {
+    finish(job);
+    return;
+  }
   const QUrl calendarUrl =
       CalDavClient::canonicalUrl(job->homeUrl, QUrl(job->currentCalendar.href));
-  QStringList retainedRemoteIds;
-  QStringList deletedRemoteIds;
-  QList<Event> stagedEvents;
-  QList<ProviderResource> stagedResources;
-  bool observedThisAndFuture = false;
-  for (const CalDavResource& resource : resources) {
+  const qsizetype end = qMin(state->index + 8, state->resources.size());
+  while (state->index < end) {
+    const CalDavResource& resource = state->resources.at(state->index++);
     const QString resourceId =
         CalDavClient::canonicalResourceId(calendarUrl, resource.href);
     if (resource.deleted()) {
-      deletedRemoteIds.append(resourceId);
+      state->deletedRemoteIds.append(resourceId);
       continue;
     }
     if (resource.calendarData.isEmpty()) {
       continue;
     }
-    const ICalendarParseResult decoded =
+    // libical's timezone/global caches depend on its build's synchronization
+    // mode. Keep its entry points on the daemon thread; only process a small
+    // number of independent resources before yielding to IPC.
+    ICalendarParseResult decoded =
         ICalendarCodec::parse(resource.calendarData.toUtf8());
     if (!decoded.ok()) {
       finish(job, decoded.error.code, decoded.error.message);
       return;
     }
-    stagedResources.append({job->currentCalendar.id, resourceId, resource.etag,
-                            QStringLiteral("text/calendar"), resource.calendarData});
-    for (Event event : decoded.events) {
-      observedThisAndFuture =
-          observedThisAndFuture ||
+    state->providerResources.append({job->currentCalendar.id, resourceId, resource.etag,
+                                     QStringLiteral("text/calendar"),
+                                     resource.calendarData});
+    for (Event& event : decoded.events) {
+      state->observedThisAndFuture =
+          state->observedThisAndFuture ||
           event.recurrenceId.contains(QStringLiteral("RANGE=THISANDFUTURE"),
                                       Qt::CaseInsensitive);
       event.calendarId = job->currentCalendar.id;
@@ -1689,86 +1770,104 @@ void CalDavSync::applyCalendarResources(SyncJob* job,
       if (!event.recurrenceId.isEmpty()) {
         event.remoteId += QLatin1Char('#') + event.recurrenceId;
       }
-      retainedRemoteIds.append(event.remoteId);
+      state->retainedRemoteIds.insert(event.remoteId);
       event.etag = resource.etag;
       markSchedulingIdentity(&event, job->schedulingIdentities);
-      stagedEvents.append(std::move(event));
+      state->events.append(std::move(event));
     }
   }
-  retainedRemoteIds.removeDuplicates();
-  QString error;
-  QStringList prunedRemoteIds;
-  if (fullSync) {
+  if (state->index < state->resources.size()) {
+    QTimer::singleShot(1, this, [this, job, state = std::move(state)]() mutable {
+      parseNextResource(job, std::move(state));
+    });
+    return;
+  }
+
+  ChunkedSyncApply::Request batch;
+  batch.calendar = job->currentCalendar;
+  batch.events = std::move(state->events);
+  batch.deletedRemoteIds = std::move(state->deletedRemoteIds);
+  batch.resources = std::move(state->providerResources);
+  if (state->fullSync) {
+    QString error;
     const QList<Event> coveredEvents = m_database->eventsBetween(
         job->queryStartUtc, job->queryEndUtc, {job->currentCalendar.id}, &error);
     if (!error.isEmpty()) {
       finish(job, QStringLiteral("database_error"), error);
       return;
     }
+    QSet<QString> pruned;
     for (const Event& cached : coveredEvents) {
-      if (cached.remoteId.isEmpty() || retainedRemoteIds.contains(cached.remoteId)) {
-        continue;
+      if (!cached.remoteId.isEmpty() &&
+          !state->retainedRemoteIds.contains(cached.remoteId)) {
+        pruned.insert(cached.remoteId);
       }
-      prunedRemoteIds.append(cached.remoteId);
     }
-    prunedRemoteIds.removeDuplicates();
+    batch.prunedRemoteIds = QStringList(pruned.cbegin(), pruned.cend());
+    batch.kind = ChunkedSyncApply::Request::Kind::Range;
+    batch.coverageStartUtc = job->queryStartUtc;
+    batch.coverageEndUtc = job->queryEndUtc;
+    batch.replaceCoverage = job->replaceCoverage;
   }
   const QString newSyncToken =
-      !responseSyncToken.isEmpty() ? responseSyncToken
-      : fullSync
+      !state->responseSyncToken.isEmpty() ? state->responseSyncToken
+      : state->fullSync
           ? job->currentCalendar.capabilities.value(QStringLiteral("serverSyncToken"))
                 .toString()
           : QString();
-  // A calendar-query only proves the requested time range was observed.  Do not
-  // advance the collection-wide incremental cursor for a historical hydration:
-  // changes elsewhere in the calendar between the old and returned tokens were
-  // not part of this response and still need the normal sync-collection pass.
+  // A bounded hydration cannot advance the collection cursor or CTag:
+  // changes outside its range still require a collection-wide pass.
   if (!job->hydrationSync && !newSyncToken.isEmpty()) {
-    job->currentCalendar.syncToken = newSyncToken;
+    batch.calendar.syncToken = newSyncToken;
   }
-  job->currentCalendar.lastSyncAt = QDateTime::currentDateTimeUtc();
+  batch.calendar.lastSyncAt = QDateTime::currentDateTimeUtc();
   const QString remoteCtag =
-      job->currentCalendar.capabilities.value(QStringLiteral("ctag")).toString();
-  // Likewise, a bounded hydration cannot establish that the cached collection
-  // matches the current CTag outside the requested range.
+      batch.calendar.capabilities.value(QStringLiteral("ctag")).toString();
   if (!job->hydrationSync && !remoteCtag.isEmpty()) {
-    job->currentCalendar.capabilities.insert(QStringLiteral("syncedCtag"), remoteCtag);
+    batch.calendar.capabilities.insert(QStringLiteral("syncedCtag"), remoteCtag);
   }
-  if (observedThisAndFuture && !job->currentCalendar.readOnly) {
-    // Receiving a canonical RANGE exception from this collection proves that
-    // the server persists and returns the RFC 5545 representation. Future
-    // writes still require a read-after-write verification before completion.
-    job->currentCalendar.capabilities.insert(QStringLiteral("thisAndFuture"), true);
-    job->currentCalendar.capabilities.insert(QStringLiteral("thisAndFutureProven"),
-                                             true);
+  if (state->observedThisAndFuture && !batch.calendar.readOnly) {
+    batch.calendar.capabilities.insert(QStringLiteral("thisAndFuture"), true);
+    batch.calendar.capabilities.insert(QStringLiteral("thisAndFutureProven"), true);
   }
-  const bool applied =
-      fullSync ? m_database->applyRemoteRangeSyncBatch(
-                     job->currentCalendar, stagedEvents, deletedRemoteIds,
-                     prunedRemoteIds, job->queryStartUtc, job->queryEndUtc, &error,
-                     job->replaceCoverage, stagedResources)
-               : m_database->applyRemoteSyncBatch(job->currentCalendar, stagedEvents,
-                                                  deletedRemoteIds, prunedRemoteIds,
-                                                  &error, stagedResources);
-  if (!applied) {
-    finish(job, QStringLiteral("database_error"), error);
-    return;
-  }
-  if (!job->changedCalendarIds.contains(job->currentCalendar.id)) {
-    job->changedCalendarIds.append(job->currentCalendar.id);
-  }
-  if (job->hydrationSync) {
-    QList<RangeSyncRequest>& pending = m_pendingHydrations[job->accountId];
-    if (!pending.isEmpty() &&
-        pending.first().calendarId == job->hydrationRequest.calendarId &&
-        pending.first().startUtc == job->hydrationRequest.startUtc &&
-        pending.first().endUtc == job->hydrationRequest.endUtc) {
-      pending.removeFirst();
+
+  const QString accountId = job->accountId;
+  auto* apply = new ChunkedSyncApply(m_database, this);
+  job->apply = apply;
+  connect(apply, &ChunkedSyncApply::chunkCommitted, this,
+          [this, accountId, job](const QString& calendarId) {
+            if (m_jobs.value(accountId) == job &&
+                !job->changedCalendarIds.contains(calendarId)) {
+              job->changedCalendarIds.append(calendarId);
+            }
+          });
+  apply->start(std::move(batch), [this, accountId, job, apply](const bool succeeded,
+                                                               const QString& error) {
+    apply->deleteLater();
+    if (m_jobs.value(accountId) != job) {
+      return;
     }
-    syncNextHydration(job);
-  } else {
-    syncNextCalendar(job);
-  }
+    job->apply = nullptr;
+    if (!succeeded) {
+      finish(job, QStringLiteral("database_error"), error);
+      return;
+    }
+    if (!job->changedCalendarIds.contains(job->currentCalendar.id)) {
+      job->changedCalendarIds.append(job->currentCalendar.id);
+    }
+    if (job->hydrationSync) {
+      QList<RangeSyncRequest>& pending = m_pendingHydrations[accountId];
+      if (!pending.isEmpty() &&
+          pending.first().calendarId == job->hydrationRequest.calendarId &&
+          pending.first().startUtc == job->hydrationRequest.startUtc &&
+          pending.first().endUtc == job->hydrationRequest.endUtc) {
+        pending.removeFirst();
+      }
+      syncNextHydration(job);
+    } else {
+      syncNextCalendar(job);
+    }
+  });
 }
 
 void CalDavSync::drainOutbox(SyncJob* job) {
@@ -2953,6 +3052,10 @@ void CalDavSync::finish(SyncJob* job, const QString& errorCode,
   const bool shouldResync =
       m_syncAfterCurrentJob.remove(accountId) ||
       (errorCode.isEmpty() && m_pendingHydrations.contains(accountId));
+  if (job->apply) {
+    job->apply->cancel();
+    job->apply->deleteLater();
+  }
   m_jobs.remove(accountId);
   delete job;
   if (cancelled) {

@@ -120,6 +120,34 @@ and cleanup; a started check is not proof of server support.
   `events.respond`, `events.undo`
 - `invitations.list`, `invitations.markSeen`
 
+`stats.dailyCounts` is additive and not yet released (added after 2.1,
+advertised in the next release). Discover it in `system.info` `methods`; the
+protocol minor remains 2.1 until that release. It takes required ISO dates
+`start` and exclusive `end` (at most 366 days apart), optional `calendarIds`
+(same scope as `events.list`; omitted means all calendars), and optional
+`timeZone` (IANA ID; defaults to the configured display zone, then the
+machine-local zone). It returns `counts` and `coverage` in one object:
+
+```json
+{"counts":{"2026-09-02":1},"coverage":{"complete":true,"hydrationScheduled":false,"uncoveredCalendarIds":[]}}
+```
+
+Zero-count days are omitted. The `coverage` object has exactly the same fields
+as `events.list` (including `rangeTooLarge` when applicable).
+Counts are a local-cache snapshot: when `complete` is false,
+Google or CalDAV range hydration is still pending and counts may be partial.
+Subscribe to `events.changed` and refetch `stats.dailyCounts` when hydration
+completes; a successful range hydration emits that notification even if no
+events changed. Timed events count on every day touched by their half-open
+interval; all-day events count from `startDate` through the day before their
+exclusive `endDate`. Recurrences and detached occurrences use the same
+expansion as `events.list`. Invalid dates, ranges and time zones return
+`invalid_params`.
+
+The yearly statistics read allows up to 50,000 occurrences and 500,000
+recurrence expansion steps (rather than the smaller agenda-query budget).
+Exceeding either limit returns `database_error` instead of partial counts.
+
 `invitations.list` returns invitations that need a response, sorted upcoming
 first. IPC 2.1 additively introduces the `upcomingTotal` and `pastTotal` result
 fields alongside `total`. These bucket counts describe the full filtered result,

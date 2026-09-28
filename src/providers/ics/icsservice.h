@@ -6,6 +6,7 @@
 #include <QJsonObject>
 #include <QNetworkAccessManager>
 #include <QObject>
+#include <QPointer>
 #include <QSet>
 #include <QTimer>
 #include <QUrl>
@@ -13,6 +14,7 @@
 
 #include "core/database.h"
 #include "core/secretstore.h"
+#include "sync/chunkedsyncapply.h"
 #include "sync/provider.h"
 
 class IcsServiceTest;
@@ -93,9 +95,9 @@ class IcsService final : public Provider {
   void finishFetch(const std::shared_ptr<FetchContext>& context,
                    const QString& errorCode = {}, const QString& errorMessage = {},
                    bool retryable = false);
-  bool applyFeed(const IcsSubscription& subscription, const QByteArray& payload,
-                 const QString& etag, const QString& lastModified,
-                 QString* errorMessage);
+  bool prepareFeed(const IcsSubscription& subscription, const QByteArray& payload,
+                   const QString& etag, const QString& lastModified,
+                   ChunkedSyncApply::Request* batch, QString* errorMessage);
   [[nodiscard]] QJsonObject subscriptionStatus(
       const IcsSubscription& subscription) const;
 
@@ -107,6 +109,7 @@ class IcsService final : public Provider {
   QHash<QString, QDateTime> m_lastAttemptAt;
   QHash<QString, QList<SecretStoreOperationId>> m_secretOperations;
   QHash<QString, quint64> m_credentialGeneration;
+  QHash<QString, QPointer<ChunkedSyncApply>> m_applies;
 };
 
 }  // namespace omacalendar::ics
