@@ -130,25 +130,7 @@ AppController::AppController(QObject* parent) : QObject(parent) {
         // A restarted daemon has forgotten that the window is in use.
         sendInteractive();
       }
-      QJsonObject subscription{
-          {QStringLiteral("topics"),
-           QJsonArray{QStringLiteral("accounts"), QStringLiteral("calendars"),
-                      QStringLiteral("calendarSets"), QStringLiteral("events"),
-                      QStringLiteral("invitations"), QStringLiteral("reminders"),
-                      QStringLiteral("sync"), QStringLiteral("google"),
-                      QStringLiteral("operations"), QStringLiteral("conflicts")}}};
-      if (m_subscriptionRevision >= 0) {
-        subscription.insert(QStringLiteral("sinceRevision"), m_subscriptionRevision);
-      }
-      send(QStringLiteral("system.subscribe"), subscription,
-           [this](const QJsonValue& value) {
-             const QJsonObject result = value.toObject();
-             m_subscriptionRevision = result.value(QStringLiteral("revision"))
-                                          .toInteger(m_subscriptionRevision);
-             if (result.value(QStringLiteral("catchUpRequired")).toBool()) {
-               refresh();
-             }
-           });
+      subscribe(true);
       refresh();
       processPendingDeepLink();
     } else {
@@ -305,6 +287,103 @@ QVariantList AppController::events() const { return m_events; }
 QVariantList AppController::calendarSets() const { return m_calendarSets; }
 QVariantList AppController::invitations() const { return m_invitations; }
 QVariantList AppController::conflicts() const { return m_conflicts; }
+
+QVariantList AppController::taskLists() const { return m_taskLists; }
+
+QVariantList AppController::tasks() const { return m_tasks; }
+
+bool AppController::tasksSupported() const { return m_tasksSupported; }
+
+void AppController::loadTasks() {
+  // Older daemons answer method_not_found; tasks then stay hidden.
+  const auto unsupported = [this](const QJsonObject& error) {
+    if (error.value(QStringLiteral("code")).toString() !=
+        QStringLiteral("method_not_found")) {
+      return false;
+    }
+    if (m_tasksSupported) {
+      m_tasksSupported = false;
+      m_taskLists.clear();
+      m_tasks.clear();
+      emit tasksChanged();
+    }
+    return true;
+  };
+  send(
+      QStringLiteral("taskLists.list"), {},
+      [this](const QJsonValue& value) {
+        requestTaskPage(variantList(value, QStringLiteral("lists")), {}, 0,
+                        ++m_taskGeneration);
+      },
+      false, unsupported);
+}
+
+void AppController::requestTaskPage(const QVariantList& lists, QVariantList tasks,
+                                    const int offset, const quint64 generation) {
+  send(
+      QStringLiteral("tasks.list"),
+      {{QStringLiteral("offset"), offset}, {QStringLiteral("limit"), kTaskPageLimit}},
+      [this, lists, tasks = std::move(tasks), offset,
+       generation](const QJsonValue& value) mutable {
+        if (generation != m_taskGeneration) {
+          return;
+        }
+        tasks.append(variantList(value, QStringLiteral("tasks")));
+        const QJsonObject page = value.toObject();
+        const int nextOffset = page.value(QStringLiteral("nextOffset")).toInt(-1);
+        // Keep reading until the daemon reports the last page.
+        if (page.value(QStringLiteral("hasMore")).toBool() && nextOffset > offset) {
+          requestTaskPage(lists, std::move(tasks), nextOffset, generation);
+          return;
+        }
+        m_taskLists = lists;
+        m_tasks = std::move(tasks);
+        m_tasksSupported = true;
+        emit tasksChanged();
+      },
+      false);
+}
+
+void AppController::sendTaskMutation(const QString& method, const QJsonObject& params) {
+  if (!connected()) {
+    setError(tr("Connect to the calendar service to change tasks"));
+    return;
+  }
+  // tasks.changed reloads the lists once the daemon has saved the change.
+  send(method, params, [this](const QJsonValue&) { setError({}); });
+}
+
+void AppController::createTask(const QVariantMap& task) {
+  sendTaskMutation(QStringLiteral("tasks.create"),
+                   {{QStringLiteral("task"), QJsonObject::fromVariantMap(task)}});
+}
+
+void AppController::updateTask(const QVariantMap& task) {
+  QJsonObject params{{QStringLiteral("task"), QJsonObject::fromVariantMap(task)}};
+  if (task.contains(QStringLiteral("localRevision"))) {
+    params.insert(QStringLiteral("expectedLocalRevision"),
+                  task.value(QStringLiteral("localRevision")).toLongLong());
+  }
+  sendTaskMutation(QStringLiteral("tasks.update"), params);
+}
+
+void AppController::setTaskCompleted(const QString& taskId, const bool completed) {
+  sendTaskMutation(QStringLiteral("tasks.update"),
+                   {{QStringLiteral("task"),
+                     QJsonObject{{QStringLiteral("id"), taskId},
+                                 {QStringLiteral("completed"), completed}}}});
+}
+
+void AppController::removeTask(const QString& taskId) {
+  sendTaskMutation(QStringLiteral("tasks.remove"),
+                   {{QStringLiteral("taskId"), taskId}});
+}
+
+void AppController::setTaskListEnabled(const QString& listId, const bool enabled) {
+  sendTaskMutation(
+      QStringLiteral("taskLists.setEnabled"),
+      {{QStringLiteral("listId"), listId}, {QStringLiteral("enabled"), enabled}});
+}
 QVariantList AppController::operations() const { return m_operations; }
 QVariantList AppController::searchResults() const { return m_searchResults; }
 PresentationListModel* AppController::accountsModel() { return &m_accountsModel; }
@@ -387,6 +466,43 @@ QString AppController::send(const QString& method, const QJsonObject& params,
   return id;
 }
 
+void AppController::subscribe(const bool includeTasks) {
+  QJsonArray topics{QStringLiteral("accounts"),     QStringLiteral("calendars"),
+                    QStringLiteral("calendarSets"), QStringLiteral("events"),
+                    QStringLiteral("invitations"),  QStringLiteral("reminders"),
+                    QStringLiteral("sync"),         QStringLiteral("google"),
+                    QStringLiteral("operations"),   QStringLiteral("conflicts")};
+  if (includeTasks) {
+    topics.append(QStringLiteral("tasks"));
+  }
+  QJsonObject subscription{{QStringLiteral("topics"), topics}};
+  if (m_subscriptionRevision >= 0) {
+    subscription.insert(QStringLiteral("sinceRevision"), m_subscriptionRevision);
+  }
+  send(
+      QStringLiteral("system.subscribe"), subscription,
+      [this](const QJsonValue& value) {
+        const QJsonObject result = value.toObject();
+        m_subscriptionRevision =
+            result.value(QStringLiteral("revision")).toInteger(m_subscriptionRevision);
+        if (result.value(QStringLiteral("catchUpRequired")).toBool()) {
+          refresh();
+        }
+      },
+      true,
+      [this, includeTasks](const QJsonObject& error) {
+        // A daemon from before tasks rejects the whole subscription over the
+        // unknown topic; subscribe to the rest instead.
+        if (includeTasks && error.value(QStringLiteral("message"))
+                                .toString()
+                                .contains(QStringLiteral("topic: tasks"))) {
+          subscribe(false);
+          return true;
+        }
+        return false;
+      });
+}
+
 void AppController::refresh() { refreshParts(RefreshAll); }
 
 int AppController::refreshPartsForNotification(const QString& event) {
@@ -408,6 +524,9 @@ int AppController::refreshPartsForNotification(const QString& event) {
   if (event == QStringLiteral("conflicts.changed")) {
     return RefreshConflicts;
   }
+  if (event == QStringLiteral("tasks.changed")) {
+    return RefreshTasks;
+  }
   // Calendar changes can hide or remove events, invalidate the default
   // calendar, and change calendar-set membership: new calendars join the
   // built-in set and removed ones leave every set. Account changes can do
@@ -417,8 +536,9 @@ int AppController::refreshPartsForNotification(const QString& event) {
            RefreshPreferences;
   }
   if (event == QStringLiteral("accounts.changed")) {
+    // Removing an account also removes its task lists.
     return RefreshAccounts | RefreshCalendars | RefreshCalendarSets | RefreshEvents |
-           RefreshInvitations | RefreshPreferences;
+           RefreshInvitations | RefreshPreferences | RefreshTasks;
   }
   return 0;
 }
@@ -524,6 +644,9 @@ void AppController::refreshParts(const int parts) {
   }
   if ((parts & RefreshPreferences) != 0) {
     loadPreferences();
+  }
+  if ((parts & RefreshTasks) != 0) {
+    loadTasks();
   }
   if ((parts & RefreshEvents) != 0) {
     if (!m_rangeStart.isValid() || !m_rangeEnd.isValid()) {

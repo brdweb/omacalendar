@@ -114,6 +114,21 @@ QtObject {
         return typeof value === "string" && value.trim().length > 0
     }
 
+    // Tasks: the smoke tests read the last call back.
+    property bool tasksSupported: true
+    property var taskLists: [{"id": "local-tasks", "name": "Tasks", "color": "#9ece6a",
+                              "enabled": true}]
+    property var tasks: []
+    property var lastTaskCall: null
+
+    function createTask(task) { lastTaskCall = {"method": "createTask", "task": task} }
+    function updateTask(task) { lastTaskCall = {"method": "updateTask", "task": task} }
+    function setTaskCompleted(taskId, completed) {
+        lastTaskCall = {"method": "setTaskCompleted", "taskId": taskId,
+                        "completed": completed}
+    }
+    function removeTask(taskId) { lastTaskCall = {"method": "removeTask", "taskId": taskId} }
+
     // Attachments: the smoke tests read the last lookup and set the answer.
     property var eventAttachments: ({})
     property var lastAttachmentLookup: null

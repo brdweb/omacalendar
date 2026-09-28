@@ -11,6 +11,7 @@
 
 #include "core/domain.h"
 #include "core/recurrenceexpander.h"
+#include "core/tasks.h"
 
 namespace omacalendar {
 
@@ -67,6 +68,16 @@ struct EventSearchQuery {
 struct EventSearchPage {
   QList<Event> events;
   int total = 0;
+};
+
+struct TaskQuery {
+  QStringList listIds;
+  bool includeCompleted = true;
+  // Inclusive due-day bounds; either set excludes undated tasks.
+  QDate dueStart;
+  QDate dueEnd;
+  int limit = 2000;
+  int offset = 0;
 };
 
 class Database final {
@@ -354,6 +365,23 @@ class Database final {
   bool recordSyncCoverage(const QString& calendarId, const QDateTime& startUtc,
                           const QDateTime& endUtc, QString* errorMessage = nullptr);
 
+  [[nodiscard]] QList<TaskList> taskLists(QString* errorMessage = nullptr) const;
+  [[nodiscard]] TaskList taskList(const QString& listId,
+                                  QString* errorMessage = nullptr) const;
+  bool upsertTaskList(const TaskList& list, QString* errorMessage = nullptr);
+  bool setTaskListEnabled(const QString& listId, bool enabled,
+                          QString* errorMessage = nullptr);
+  [[nodiscard]] QList<Task> tasks(const TaskQuery& filter,
+                                  QString* errorMessage = nullptr) const;
+  [[nodiscard]] Task task(const QString& taskId, QString* errorMessage = nullptr) const;
+  // Creates or updates a task from a client edit. Device-only lists are
+  // written as is; other lists mark the task dirty with the provider write it
+  // still needs. expectedLocalRevision (when not -1) guards against
+  // overwriting a newer edit.
+  bool saveLocalTask(Task* task, qint64 expectedLocalRevision = -1,
+                     QString* errorMessage = nullptr);
+  bool removeLocalTask(const QString& taskId, QString* errorMessage = nullptr);
+
   [[nodiscard]] QJsonValue setting(const QString& key, const QJsonValue& fallback = {},
                                    QString* errorMessage = nullptr) const;
   bool setSetting(const QString& key, const QJsonValue& value,
@@ -367,6 +395,7 @@ class Database final {
   bool ensureSyncCoverageSchema(QString* errorMessage);
   bool ensureProviderResourcesSchema(QString* errorMessage);
   bool ensureReadPerformanceIndexes(QString* errorMessage);
+  bool ensureTaskSchema(QString* errorMessage);
   bool repairInclusiveAllDayEndDates(QString* errorMessage);
   bool migrateSeriesBounds(QString* errorMessage);
   bool repairSeriesBounds(QString* errorMessage);

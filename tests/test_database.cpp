@@ -1074,6 +1074,98 @@ class DatabaseTest final : public QObject {
     QVERIFY(readyAfterCancellation.isEmpty());
   }
 
+  void tasksAreStoredPerList() {
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    Database db;
+    QString error;
+    QVERIFY2(db.open(directory.filePath("store.sqlite"), &error), qPrintable(error));
+
+    // Every installation has the device-only list.
+    const QList<TaskList> lists = db.taskLists(&error);
+    QCOMPARE(lists.size(), 1);
+    QCOMPARE(lists.first().id, QString::fromLatin1(kLocalTaskListId));
+    QCOMPARE(lists.first().capabilities.value("provider").toString(),
+             QStringLiteral("local"));
+
+    Task buy;
+    buy.listId = QString::fromLatin1(kLocalTaskListId);
+    buy.title = QStringLiteral("  Buy milk  ");
+    buy.dueDate = QDate(2026, 10, 2);
+    QVERIFY2(db.saveLocalTask(&buy, -1, &error), qPrintable(error));
+    QVERIFY(!buy.id.isEmpty());
+    QCOMPARE(buy.title, QStringLiteral("Buy milk"));
+    QVERIFY(!buy.dirty);
+    QVERIFY(buy.pendingOperation.isEmpty());
+
+    Task later;
+    later.listId = buy.listId;
+    later.title = QStringLiteral("Someday");
+    QVERIFY2(db.saveLocalTask(&later, -1, &error), qPrintable(error));
+
+    Task empty;
+    empty.listId = buy.listId;
+    empty.title = QStringLiteral("   ");
+    QVERIFY(!db.saveLocalTask(&empty, -1, &error));
+    QCOMPARE(error, QStringLiteral("A task needs a title"));
+
+    // Completing stamps the time; a stale revision is refused.
+    Task done = db.task(buy.id, &error);
+    done.completed = true;
+    QVERIFY2(db.saveLocalTask(&done, buy.localRevision, &error), qPrintable(error));
+    QVERIFY(done.completedAt.isValid());
+    Task stale = done;
+    stale.title = QStringLiteral("Stale");
+    QVERIFY(!db.saveLocalTask(&stale, buy.localRevision, &error));
+
+    TaskQuery open;
+    open.includeCompleted = false;
+    QCOMPARE(db.tasks(open, &error).size(), 1);
+    TaskQuery due;
+    due.dueStart = QDate(2026, 10, 1);
+    due.dueEnd = QDate(2026, 10, 3);
+    const QList<Task> dueTasks = db.tasks(due, &error);
+    QCOMPARE(dueTasks.size(), 1);
+    QCOMPARE(dueTasks.first().id, buy.id);
+
+    TaskQuery page;
+    page.limit = 1;
+    page.offset = 1;
+    const QList<Task> second = db.tasks(page, &error);
+    QCOMPARE(second.size(), 1);
+    QVERIFY(second.first().id != db.tasks({}, &error).first().id);
+
+    QVERIFY2(db.removeLocalTask(later.id, &error), qPrintable(error));
+    QCOMPARE(db.tasks({}, &error).size(), 1);
+
+    // A provider list keeps the write it owes on the task row.
+    Account account = makeAccount("acc-tasks", "Tasks account");
+    QVERIFY(db.upsertAccount(account, &error));
+    TaskList remote;
+    remote.id = QStringLiteral("remote-list");
+    remote.accountId = account.id;
+    remote.remoteId = QStringLiteral("list-1");
+    remote.name = QStringLiteral("Work");
+    QVERIFY2(db.upsertTaskList(remote, &error), qPrintable(error));
+    Task report;
+    report.listId = remote.id;
+    report.title = QStringLiteral("Send report");
+    QVERIFY2(db.saveLocalTask(&report, -1, &error), qPrintable(error));
+    QVERIFY(report.dirty);
+    QCOMPARE(report.pendingOperation, QStringLiteral("create"));
+    report.notes = QStringLiteral("Before Friday");
+    QVERIFY2(db.saveLocalTask(&report, -1, &error), qPrintable(error));
+    // An edit before the first upload is still a create.
+    QCOMPARE(report.pendingOperation, QStringLiteral("create"));
+    // Never uploaded, so removing it needs nothing from the provider.
+    QVERIFY2(db.removeLocalTask(report.id, &error), qPrintable(error));
+    QVERIFY(db.task(report.id, &error).id.isEmpty());
+
+    // Removing the account removes its lists and tasks.
+    QVERIFY(db.removeAccount(account.id, &error));
+    QCOMPARE(db.taskLists(&error).size(), 1);
+  }
+
   void conferenceRequestSurvivesFoldedEdits() {
     QTemporaryDir directory;
     QVERIFY(directory.isValid());

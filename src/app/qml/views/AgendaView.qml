@@ -5,6 +5,7 @@ import QtQuick.Layouts
 import OmaCalendar
 import "../components"
 import "../EventIndex.js" as EventIndex
+import "../TaskGroups.js" as TaskGroups
 
 Item {
     id: root
@@ -16,7 +17,12 @@ Item {
     property string selectedEventReference: ""
     property int dayCount: 31
     property string timeFormat: "system"
+    // Open tasks are listed on the day they are due.
+    property var tasks: []
+    property var taskLists: []
     signal eventActivated(var eventData)
+    signal taskActivated(var task)
+    signal taskCompletionRequested(string taskId, bool completed)
     signal createRequested(date dateValue)
     signal dateSelected(date dateValue)
     // Scrolled to the last loaded day; the owner may raise dayCount and load
@@ -46,6 +52,8 @@ Item {
                                                         root.currentDate.getMonth(),
                                                         root.currentDate.getDate() + index)
             readonly property var dayEvents: root.eventsForDate(dateValue)
+            readonly property var dayTasks: TaskGroups.dueOn(root.tasks, root.taskLists,
+                                                             TaskGroups.dayKey(dateValue))
             width: agendaList.width
             spacing: Theme.spacingSM
 
@@ -149,8 +157,53 @@ Item {
                 }
             }
 
+            Repeater {
+                model: daySection.dayTasks
+                delegate: ItemDelegate {
+                    id: taskRow
+                    required property var modelData
+                    objectName: "agendaTask-" + modelData.id
+                    Layout.fillWidth: true
+                    Layout.leftMargin: 50
+                    implicitHeight: 34
+                    Accessible.name: qsTr("Task due: %1").arg(String(modelData.title || ""))
+                    onClicked: root.taskActivated(modelData)
+                    background: Rectangle {
+                        radius: Theme.radiusMD
+                        color: taskRow.hovered ? Theme.alpha(Theme.text, 0.045)
+                                               : "transparent"
+                    }
+                    contentItem: RowLayout {
+                        spacing: Theme.spacingSM
+                        AppCheckBox {
+                            checked: false
+                            enabled: !TaskGroups.isReadOnly(root.taskLists,
+                                                            taskRow.modelData.listId)
+                            Accessible.name: qsTr("Mark %1 done").arg(
+                                                 String(taskRow.modelData.title || ""))
+                            onToggled: root.taskCompletionRequested(
+                                           String(taskRow.modelData.id), checked)
+                        }
+                        Text {
+                            textFormat: Text.PlainText
+                            Layout.fillWidth: true
+                            text: String(taskRow.modelData.title || "")
+                            color: Theme.text
+                            font.pixelSize: Theme.smallFontSize
+                            elide: Text.ElideRight
+                        }
+                        Text {
+                            textFormat: Text.PlainText
+                            text: qsTr("Task")
+                            color: Theme.mutedText
+                            font.pixelSize: Theme.microFontSize
+                        }
+                    }
+                }
+            }
+
             Rectangle {
-                visible: daySection.dayEvents.length === 0
+                visible: daySection.dayEvents.length === 0 && daySection.dayTasks.length === 0
                 Layout.fillWidth: true
                 implicitHeight: 44
                 radius: Theme.radiusMD

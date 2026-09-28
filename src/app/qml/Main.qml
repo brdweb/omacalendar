@@ -11,6 +11,7 @@ import "views"
 import "CalendarVisibility.js" as CalendarVisibility
 import "DateRange.js" as DateRange
 import "EventIndex.js" as EventIndex
+import "TaskGroups.js" as TaskGroups
 
 ApplicationWindow {
     id: window
@@ -63,6 +64,15 @@ ApplicationWindow {
     property var pendingMoveOptions: ({})
     property var pendingExportScope: ({})
     property var pendingPdfOptions: ({})
+    readonly property bool tasksAvailable: App.connected && App.tasksSupported === true
+    readonly property var taskItems: appList("tasks")
+    readonly property var taskLists: appList("taskLists")
+    // Re-evaluated every minute through clockTick so it rolls over at midnight.
+    readonly property date todayDate: {
+        window.clockTick
+        return new Date()
+    }
+    readonly property string todayKey: TaskGroups.dayKey(todayDate)
     property string pendingGoogleDisplayName: ""
     // Timeline scroll positions survive switching away from a view; negative
     // lets the view choose (the current time today, else the work day).
@@ -339,6 +349,9 @@ ApplicationWindow {
             activeSetId: window.activeCalendarSetId
             connected: App.connected
             invitationCount: window.invitations.length
+            tasksAvailable: window.tasksAvailable
+            dueTaskCount: TaskGroups.dueCount(window.taskItems, window.taskLists,
+                                              window.todayKey)
             conflictCount: window.conflicts.length
             failedOperationCount: window.failedOperationCount()
             eventCountForDate: function(dateValue) {
@@ -359,7 +372,9 @@ ApplicationWindow {
             onSetActivated: setId => window.activateCalendarSet(setId)
             onCalendarVisibilityRequested: (calendarId, visible) =>
                                                window.setCalendarVisible(calendarId, visible)
-            onPanelRequested: panelName => window.openActivity(panelName)
+            onPanelRequested: panelName => panelName === "tasks"
+                                           ? window.openTasks()
+                                           : window.openActivity(panelName)
             onSettingsRequested: settingsDrawer.open()
             accounts: window.appList("accounts")
             accountSyncStates: window.appValue("accountSyncStates", ({}))
@@ -461,6 +476,11 @@ ApplicationWindow {
                                     onEventActivated: value => window.openEvent(value)
                                     onCreateRequested: dateValue => editor.openNew(dateValue, 540)
                                     onDateSelected: dateValue => window.selectDate(dateValue)
+                                    tasks: window.tasksAvailable ? window.taskItems : []
+                                    taskLists: window.taskLists
+                                    onTaskActivated: task => taskEditor.openExisting(task)
+                                    onTaskCompletionRequested: (taskId, completed) =>
+                                        window.callApp("setTaskCompleted", [taskId, completed])
                                 }
                             }
                         }
@@ -715,6 +735,25 @@ ApplicationWindow {
         id: conflictMergeDialog
     }
 
+    TasksPanel {
+        id: tasksPanel
+        tasks: window.taskItems
+        taskLists: window.taskLists
+        today: window.todayDate
+        onCreateRequested: task => window.callApp("createTask", [task])
+        onCompletionRequested: (taskId, completed) =>
+                                   window.callApp("setTaskCompleted", [taskId, completed])
+        onEditRequested: task => taskEditor.openExisting(task)
+    }
+
+    TaskEditor {
+        id: taskEditor
+        taskLists: window.taskLists
+        onSaveRequested: task => window.callApp(task.id ? "updateTask" : "createTask",
+                                                [task])
+        onRemoveRequested: taskId => window.callApp("removeTask", [taskId])
+    }
+
     ActivityPanel {
         id: activityPanel
         mode: "search"
@@ -922,6 +961,12 @@ ApplicationWindow {
         }
     }
 
+    Shortcut {
+        sequence: "Ctrl+Shift+T"
+        enabled: window.tasksAvailable
+        context: Qt.ApplicationShortcut
+        onActivated: tasksPanel.opened ? tasksPanel.close() : window.openTasks()
+    }
     Shortcut {
         sequence: "Ctrl+P"
         context: Qt.ApplicationShortcut
@@ -1901,6 +1946,11 @@ ApplicationWindow {
         localSearchResults = result
     }
 
+    function openTasks() {
+        activityPanel.close()
+        tasksPanel.open()
+    }
+
     function openActivity(modeName) {
         activityPanel.mode = modeName
         activityPanel.open()
@@ -2020,6 +2070,6 @@ ApplicationWindow {
 
     function navigationShortcutsEnabled() {
         return !editor.opened && !settingsDrawer.opened && !activityPanel.opened
-               && !quickAdd.opened
+               && !quickAdd.opened && !tasksPanel.opened && !taskEditor.opened
     }
 }

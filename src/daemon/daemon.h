@@ -136,6 +136,18 @@ class Daemon final : public QObject {
                                            ipc::Error* error);
   [[nodiscard]] QJsonValue onWidgetSnapshot(const QJsonObject& params,
                                             ipc::Error* error);
+  // Tasks (daemontasks.cpp).
+  void registerTaskHandlers();
+  void emitTasksChanged(const QStringList& listIds);
+  [[nodiscard]] QJsonValue onTaskListsList(const QJsonObject& params,
+                                           ipc::Error* error) const;
+  [[nodiscard]] QJsonValue onTaskListsSetEnabled(const QJsonObject& params,
+                                                 ipc::Error* error);
+  [[nodiscard]] QJsonValue onTasksList(const QJsonObject& params,
+                                       ipc::Error* error) const;
+  [[nodiscard]] QJsonValue onTasksCreate(const QJsonObject& params, ipc::Error* error);
+  [[nodiscard]] QJsonValue onTasksUpdate(const QJsonObject& params, ipc::Error* error);
+  [[nodiscard]] QJsonValue onTasksRemove(const QJsonObject& params, ipc::Error* error);
 
   static QStringList parseCalendarIds(const QJsonValue& value, ipc::Error* error);
   void emitEventsChanged(const QStringList& calendarIds);

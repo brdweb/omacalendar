@@ -1639,6 +1639,75 @@ def run_attachments_and_conference_contract(harness: DaemonHarness) -> None:
             f"events.get did not list an empty attachment set: {detail.get('attachments')}")
 
 
+def run_tasks_contract(harness: DaemonHarness) -> None:
+    subscribed = harness.call("system.subscribe", {"topics": ["tasks"]})
+    require(subscribed.get("topics") == ["tasks"],
+            f"system.subscribe did not accept the tasks topic: {subscribed}")
+    lists = harness.call("taskLists.list", {})["lists"]
+    require([entry["id"] for entry in lists] == ["local-tasks"],
+            f"taskLists.list did not start with the device-only list: {lists}")
+    require(lists[0]["capabilities"].get("provider") == "local",
+            "the device-only task list does not report its provider")
+    created = harness.call("tasks.create", {"task": {"title": "Water plants",
+                                                     "dueDate": "2026-11-05",
+                                                     "rawPayload": "forged"}})
+    require(created["listId"] == "local-tasks" and created["title"] == "Water plants",
+            f"tasks.create did not default to the device-only list: {created}")
+    require("rawPayload" not in created, "tasks.create echoed provider data")
+    undated = harness.call("tasks.create", {"task": {"listId": "local-tasks",
+                                                     "title": "Read a book"}})
+    done = harness.call("tasks.update", {"task": {"id": created["id"], "completed": True},
+                                         "expectedLocalRevision": created["localRevision"]})
+    require(done["completed"] and done["completedAt"],
+            f"tasks.update did not complete the task: {done}")
+    assert_ipc_error(
+        harness.call_error("tasks.update", {"task": {"id": created["id"], "title": "x"},
+                                            "expectedLocalRevision": 0}),
+        "task_rejected", "tasks.update with a stale revision")
+    open_tasks = harness.call("tasks.list", {"includeCompleted": False})["tasks"]
+    require([task["id"] for task in open_tasks] == [undated["id"]],
+            f"tasks.list includeCompleted=false returned {open_tasks}")
+    due = harness.call("tasks.list", {"dueStart": "2026-11-01",
+                                      "dueEnd": "2026-11-30"})["tasks"]
+    require([task["id"] for task in due] == [created["id"]],
+            f"tasks.list due range returned {due}")
+    for method, params, code, context in (
+        ("tasks.create", {"task": {"title": "  "}}, "task_rejected",
+         "tasks.create without a title"),
+        ("tasks.create", {"task": {"title": "x", "dueDate": "tomorrow"}},
+         "invalid_params", "tasks.create with a bad due date"),
+        ("tasks.create", {"task": {"title": "x", "listId": "missing"}},
+         "task_rejected", "tasks.create in a missing list"),
+        ("tasks.list", {"dueStart": "2026-11-30", "dueEnd": "2026-11-01"},
+         "invalid_params", "tasks.list with a backwards range"),
+        ("tasks.remove", {"taskId": "missing"}, "not_found",
+         "tasks.remove of a missing task"),
+    ):
+        assert_ipc_error(harness.call_error(method, params), code, context)
+    first_page = harness.call("tasks.list", {"limit": 1})
+    require(len(first_page["tasks"]) == 1 and first_page["hasMore"] is True
+            and first_page["nextOffset"] == 1,
+            f"tasks.list did not page: {first_page}")
+    second_page = harness.call("tasks.list", {"limit": 1, "offset": 1})
+    require(len(second_page["tasks"]) == 1 and second_page["hasMore"] is False,
+            f"tasks.list second page: {second_page}")
+    timed = harness.call("tasks.create", {"task": {"title": "Call", "dueDate": "2026-11-05",
+                                                   "dueUtc": "2026-11-05T09:00:00Z"}})
+    moved = harness.call("tasks.update", {"task": {"id": timed["id"],
+                                                   "dueDate": "2026-11-06"}})
+    require(moved["dueDate"] == "2026-11-06" and moved["dueUtc"] == "",
+            f"moving the due day kept the old due time: {moved}")
+    harness.call("tasks.remove", {"taskId": timed["id"]})
+    harness.call("tasks.remove", {"taskId": undated["id"]})
+    remaining = harness.call("tasks.list", {})["tasks"]
+    require([task["id"] for task in remaining] == [created["id"]],
+            f"tasks.remove left {remaining}")
+    harness.call("taskLists.setEnabled", {"listId": "local-tasks", "enabled": False})
+    require(harness.call("taskLists.list", {})["lists"][0]["enabled"] is False,
+            "taskLists.setEnabled did not hide the list")
+    harness.call("taskLists.setEnabled", {"listId": "local-tasks", "enabled": True})
+
+
 def run_settings_get_many_contract(harness: DaemonHarness) -> None:
     harness.call("settings.set", {"key": "workDayStart", "value": 7})
     keys = ["workDayStart", "timeFormat", "defaultCalendarId"]
@@ -1839,6 +1908,7 @@ def run_contract(harness: DaemonHarness) -> None:
     run_sync_set_interactive_contract(harness)
     run_freebusy_contract(harness)
     run_attachments_and_conference_contract(harness)
+    run_tasks_contract(harness)
     for owned_directory in (
         harness.root / "data" / "omacalendar",
         harness.root / "config" / "omacalendar",
