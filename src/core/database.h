@@ -179,6 +179,12 @@ class Database final {
                                            const QDateTime& endUtc,
                                            const QStringList& calendarIds = {},
                                            QString* errorMessage = nullptr) const;
+  // The 366-day statistics window can legitimately contain more than the
+  // agenda's 10,000 occurrences. Keep the same expansion semantics with a
+  // larger, still bounded, yearly budget.
+  [[nodiscard]] QList<Event> dailyCountEventsBetween(
+      const QDateTime& startUtc, const QDateTime& endUtc,
+      const QStringList& calendarIds = {}, QString* errorMessage = nullptr) const;
   // Invitation reads deliberately stay daemon-private. They apply the same
   // recurrence semantics as eventsBetween(), but discard unrelated bounded
   // rows before decoding them from SQLite.
@@ -391,6 +397,8 @@ class Database final {
                                                    const QDateTime& endUtc,
                                                    const QStringList& calendarIds,
                                                    bool invitationsOnly,
+                                                   qsizetype maximumOccurrences,
+                                                   qsizetype maximumExpansionSteps,
                                                    QString* errorMessage) const;
 
   QString m_connectionName;

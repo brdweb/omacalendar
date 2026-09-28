@@ -133,6 +133,10 @@ events count from `startDate` through the day before their exclusive `endDate`.
 Recurrences and detached occurrences use the same expansion as `events.list`.
 Invalid dates, ranges and time zones return `invalid_params`.
 
+The yearly statistics read allows up to 50,000 occurrences and 500,000
+recurrence expansion steps (rather than the smaller agenda-query budget).
+Exceeding either limit returns `database_error` instead of partial counts.
+
 `invitations.list` returns invitations that need a response, sorted upcoming
 first. IPC 2.1 additively introduces the `upcomingTotal` and `pastTotal` result
 fields alongside `total`. These bucket counts describe the full filtered result,

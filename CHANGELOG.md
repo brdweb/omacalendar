@@ -37,6 +37,9 @@ Versioning once public releases begin.
 
 ### Fixed
 
+- Yearly `stats.dailyCounts` now accommodates realistic recurrence volumes
+  without silently truncating counts or rejecting valid 366-day ranges (#43).
+
 - The desktop app reads every page of a date range from the calendar
   service. Previously it showed only the first 500 events, so a busy year
   view or a month with several shared calendars silently lost the rest. A

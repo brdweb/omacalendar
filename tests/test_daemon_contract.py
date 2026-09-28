@@ -1530,6 +1530,42 @@ def run_daily_counts_contract(harness: DaemonHarness) -> None:
                          "invalid_params", f"stats.dailyCounts {invalid}")
 
 
+
+def run_yearly_daily_counts_contract(harness: DaemonHarness) -> None:
+    calendar_id = "contract-yearly-counts"
+    harness.call("calendars.upsert", {"calendar": {
+        "id": calendar_id, "accountId": "local-account",
+        "name": "Yearly count regression", "timeZone": "UTC", "enabled": True,
+    }})
+    # 30 daily series produce 10,980 occurrences in a leap year: this is a
+    # valid statistics result, not a truncated 10,000-occurrence agenda page.
+    for index in range(30):
+        harness.call("events.create", {
+            "clientMutationId": f"contract-yearly-count-{index}",
+            "recurrenceScope": "series",
+            "guestNotificationPolicy": "none",
+            "event": {
+                "calendarId": calendar_id, "summary": f"Daily {index}",
+                "startUtc": "2028-01-01T09:00:00Z",
+                "endUtc": "2028-01-01T10:00:00Z",
+                "startTimeZone": "UTC", "endTimeZone": "UTC",
+                "allDay": False, "timeKind": "zoned",
+                "recurrenceRule": "FREQ=DAILY;COUNT=366",
+            },
+        })
+    first = datetime(2028, 1, 1)
+    expected = {
+        (first + timedelta(days=offset)).date().isoformat(): 30
+        for offset in range(366)
+    }
+    result = harness.call("stats.dailyCounts", {
+        "start": "2028-01-01", "end": "2029-01-01",
+        "calendarIds": [calendar_id], "timeZone": "UTC",
+    })
+    require(result == expected,
+            "full leap-year daily counts lost, duplicated, or truncated occurrences")
+
+
 def run_contract(harness: DaemonHarness) -> None:
     require(not harness.database_path.exists(), "test did not begin with fresh state")
     harness.start()
@@ -2396,6 +2432,7 @@ def run_contract(harness: DaemonHarness) -> None:
         == invitation_page.get("total", -1),
         "invitations.list bucket totals disagree with the reported total",
     )
+    run_yearly_daily_counts_contract(harness)
 
 
 def run_occurrence_patch_contract(harness: DaemonHarness) -> None:

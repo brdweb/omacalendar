@@ -3989,20 +3989,28 @@ QList<Event> Database::eventsForCalendars(const QStringList& calendarIds,
 QList<Event> Database::eventsBetween(const QDateTime& startUtc, const QDateTime& endUtc,
                                      const QStringList& calendarIds,
                                      QString* errorMessage) const {
-  return eventsBetweenInternal(startUtc, endUtc, calendarIds, false, errorMessage);
+  return eventsBetweenInternal(startUtc, endUtc, calendarIds, false, 10000, 100000,
+                               errorMessage);
+}
+
+QList<Event> Database::dailyCountEventsBetween(const QDateTime& startUtc,
+                                               const QDateTime& endUtc,
+                                               const QStringList& calendarIds,
+                                               QString* errorMessage) const {
+  return eventsBetweenInternal(startUtc, endUtc, calendarIds, false, 50000, 500000,
+                               errorMessage);
 }
 
 QList<Event> Database::invitationEventsBetween(const QDateTime& startUtc,
                                                const QDateTime& endUtc,
                                                QString* errorMessage) const {
-  return eventsBetweenInternal(startUtc, endUtc, {}, true, errorMessage);
+  return eventsBetweenInternal(startUtc, endUtc, {}, true, 10000, 100000, errorMessage);
 }
 
-QList<Event> Database::eventsBetweenInternal(const QDateTime& startUtc,
-                                             const QDateTime& endUtc,
-                                             const QStringList& calendarIds,
-                                             const bool invitationsOnly,
-                                             QString* errorMessage) const {
+QList<Event> Database::eventsBetweenInternal(
+    const QDateTime& startUtc, const QDateTime& endUtc, const QStringList& calendarIds,
+    const bool invitationsOnly, const qsizetype maximumOccurrences,
+    const qsizetype maximumExpansionSteps, QString* errorMessage) const {
   QList<Event> candidates;
   if (!startUtc.isValid() || !endUtc.isValid() || startUtc >= endUtc) {
     if (errorMessage != nullptr) {
@@ -4226,12 +4234,13 @@ QList<Event> Database::eventsBetweenInternal(const QDateTime& startUtc,
     }
   }
   m_expansionCache.invalidateIfChanged(changeRevision());
-  const RecurrenceExpansionResult expansion = RecurrenceExpander::expand(
-      candidates, startUtc, endUtc, 10000, 100000, &m_expansionCache);
+  const RecurrenceExpansionResult expansion =
+      RecurrenceExpander::expand(candidates, startUtc, endUtc, maximumOccurrences,
+                                 maximumExpansionSteps, &m_expansionCache);
   if (expansion.truncated) {
     if (errorMessage != nullptr) {
-      *errorMessage =
-          QStringLiteral("Calendar recurrence expansion exceeded its safe work limit");
+      *errorMessage = QStringLiteral(
+          "Calendar recurrence expansion exceeded its safe work or occurrence limit");
     }
     return {};
   }

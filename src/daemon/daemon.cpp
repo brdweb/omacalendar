@@ -1598,7 +1598,7 @@ QJsonValue Daemon::onStatsDailyCounts(const QJsonObject& params, ipc::Error* err
   if (dbError.isEmpty()) {
     // The range query filters all-day dates using UTC dates. Padding makes
     // local dates at either edge available even in UTC+14 / UTC-12.
-    const QList<Event> events = m_database.eventsBetween(
+    const QList<Event> events = m_database.dailyCountEventsBetween(
         startUtc.addDays(-2), endUtc.addDays(2), calendarIds, &dbError);
     if (dbError.isEmpty()) {
       QJsonObject counts;
