@@ -740,7 +740,9 @@ bool CalDavSync::disconnectAccount(const QString& accountId,
     // from touching an account that is being removed.
     job->cancelled = true;
     if (job->apply) {
-      job->apply->cancel();
+      // No network callback remains once the chunked apply has started.
+      // cancel() suppresses its completion callback, so retire the job here.
+      finish(job);
     }
   }
   m_client.forgetCredentials(accountId);

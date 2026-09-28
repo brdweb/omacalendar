@@ -4087,7 +4087,7 @@ QList<Event> Database::eventsBetweenInternal(
                      CASE WHEN instr(e.remote_id,'#')=0 THEN length(e.remote_id)
                           ELSE instr(e.remote_id,'#')-1 END)
                  AND resource.raw_payload LIKE '%RDATE%'))
-        AND COALESCE(e.series_until_utc,'~')>:startUtc%3%2
+        AND COALESCE(e.series_until_utc,'~')>=:startUtc%3%2
       UNION ALL
       SELECT %4 FROM events AS e INDEXED BY events_series_floating_bound_index
       WHERE e.deleted=0 AND e.recurrence_rule<>'' AND e.recurrence_id=''
@@ -4103,7 +4103,7 @@ QList<Event> Database::eventsBetweenInternal(
                      CASE WHEN instr(e.remote_id,'#')=0 THEN length(e.remote_id)
                           ELSE instr(e.remote_id,'#')-1 END)
                  AND resource.raw_payload LIKE '%RDATE%'))
-        AND COALESCE(e.series_until_date,'~')>:startDate%3%2
+        AND COALESCE(e.series_until_date,'~')>=:startDate%3%2
       UNION ALL
       SELECT %4 FROM events AS e INDEXED BY events_series_date_bound_index
       WHERE e.deleted=0 AND e.recurrence_rule<>'' AND e.recurrence_id=''
@@ -4119,7 +4119,7 @@ QList<Event> Database::eventsBetweenInternal(
                      CASE WHEN instr(e.remote_id,'#')=0 THEN length(e.remote_id)
                           ELSE instr(e.remote_id,'#')-1 END)
                  AND resource.raw_payload LIKE '%RDATE%'))
-        AND COALESCE(e.series_until_date,'~')>:startDate%3%2
+        AND COALESCE(e.series_until_date,'~')>=:startDate%3%2
       UNION ALL
       SELECT %4 FROM events AS e INDEXED BY events_exception_utc_index
       WHERE e.recurrence_id<>'' AND (

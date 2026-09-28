@@ -772,6 +772,61 @@ def run_account_lifecycle_contract(
             initial_range.get("coverage", {}).get("complete") is True,
             "initial CalDAV hydration did not record durable coverage",
         )
+        covered_counts = harness.call("stats.dailyCounts", {
+            "start": "2026-09-01", "end": "2026-09-08",
+            "calendarIds": [caldav_calendar_id], "timeZone": "UTC",
+        })
+        require(
+            covered_counts.get("coverage", {}).get("complete") is True
+            and covered_counts.get("counts", {}).get("2026-09-02") == 1,
+            "covered CalDAV daily counts lost coverage or cached events",
+        )
+        hydration_subscriber = JsonSocket(harness.socket_path)
+        try:
+            hydration_subscriber.send(
+                "stats-hydration-subscription", "system.subscribe",
+                {"topics": ["events"], "sinceRevision": 0},
+            )
+            hydration_subscriber.receive_matching(
+                lambda value: value.get("id") == "stats-hydration-subscription",
+                "statistics hydration subscription acknowledgement",
+            )
+            uncovered_counts = harness.call("stats.dailyCounts", {
+                "start": "2009-01-01", "end": "2009-02-01",
+                "calendarIds": [caldav_calendar_id], "timeZone": "UTC",
+            })
+            require(
+                uncovered_counts.get("counts") == {}
+                and uncovered_counts.get("coverage", {}).get("complete") is False
+                and uncovered_counts["coverage"].get("hydrationScheduled") is True
+                and caldav_calendar_id in uncovered_counts["coverage"].get(
+                    "uncoveredCalendarIds", []
+                ),
+                "uncovered daily counts did not expose pending CalDAV hydration",
+            )
+            hydrated = hydration_subscriber.receive_matching(
+                lambda value: value.get("event") == "events.changed"
+                and caldav_calendar_id in value.get("data", {}).get(
+                    "calendarIds", []
+                ),
+                "statistics hydration events.changed notification",
+                timeout=5.0,
+            )
+            require(hydrated.get("data", {}).get("revision") is not None,
+                    "hydration notification lacked a revision")
+            hydration_deadline = time.monotonic() + 5.0
+            while time.monotonic() < hydration_deadline:
+                covered_counts = harness.call("stats.dailyCounts", {
+                    "start": "2009-01-01", "end": "2009-02-01",
+                    "calendarIds": [caldav_calendar_id], "timeZone": "UTC",
+                })
+                if covered_counts.get("coverage", {}).get("complete") is True:
+                    break
+                time.sleep(0.05)
+            require(covered_counts.get("coverage", {}).get("complete") is True,
+                    "daily counts did not become complete after hydration")
+        finally:
+            hydration_subscriber.close()
         historical_params = {
             "start": "2010-01-01T00:00:00Z",
             "end": "2011-01-01T00:00:00Z",
@@ -1502,15 +1557,17 @@ def run_daily_counts_contract(harness: DaemonHarness) -> None:
         "2026-09-04": 1, "2026-09-05": 1, "2026-09-06": 1,
         "2026-09-07": 1,
     }
-    require(harness.call("stats.dailyCounts", params) == expected,
-            "daily counts disagreed with multi-day/all-day/recurring overlap")
+    result = harness.call("stats.dailyCounts", params)
+    require(result.get("coverage", {}).get("complete") is True
+            and result.get("counts") == expected,
+            "covered daily counts disagreed with multi-day/all-day/recurring overlap")
     require(harness.call("stats.dailyCounts", {**params, "start": "2026-09-04",
-                                               "end": "2026-09-05"}) == {
+                                               "end": "2026-09-05"}).get("counts") == {
                                                    "2026-09-04": 1},
             "exclusive range end or calendar filter was ignored")
     require(harness.call("stats.dailyCounts", {**params, "timeZone":
                                                "America/Los_Angeles"}).get(
-                                                   "2026-09-01") == 2,
+                                                   "counts", {}).get("2026-09-01") == 2,
             "display time zone did not shift an event across midnight")
     harness.call("settings.set", {"key": "displayTimeZone",
                                   "value": "America/Los_Angeles"})
@@ -1562,7 +1619,8 @@ def run_yearly_daily_counts_contract(harness: DaemonHarness) -> None:
         "start": "2028-01-01", "end": "2029-01-01",
         "calendarIds": [calendar_id], "timeZone": "UTC",
     })
-    require(result == expected,
+    require(result.get("coverage", {}).get("complete") is True
+            and result.get("counts") == expected,
             "full leap-year daily counts lost, duplicated, or truncated occurrences")
 
 

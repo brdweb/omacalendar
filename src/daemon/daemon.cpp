@@ -1594,7 +1594,8 @@ QJsonValue Daemon::onStatsDailyCounts(const QJsonObject& params, ipc::Error* err
   const QDateTime startUtc = QDateTime(start, QTime(0, 0), zone).toUTC();
   const QDateTime endUtc = QDateTime(end, QTime(0, 0), zone).toUTC();
   QString dbError;
-  (void)m_sync.ensureRangeHydrated(startUtc, endUtc, calendarIds, &dbError);
+  const QJsonObject coverage =
+      m_sync.ensureRangeHydrated(startUtc, endUtc, calendarIds, &dbError);
   if (dbError.isEmpty()) {
     // The range query filters all-day dates using UTC dates. Padding makes
     // local dates at either edge available even in UTC+14 / UTC-12.
@@ -1614,7 +1615,8 @@ QJsonValue Daemon::onStatsDailyCounts(const QJsonObject& params, ipc::Error* err
           counts.insert(key, counts.value(key).toInt() + 1);
         }
       }
-      return counts;
+      return QJsonObject{{QStringLiteral("counts"), counts},
+                         {QStringLiteral("coverage"), coverage}};
     }
   }
   if (error != nullptr) {

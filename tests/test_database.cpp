@@ -3012,6 +3012,60 @@ class DatabaseTest final : public QObject {
     QVERIFY(db.eventsBetween(newDay, newDay.addSecs(3600)).isEmpty());
   }
 
+  void zeroDurationCountSeriesAtFinalBoundary() {
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    Database db;
+    QString error;
+    QVERIFY2(db.open(directory.filePath(QStringLiteral("store.sqlite")), &error),
+             qPrintable(error));
+
+    Event timed = makeRemoteEvent(QStringLiteral("local-default"),
+                                  QStringLiteral("instant-series"), 0);
+    timed.endUtc = timed.startUtc;
+    timed.recurrenceRule = QStringLiteral("FREQ=DAILY;COUNT=3");
+    QVERIFY2(db.applyRemoteEvent(timed, &error), qPrintable(error));
+    const QDateTime last = timed.startUtc.addDays(2);
+    const QList<Event> atLast = db.eventsBetween(last, last.addSecs(1), {}, &error);
+    QVERIFY2(error.isEmpty(), qPrintable(error));
+    QCOMPARE(atLast.size(), 1);
+    QCOMPARE(atLast.first().uid, timed.uid);
+    QVERIFY(db.eventsBetween(last.addSecs(1), last.addSecs(2)).isEmpty());
+
+    Event floating = timed;
+    floating.id = QStringLiteral("floating-instant-series");
+    floating.remoteId = QStringLiteral("remote-floating-instant-series");
+    floating.uid = floating.id;
+    floating.timeKind = TimeKind::Floating;
+    QVERIFY2(db.applyRemoteEvent(floating, &error), qPrintable(error));
+    const QList<Event> floatingAtLast =
+        db.eventsBetween(last, last.addSecs(1), {}, &error);
+    QVERIFY2(error.isEmpty(), qPrintable(error));
+    QCOMPARE(floatingAtLast.size(), 2);
+    QVERIFY(std::any_of(
+        floatingAtLast.cbegin(), floatingAtLast.cend(),
+        [&floating](const Event& event) { return event.uid == floating.uid; }));
+
+    Event allDay = makeRemoteEvent(QStringLiteral("local-default"),
+                                   QStringLiteral("all-day-final-date"), 0);
+    allDay.allDay = true;
+    allDay.timeKind = TimeKind::AllDay;
+    allDay.startUtc = {};
+    allDay.endUtc = {};
+    allDay.startDate = QDate(2026, 2, 1);
+    allDay.endDate = QDate(2026, 2, 2);
+    allDay.recurrenceRule = QStringLiteral("FREQ=DAILY;COUNT=3");
+    QVERIFY2(db.applyRemoteEvent(allDay, &error), qPrintable(error));
+    const QDateTime finalDate(QDate(2026, 2, 3), QTime(0, 0), QTimeZone::UTC);
+    const QList<Event> onFinalDate =
+        db.eventsBetween(finalDate, finalDate.addDays(1), {}, &error);
+    QVERIFY2(error.isEmpty(), qPrintable(error));
+    QVERIFY(
+        std::any_of(onFinalDate.cbegin(), onFinalDate.cend(),
+                    [&allDay](const Event& event) { return event.uid == allDay.uid; }));
+    QVERIFY(db.eventsBetween(finalDate.addDays(1), finalDate.addDays(2)).isEmpty());
+  }
+
   void mixedSeriesAndExceptionsMatchUnboundedExpansion() {
     QTemporaryDir directory;
     QVERIFY(directory.isValid());

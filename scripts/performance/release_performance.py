@@ -727,13 +727,15 @@ def benchmark(args: argparse.Namespace, root: Path) -> dict[str, Any]:
              "calendarIds": calendar_ids, "timeZone": "UTC"},
             args.warmups, args.samples, DAILY_COUNTS_GATE_MS,
         )
+        day_counts = (daily_result.get("counts")
+                      if isinstance(daily_result, dict) else None)
         require(
-            isinstance(daily_result, dict)
+            isinstance(day_counts, dict)
             and any(isinstance(count, int) and count > 0
-                    for count in daily_result.values()),
+                    for count in day_counts.values()),
             "yearly daily counts returned no representative events",
         )
-        daily_counts["resultCount"] = len(daily_result)
+        daily_counts["resultCount"] = len(day_counts)
         search, search_result = measure(
             client, "events.search", search_params, args.warmups, args.samples,
             SEARCH_GATE_MS,
