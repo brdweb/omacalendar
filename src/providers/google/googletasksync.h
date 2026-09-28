@@ -19,6 +19,14 @@ inline constexpr auto kGoogleTaskFormat = "google-tasks-json";
 // The fields OmaCalendar edits, for inserts and patches.
 [[nodiscard]] QJsonObject taskToGoogleJson(const Task& task);
 
+// A create whose response never arrived may still have reached Google. Pairs
+// each such local write with an unclaimed Google task holding the same
+// content, taking it from candidates. The Tasks API has no idempotent insert,
+// so an identical task added elsewhere in the meantime is taken as that copy. Returns
+// local task id -> Google task id.
+[[nodiscard]] QHash<QString, QString> matchUnconfirmedCreates(const QList<Task>& writes,
+                                                              QList<Task>* candidates);
+
 // Keeps an account's Google task lists and the stored copies in step: owed
 // local writes are sent first, then every list is read back in full. The
 // Tasks API has no conditional writes, so the last write wins.
@@ -46,6 +54,8 @@ class GoogleTaskSync final : public QObject {
   void syncNextList(const std::shared_ptr<Job>& job);
   void sendNextWrite(const std::shared_ptr<Job>& job);
   void readTaskPage(const std::shared_ptr<Job>& job, const QString& pageToken);
+  void storeRemoteTasks(const std::shared_ptr<Job>& job);
+  void reconcileCreates(const std::shared_ptr<Job>& job);
   void recordWrite(const std::shared_ptr<Job>& job, const Task& task,
                    const ApiResponse& response);
   void failList(const std::shared_ptr<Job>& job, const ApiResponse& response);

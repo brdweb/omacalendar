@@ -156,6 +156,40 @@ void ProviderTest::googleTasksRequestsAndMapping() {
            QStringLiteral("needsAction"));
   QVERIFY(body.value(QStringLiteral("due")).isNull());
   QVERIFY(body.value(QStringLiteral("completed")).isNull());
+
+  // A create or removal written before Google confirmed the create claims an
+  // unclaimed Google copy with the same content, each copy at most once.
+  Task pending;
+  pending.id = QStringLiteral("local-1");
+  pending.title = QStringLiteral("Call the bank");
+  pending.dueDate = QDate(2026, 10, 1);
+  pending.pendingOperation = QStringLiteral("create");
+  Task twin = pending;
+  twin.id = QStringLiteral("local-2");
+  Task removed = pending;
+  removed.id = QStringLiteral("local-3");
+  removed.title = QStringLiteral("Book flights");
+  removed.pendingOperation = QStringLiteral("remove");
+  Task confirmed = pending;
+  confirmed.id = QStringLiteral("local-4");
+  confirmed.remoteId = QStringLiteral("g-known");
+  confirmed.pendingOperation = QStringLiteral("update");
+  Task copy = pending;
+  copy.remoteId = QStringLiteral("g-1");
+  Task other = removed;
+  other.remoteId = QStringLiteral("g-2");
+  Task different = pending;
+  different.remoteId = QStringLiteral("g-3");
+  different.notes = QStringLiteral("not the same");
+  QList<Task> candidates{different, copy, other};
+  const QHash<QString, QString> matched =
+      google::matchUnconfirmedCreates({pending, twin, removed, confirmed}, &candidates);
+  QCOMPARE(matched.value(QStringLiteral("local-1")), QStringLiteral("g-1"));
+  QVERIFY(!matched.contains(QStringLiteral("local-2")));
+  QCOMPARE(matched.value(QStringLiteral("local-3")), QStringLiteral("g-2"));
+  QVERIFY(!matched.contains(QStringLiteral("local-4")));
+  QCOMPARE(candidates.size(), 1);
+  QCOMPARE(candidates.first().remoteId, QStringLiteral("g-3"));
 }
 
 void ProviderTest::attachmentsAndConferenceRequests() {

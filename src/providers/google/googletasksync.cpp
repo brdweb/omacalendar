@@ -3,6 +3,7 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QTimer>
+#include <algorithm>
 
 namespace omacalendar::google {
 namespace {
@@ -19,7 +20,36 @@ QDateTime rfc3339(const QString& value) {
   return parsed.isValid() ? parsed.toUTC() : QDateTime{};
 }
 
+bool sameContent(const Task& local, const Task& remote) {
+  return local.title == remote.title && local.notes == remote.notes &&
+         local.dueDate == remote.dueDate && local.completed == remote.completed;
+}
+
+// Written before its create was confirmed: no Google id yet.
+bool unconfirmed(const Task& task) {
+  return task.remoteId.isEmpty() &&
+         (task.pendingOperation == QStringLiteral("create") ||
+          task.pendingOperation == QStringLiteral("remove"));
+}
+
 }  // namespace
+
+QHash<QString, QString> matchUnconfirmedCreates(const QList<Task>& writes,
+                                                QList<Task>* candidates) {
+  QHash<QString, QString> matched;
+  for (const Task& write : writes) {
+    if (!unconfirmed(write)) {
+      continue;
+    }
+    for (qsizetype index = 0; index < candidates->size(); ++index) {
+      if (sameContent(write, candidates->at(index))) {
+        matched.insert(write.id, candidates->takeAt(index).remoteId);
+        break;
+      }
+    }
+  }
+  return matched;
+}
 
 Task taskFromGoogleJson(const QJsonObject& resource) {
   Task task;
@@ -67,6 +97,8 @@ struct GoogleTaskSync::Job {
   QList<Task> writes;
   int writeIndex = 0;
   QList<Task> remoteTasks;
+  // Reading the list before the writes, to find creates that already landed.
+  bool reconciling = false;
   QStringList changed;
 };
 
@@ -138,6 +170,8 @@ void GoogleTaskSync::storeLists(const std::shared_ptr<Job>& job) {
     seen.insert(remoteId);
     TaskList list = m_database->taskListByRemoteId(job->accountId, remoteId);
     const bool added = list.id.isEmpty();
+    const QString previousName = list.name;
+    const int previousPosition = list.position;
     if (added) {
       list.id = newUuid();
       list.accountId = job->accountId;
@@ -155,7 +189,7 @@ void GoogleTaskSync::storeLists(const std::shared_ptr<Job>& job) {
       emit syncFailed(job->accountId, list.id, QStringLiteral("database_error"), error);
       continue;
     }
-    if (added) {
+    if (added || list.name != previousName || list.position != previousPosition) {
       job->changed.append(list.id);
     }
   }
@@ -185,6 +219,40 @@ void GoogleTaskSync::syncNextList(const std::shared_ptr<Job>& job) {
   }
   job->writes = m_database->pendingTaskWrites(job->lists.at(job->listIndex).id);
   job->writeIndex = 0;
+  job->remoteTasks.clear();
+  job->reconciling = std::any_of(job->writes.cbegin(), job->writes.cend(), unconfirmed);
+  if (job->reconciling) {
+    readTaskPage(job, {});
+    return;
+  }
+  sendNextWrite(job);
+}
+
+void GoogleTaskSync::reconcileCreates(const std::shared_ptr<Job>& job) {
+  const TaskList& list = job->lists.at(job->listIndex);
+  QString error;
+  const QSet<QString> known = m_database->taskRemoteIds(list.id, &error);
+  QList<Task> candidates;
+  for (const Task& remote : std::as_const(job->remoteTasks)) {
+    // Without the stored ids nothing is claimed; the writes go out as they are.
+    if (error.isEmpty() && !known.contains(remote.remoteId)) {
+      candidates.append(remote);
+    }
+  }
+  const QHash<QString, QString> matched =
+      matchUnconfirmedCreates(job->writes, &candidates);
+  for (Task& write : job->writes) {
+    const QString remoteId = matched.value(write.id);
+    if (remoteId.isEmpty()) {
+      continue;
+    }
+    // Google has it already: patch or delete that copy instead of adding one.
+    write.remoteId = remoteId;
+    if (write.pendingOperation == QStringLiteral("create")) {
+      write.pendingOperation = QStringLiteral("update");
+    }
+  }
+  job->reconciling = false;
   job->remoteTasks.clear();
   sendNextWrite(job);
 }
@@ -261,9 +329,8 @@ void GoogleTaskSync::recordWrite(const std::shared_ptr<Job>& job, const Task& ta
 
 void GoogleTaskSync::readTaskPage(const std::shared_ptr<Job>& job,
                                   const QString& pageToken) {
-  const TaskList list = job->lists.at(job->listIndex);
-  m_client->listTasks(job->accountId, list.remoteId, pageToken,
-                      [this, job, list, pageToken](const ApiResponse& response) {
+  m_client->listTasks(job->accountId, job->lists.at(job->listIndex).remoteId, pageToken,
+                      [this, job, pageToken](const ApiResponse& response) {
                         if (!current(job)) {
                           return;
                         }
@@ -283,24 +350,33 @@ void GoogleTaskSync::readTaskPage(const std::shared_ptr<Job>& job,
                           readTaskPage(job, next);
                           return;
                         }
-                        bool changed = false;
-                        QString error;
-                        if (!m_database->applyRemoteTasks(list.id, job->remoteTasks,
-                                                          true, &changed, &error)) {
-                          ApiResponse failure;
-                          failure.errorCode = QStringLiteral("database_error");
-                          failure.errorMessage = error;
-                          failList(job, failure);
-                          return;
+                        if (job->reconciling) {
+                          reconcileCreates(job);
+                        } else {
+                          storeRemoteTasks(job);
                         }
-                        if (changed) {
-                          job->changed.append(list.id);
-                        }
-                        TaskList synced = list;
-                        synced.lastSyncAt = QDateTime::currentDateTimeUtc();
-                        m_database->upsertTaskList(synced);
-                        syncNextList(job);
                       });
+}
+
+void GoogleTaskSync::storeRemoteTasks(const std::shared_ptr<Job>& job) {
+  const TaskList list = job->lists.at(job->listIndex);
+  bool changed = false;
+  QString error;
+  if (!m_database->applyRemoteTasks(list.id, job->remoteTasks, true, &changed,
+                                    &error)) {
+    ApiResponse failure;
+    failure.errorCode = QStringLiteral("database_error");
+    failure.errorMessage = error;
+    failList(job, failure);
+    return;
+  }
+  if (changed) {
+    job->changed.append(list.id);
+  }
+  TaskList synced = list;
+  synced.lastSyncAt = QDateTime::currentDateTimeUtc();
+  m_database->upsertTaskList(synced);
+  syncNextList(job);
 }
 
 void GoogleTaskSync::failList(const std::shared_ptr<Job>& job,
