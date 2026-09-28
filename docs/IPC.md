@@ -120,6 +120,19 @@ and cleanup; a started check is not proof of server support.
   `events.respond`, `events.undo`
 - `invitations.list`, `invitations.markSeen`
 
+`stats.dailyCounts` is additive and not yet released (added after 2.1,
+advertised in the next release). Discover it in `system.info` `methods`; the
+protocol minor remains 2.1 until that release. It takes required ISO dates
+`start` and exclusive `end` (at most 366 days apart), optional `calendarIds`
+(same scope as `events.list`; omitted means all calendars), and optional
+`timeZone` (IANA ID; defaults to the configured display zone, then the
+machine-local zone). It returns an object mapping each overlapping local
+`YYYY-MM-DD` to its event/occurrence count, omitting days with zero events.
+Timed events count on every day touched by their half-open interval; all-day
+events count from `startDate` through the day before their exclusive `endDate`.
+Recurrences and detached occurrences use the same expansion as `events.list`.
+Invalid dates, ranges and time zones return `invalid_params`.
+
 `invitations.list` returns invitations that need a response, sorted upcoming
 first. IPC 2.1 additively introduces the `upcomingTotal` and `pastTotal` result
 fields alongside `total`. These bucket counts describe the full filtered result,

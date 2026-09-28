@@ -1468,6 +1468,68 @@ def run_settings_get_many_contract(harness: DaemonHarness) -> None:
         assert_ipc_error(harness.call_error("settings.getMany", params), "invalid_params", context)
 
 
+def run_daily_counts_contract(harness: DaemonHarness) -> None:
+    def create(name: str, calendar_id: str, start: str, end: str) -> None:
+        harness.call(
+            "events.create",
+            {
+                "clientMutationId": f"contract-stats-{name}",
+                "recurrenceScope": "series",
+                "guestNotificationPolicy": "none",
+                "event": {
+                    "calendarId": calendar_id,
+                    "summary": name,
+                    "startUtc": start,
+                    "endUtc": end,
+                    "startTimeZone": "UTC",
+                    "endTimeZone": "UTC",
+                    "allDay": False,
+                    "timeKind": "zoned",
+                },
+            },
+        )
+
+    create("overnight", "contract-local", "2026-09-02T23:30:00Z",
+           "2026-09-03T00:30:00Z")
+    create("zone-shift", "contract-local", "2026-09-02T00:30:00Z",
+           "2026-09-02T01:30:00Z")
+    create("other-calendar", "local-default", "2026-09-04T12:00:00Z",
+           "2026-09-04T13:00:00Z")
+    params = {"start": "2026-09-01", "end": "2026-09-08",
+              "calendarIds": ["contract-local"], "timeZone": "UTC"}
+    expected = {
+        "2026-09-01": 1, "2026-09-02": 2, "2026-09-03": 2,
+        "2026-09-04": 1, "2026-09-05": 1, "2026-09-06": 1,
+        "2026-09-07": 1,
+    }
+    require(harness.call("stats.dailyCounts", params) == expected,
+            "daily counts disagreed with multi-day/all-day/recurring overlap")
+    require(harness.call("stats.dailyCounts", {**params, "start": "2026-09-04",
+                                               "end": "2026-09-05"}) == {
+                                                   "2026-09-04": 1},
+            "exclusive range end or calendar filter was ignored")
+    require(harness.call("stats.dailyCounts", {**params, "timeZone":
+                                               "America/Los_Angeles"}).get(
+                                                   "2026-09-01") == 2,
+            "display time zone did not shift an event across midnight")
+    harness.call("settings.set", {"key": "displayTimeZone",
+                                  "value": "America/Los_Angeles"})
+    require(harness.call("stats.dailyCounts", {key: value for key, value in
+                                               params.items() if key != "timeZone"}) ==
+            harness.call("stats.dailyCounts", {**params, "timeZone":
+                                               "America/Los_Angeles"}),
+            "default display zone did not match the configured setting")
+    for invalid in (
+        {}, {"start": "2026-09-40", "end": "2026-09-08"},
+        {"start": "2026-09-08", "end": "2026-09-08"},
+        {"start": "2026-01-01", "end": "2027-01-03"},
+        {**params, "timeZone": "Not/A_Zone"},
+        {**params, "calendarIds": [4]},
+    ):
+        assert_ipc_error(harness.call_error("stats.dailyCounts", invalid),
+                         "invalid_params", f"stats.dailyCounts {invalid}")
+
+
 def run_contract(harness: DaemonHarness) -> None:
     require(not harness.database_path.exists(), "test did not begin with fresh state")
     harness.start()
@@ -1496,6 +1558,7 @@ def run_contract(harness: DaemonHarness) -> None:
         "events.undo",
         "settings.get",
         "settings.getMany",
+        "stats.dailyCounts",
     }
     methods = info.get("methods")
     require(isinstance(methods, list), "system.info methods is not an array")
@@ -1752,6 +1815,7 @@ def run_contract(harness: DaemonHarness) -> None:
             },
         },
     )
+    run_daily_counts_contract(harness)
 
     def reject_without_durable_mutation(
         method: str,

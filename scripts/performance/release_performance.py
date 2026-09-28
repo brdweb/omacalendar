@@ -32,6 +32,7 @@ from typing import Any, Iterable
 SCHEMA_VERSION = 3
 PROTOCOL_MAJOR = 2
 AGENDA_GATE_MS = 200.0
+DAILY_COUNTS_GATE_MS = 250.0
 SEARCH_GATE_MS = 250.0
 WIDGET_GATE_MS = 100.0
 REFERENCE_START = datetime(2026, 8, 17, tzinfo=UTC)
@@ -720,6 +721,19 @@ def benchmark(args: argparse.Namespace, root: Path) -> dict[str, Any]:
                 agenda["p95Ms"] / max(0.001, baseline_agenda["p95Ms"]), 3,
             )
 
+        daily_counts, daily_result = measure(
+            client, "stats.dailyCounts",
+            {"start": "2026-01-01", "end": "2027-01-01",
+             "calendarIds": calendar_ids, "timeZone": "UTC"},
+            args.warmups, args.samples, DAILY_COUNTS_GATE_MS,
+        )
+        require(
+            isinstance(daily_result, dict)
+            and any(isinstance(count, int) and count > 0
+                    for count in daily_result.values()),
+            "yearly daily counts returned no representative events",
+        )
+        daily_counts["resultCount"] = len(daily_result)
         search, search_result = measure(
             client, "events.search", search_params, args.warmups, args.samples,
             SEARCH_GATE_MS,
@@ -801,6 +815,7 @@ def benchmark(args: argparse.Namespace, root: Path) -> dict[str, Any]:
 
     gates = {
         "agendaP95": bool(agenda["passesGate"]),
+        "dailyCountsP95": bool(daily_counts["passesGate"]),
         "searchP95": bool(search["passesGate"]),
         "widgetP95": bool(widget["passesGate"]),
         "historicalSeriesP95": (
@@ -830,6 +845,7 @@ def benchmark(args: argparse.Namespace, root: Path) -> dict[str, Any]:
             "boundedAgendaWithoutHistory": baseline_agenda,
             "indexedSearch": search,
             "widgetSnapshot": widget,
+            "yearlyDailyCounts": daily_counts,
             "widgetUnchangedSnapshot": unchanged,
         },
         "queryPlans": plans,

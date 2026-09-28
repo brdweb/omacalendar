@@ -528,6 +528,10 @@ void Daemon::registerHandlers() {
                            [this](const QJsonObject& params, ipc::Error* error) {
                              return onEventsList(params, error);
                            });
+  m_router.registerHandler(QStringLiteral("stats.dailyCounts"),
+                           [this](const QJsonObject& params, ipc::Error* error) {
+                             return onStatsDailyCounts(params, error);
+                           });
   m_router.registerHandler(QStringLiteral("events.get"),
                            [this](const QJsonObject& params, ipc::Error* error) {
                              return onEventsGet(params, error);
@@ -1536,6 +1540,89 @@ QJsonValue Daemon::onEventsList(const QJsonObject& params, ipc::Error* error) {
                                          : safeOffset + safeCount},
       {QStringLiteral("coverage"), coverage},
   };
+}
+
+QJsonValue Daemon::onStatsDailyCounts(const QJsonObject& params, ipc::Error* error) {
+  const QString startText = params.value(QStringLiteral("start")).toString();
+  const QString endText = params.value(QStringLiteral("end")).toString();
+  const QDate start = QDate::fromString(startText, Qt::ISODate);
+  const QDate end = QDate::fromString(endText, Qt::ISODate);
+  if (!start.isValid() || !end.isValid() ||
+      start.toString(Qt::ISODate) != startText ||
+      end.toString(Qt::ISODate) != endText || start >= end ||
+      start.daysTo(end) > 366) {
+    if (error != nullptr) {
+      *error = {QStringLiteral("invalid_params"),
+                QStringLiteral("start and end must be ISO dates within 366 days"),
+                false};
+    }
+    return {};
+  }
+  const QStringList calendarIds =
+      parseCalendarIds(params.value(QStringLiteral("calendarIds")), error);
+  if (error != nullptr && !error->code.isEmpty()) {
+    return {};
+  }
+  QString zoneId;
+  if (params.contains(QStringLiteral("timeZone"))) {
+    if (!params.value(QStringLiteral("timeZone")).isString()) {
+      if (error != nullptr) {
+        *error = {QStringLiteral("invalid_params"),
+                  QStringLiteral("timeZone must be an IANA time zone"), false};
+      }
+      return {};
+    }
+    zoneId = params.value(QStringLiteral("timeZone")).toString();
+  } else {
+    QString dbError;
+    zoneId = m_database.setting(QStringLiteral("displayTimeZone"), {}, &dbError)
+                 .toString();
+    if (!dbError.isEmpty()) {
+      if (error != nullptr) {
+        *error = {QStringLiteral("database_error"), dbError, false};
+      }
+      return {};
+    }
+  }
+  const QTimeZone zone =
+      zoneId.isEmpty() ? QTimeZone(QTimeZone::LocalTime) : QTimeZone(zoneId.toUtf8());
+  if (!zone.isValid()) {
+    if (error != nullptr) {
+      *error = {QStringLiteral("invalid_params"),
+                QStringLiteral("timeZone must be an IANA time zone"), false};
+    }
+    return {};
+  }
+  const QDateTime startUtc = QDateTime(start, QTime(0, 0), zone).toUTC();
+  const QDateTime endUtc = QDateTime(end, QTime(0, 0), zone).toUTC();
+  QString dbError;
+  m_sync.ensureRangeHydrated(startUtc, endUtc, calendarIds, &dbError);
+  if (dbError.isEmpty()) {
+    // The range query filters all-day dates using UTC dates. Padding makes
+    // local dates at either edge available even in UTC+14 / UTC-12.
+    const QList<Event> events = m_database.eventsBetween(
+        startUtc.addDays(-2), endUtc.addDays(2), calendarIds, &dbError);
+    if (dbError.isEmpty()) {
+      QJsonObject counts;
+      for (const Event& event : events) {
+        const QDate first = event.allDay ? event.startDate
+                                        : event.startUtc.toTimeZone(zone).date();
+        const QDate last = event.allDay
+                               ? event.endDate.addDays(-1)
+                               : event.endUtc.addMSecs(-1).toTimeZone(zone).date();
+        for (QDate day = qMax(first, start); day <= qMin(last, end.addDays(-1));
+             day = day.addDays(1)) {
+          const QString key = day.toString(Qt::ISODate);
+          counts.insert(key, counts.value(key).toInt() + 1);
+        }
+      }
+      return counts;
+    }
+  }
+  if (error != nullptr) {
+    *error = {QStringLiteral("database_error"), dbError, false};
+  }
+  return {};
 }
 
 QJsonValue Daemon::onEventsGet(const QJsonObject& params, ipc::Error* error) {

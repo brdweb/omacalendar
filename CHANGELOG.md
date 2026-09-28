@@ -29,6 +29,8 @@ Versioning once public releases begin.
 
 - The `settings.getMany` IPC method reads several settings in one request
   (see docs/IPC.md).
+- Add `stats.dailyCounts` for bounded local-day counts without transferring
+  full event DTOs (#43).
 - A report-only desktop view benchmark (see docs/PERFORMANCE.md).
 
 ### Fixed
