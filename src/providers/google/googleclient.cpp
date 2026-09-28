@@ -17,6 +17,7 @@ namespace omacalendar::google {
 namespace {
 
 constexpr auto kApiBase = "https://www.googleapis.com/calendar/v3";
+constexpr auto kTasksApiBase = "https://tasks.googleapis.com/tasks/v1";
 constexpr qint64 kMaximumResponseBytes = 8 * 1024 * 1024;
 constexpr int kTransferTimeoutMs = 30 * 1000;
 
@@ -118,6 +119,35 @@ void addBounds(QUrlQuery* query, const QDateTime& timeMinUtc,
 }
 
 }  // namespace
+
+QUrl taskListsRequestUrl(const QString& pageToken) {
+  QUrl url(QString::fromLatin1(kTasksApiBase) + QStringLiteral("/users/@me/lists"));
+  QUrlQuery query;
+  query.addQueryItem(QStringLiteral("maxResults"), QStringLiteral("100"));
+  addPagination(&query, pageToken);
+  url.setQuery(query);
+  return url;
+}
+
+QUrl taskResourceUrl(const QString& taskListId, const QString& taskId) {
+  QString path = QString::fromLatin1(kTasksApiBase) + QStringLiteral("/lists/") +
+                 pathSegment(taskListId) + QStringLiteral("/tasks");
+  if (!taskId.isEmpty()) {
+    path += QLatin1Char('/') + pathSegment(taskId);
+  }
+  return QUrl(path);
+}
+
+QUrl tasksRequestUrl(const QString& taskListId, const QString& pageToken) {
+  QUrl url = taskResourceUrl(taskListId);
+  QUrlQuery query;
+  query.addQueryItem(QStringLiteral("maxResults"), QStringLiteral("100"));
+  query.addQueryItem(QStringLiteral("showCompleted"), QStringLiteral("true"));
+  query.addQueryItem(QStringLiteral("showHidden"), QStringLiteral("true"));
+  addPagination(&query, pageToken);
+  url.setQuery(query);
+  return url;
+}
 
 bool isValidGuestNotificationPolicy(const QString& value) {
   return value == QStringLiteral("none") || value == QStringLiteral("all") ||
@@ -405,6 +435,37 @@ void GoogleClient::respondToEvent(const QString& accountId,
   url.setQuery(query);
   request(accountId, QByteArrayLiteral("PATCH"), url, attendeePatch, etag,
           std::move(callback));
+}
+
+void GoogleClient::listTaskLists(const QString& accountId, const QString& pageToken,
+                                 Callback callback) {
+  request(accountId, QByteArrayLiteral("GET"), taskListsRequestUrl(pageToken), {}, {},
+          std::move(callback));
+}
+
+void GoogleClient::listTasks(const QString& accountId, const QString& taskListId,
+                             const QString& pageToken, Callback callback) {
+  request(accountId, QByteArrayLiteral("GET"), tasksRequestUrl(taskListId, pageToken),
+          {}, {}, std::move(callback));
+}
+
+void GoogleClient::createTask(const QString& accountId, const QString& taskListId,
+                              const QJsonObject& task, Callback callback) {
+  request(accountId, QByteArrayLiteral("POST"), taskResourceUrl(taskListId), task, {},
+          std::move(callback));
+}
+
+void GoogleClient::updateTask(const QString& accountId, const QString& taskListId,
+                              const QString& taskId, const QJsonObject& task,
+                              Callback callback) {
+  request(accountId, QByteArrayLiteral("PATCH"), taskResourceUrl(taskListId, taskId),
+          task, {}, std::move(callback));
+}
+
+void GoogleClient::deleteTask(const QString& accountId, const QString& taskListId,
+                              const QString& taskId, Callback callback) {
+  request(accountId, QByteArrayLiteral("DELETE"), taskResourceUrl(taskListId, taskId),
+          {}, {}, std::move(callback), true);
 }
 
 void GoogleClient::request(const QString& accountId, const QByteArray& verb, QUrl url,

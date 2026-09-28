@@ -46,11 +46,13 @@ accounts in the acceptance test. OmaCalendar requests only these scopes:
 - `https://www.googleapis.com/auth/calendar.calendars`
 - `https://www.googleapis.com/auth/calendar.calendarlist.readonly`
 - `https://www.googleapis.com/auth/calendar.freebusy`
+- `https://www.googleapis.com/auth/tasks`
 
 The current app uses `calendar.calendars` only to delete an owned, non-primary
 secondary calendar after explicit confirmation. It does not create or rename
 Google calendars. It uses `calendar.freebusy` only to show guests' busy times
-in the event editor; that scope returns busy intervals, never event details.
+in the event editor; that scope returns busy intervals, never event details. It
+uses `tasks` to read and change the account's Google Tasks lists.
 Whenever the scope set grows, each previously connected Google account on an
 existing installation must complete **Reauthorize** once.
 

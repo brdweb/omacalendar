@@ -16,8 +16,9 @@ SQLite database so views work offline.
 - ICS content from subscriptions or files selected by the user.
 - Event details entered locally, including guests and reminders.
 - Tasks: titles, notes, due dates and completion. Tasks in the built-in
-  "Tasks" list stay on the device; tasks in a CalDAV task list are read from and
-  written to that server.
+  "Tasks" list stay on the device; tasks in a CalDAV or Google task list are
+  read from and written to that server, using Google's `tasks` permission for
+  Google lists.
 - Omarchy theme/configuration needed for appearance and optional widget
   activation.
 

@@ -1,6 +1,7 @@
 #include "providers/google/googlesync.h"
 
 #include <QCryptographicHash>
+#include <QDebug>
 #include <QFutureWatcher>
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -22,7 +23,7 @@ namespace {
 
 constexpr auto kClientIdSetting = "google.oauth.clientId";
 constexpr auto kOAuthScopeVersionSetting = "google.oauth.scopeVersion";
-constexpr int kOAuthScopeVersion = 3;
+constexpr int kOAuthScopeVersion = 4;
 constexpr auto kCalendarListToken = "calendarList.syncToken";
 
 quint64 stableJitterKey(const QString& value) {
@@ -183,8 +184,15 @@ GoogleSync::GoogleSync(Database* database, QObject* parent)
     : Provider(QStringLiteral("google"), ProviderKind::Google, parent),
       m_database(database),
       m_auth(this),
-      m_client(&m_auth, this) {
+      m_client(&m_auth, this),
+      m_tasks(database, &m_client, this) {
   m_mappingPool.setMaxThreadCount(1);
+  connect(&m_tasks, &GoogleTaskSync::tasksChanged, this, &GoogleSync::tasksChanged);
+  connect(&m_tasks, &GoogleTaskSync::syncFailed, this,
+          [](const QString&, const QString& listId, const QString& errorCode,
+             const QString&) {
+            qWarning().noquote() << "Google task sync failed:" << listId << errorCode;
+          });
   m_pollTimer.setInterval(5 * 60 * 1000);
   connect(&m_pollTimer, &QTimer::timeout, this, &GoogleSync::syncAll);
   m_pollTimer.start();
@@ -633,7 +641,8 @@ bool GoogleSync::restoreAccounts(QString* errorMessage) {
           statusObject(QStringLiteral("reauthorization_required"),
                        QStringLiteral("oauth_scope_upgrade"),
                        QStringLiteral("Reauthorize this Google account to grant "
-                                      "calendar-management and free/busy access"));
+                                      "calendar-management, free/busy and tasks "
+                                      "access"));
       m_status.insert(account.id, value);
       emit accountChanged(account.id);
       emit syncStatusChanged(account.id, value);
@@ -685,6 +694,7 @@ void GoogleSync::cancelAuthorization(const QString& accountId) {
 
 bool GoogleSync::disconnectAccount(const QString& accountId,
                                    const bool removeCachedData, QString* errorMessage) {
+  m_tasks.cancel(accountId);
   if (m_pendingDisconnects.contains(accountId)) {
     if (errorMessage != nullptr) {
       *errorMessage =
@@ -908,6 +918,22 @@ void GoogleSync::syncAccount(const QString& accountId) {
   job = activeJob(accountId, generation);
   if (job != nullptr) {
     startCalendarList(job);
+  }
+  // Task lists sync alongside, with their own requests.
+  m_tasks.syncAccount(accountId);
+}
+
+void GoogleSync::syncTasks(const QString& accountId) {
+  const Account account = m_database->account(accountId);
+  if (account.id.isEmpty() || !account.enabled ||
+      account.authStatus == QStringLiteral("reauthorization_required")) {
+    return;
+  }
+  if (m_auth.hasAccessToken(accountId)) {
+    m_tasks.syncAccount(accountId);
+  } else {
+    // Refreshing the token goes through a full sync, which includes tasks.
+    syncAccount(accountId);
   }
 }
 

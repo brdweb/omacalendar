@@ -48,6 +48,11 @@ struct ApiResponse {
                                        const QString& eventRemoteId,
                                        const QString& targetCalendarRemoteId,
                                        const QString& sendUpdates);
+// Google Tasks API.
+[[nodiscard]] QUrl taskListsRequestUrl(const QString& pageToken);
+[[nodiscard]] QUrl tasksRequestUrl(const QString& taskListId, const QString& pageToken);
+[[nodiscard]] QUrl taskResourceUrl(const QString& taskListId,
+                                   const QString& taskId = {});
 [[nodiscard]] ApiResponse parseGoogleApiResponse(
     int httpStatus, int networkError, const QByteArray& body,
     const QByteArray& etag = {}, const QByteArray& retryAfter = {},
@@ -93,6 +98,17 @@ class GoogleClient final : public QObject {
   void queryFreeBusy(const QString& accountId, const QStringList& ids,
                      const QDateTime& timeMinUtc, const QDateTime& timeMaxUtc,
                      Callback callback);
+  void listTaskLists(const QString& accountId, const QString& pageToken,
+                     Callback callback);
+  // Every task of a list, completed and hidden ones included.
+  void listTasks(const QString& accountId, const QString& taskListId,
+                 const QString& pageToken, Callback callback);
+  void createTask(const QString& accountId, const QString& taskListId,
+                  const QJsonObject& task, Callback callback);
+  void updateTask(const QString& accountId, const QString& taskListId,
+                  const QString& taskId, const QJsonObject& task, Callback callback);
+  void deleteTask(const QString& accountId, const QString& taskListId,
+                  const QString& taskId, Callback callback);
   void respondToEvent(const QString& accountId, const QString& calendarRemoteId,
                       const QString& eventRemoteId, const QString& etag,
                       const QJsonObject& attendeePatch, const QString& sendUpdates,

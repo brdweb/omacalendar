@@ -11,6 +11,7 @@
 #include "core/freebusy.h"
 #include "providers/google/googleauth.h"
 #include "providers/google/googleclient.h"
+#include "providers/google/googletasksync.h"
 #include "sync/provider.h"
 #include "sync/retrypolicy.h"
 
@@ -69,9 +70,12 @@ class GoogleSync final : public Provider {
   bool syncRange(const RangeSyncRequest& request,
                  QString* errorMessage = nullptr) override;
   [[nodiscard]] QJsonObject status(const QString& accountId = {}) const override;
+  // Sends the account's owed task writes and reads its task lists back.
+  void syncTasks(const QString& accountId);
 
  signals:
   void authorizationUrlReady(const QString& accountId, const QUrl& url);
+  void tasksChanged(const QStringList& listIds);
 
  private:
   struct SyncJob;
@@ -118,6 +122,7 @@ class GoogleSync final : public Provider {
   Database* m_database = nullptr;
   GoogleAuthManager m_auth;
   GoogleClient m_client;
+  GoogleTaskSync m_tasks;
   RetryPolicy m_retryPolicy;
   QThreadPool m_mappingPool;
   QTimer m_pollTimer;

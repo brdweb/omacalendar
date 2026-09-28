@@ -32,8 +32,8 @@ is started on demand by its systemd socket.
 - **Tasks** in the sidebar (Ctrl+Shift+T) lists your to-dos by when they are
   due. Add one by typing its title, tick it off when done, or click it to set
   notes and a due date. Open tasks also appear in the agenda on their due day.
-  CalDAV task lists (for example from Nextcloud or Radicale) show up next to the
-  built-in list and stay in sync with the server.
+  CalDAV task lists (for example from Nextcloud or Radicale) and Google Tasks
+  lists show up next to the built-in list and stay in sync with the server.
 - **Print** (Ctrl+P) saves the current day, week, agenda or month as a PDF,
   either as a list of events by day or as month grids.
 

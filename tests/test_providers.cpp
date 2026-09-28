@@ -21,6 +21,7 @@
 #include "providers/google/googlemapper.h"
 #include "providers/google/googleoauthconfig.h"
 #include "providers/google/googlesync.h"
+#include "providers/google/googletasksync.h"
 #include "sync/retrypolicy.h"
 
 using namespace omacalendar;
@@ -95,7 +96,67 @@ class ProviderTest final : public QObject {
   void retryClassification();
   void retryBackoffAndRetryAfter();
   void attachmentsAndConferenceRequests();
+  void googleTasksRequestsAndMapping();
 };
+
+void ProviderTest::googleTasksRequestsAndMapping() {
+  const QUrl lists = google::taskListsRequestUrl(QStringLiteral("next page"));
+  QCOMPARE(lists.host(), QStringLiteral("tasks.googleapis.com"));
+  QCOMPARE(lists.path(), QStringLiteral("/tasks/v1/users/@me/lists"));
+  QCOMPARE(QUrlQuery(lists).queryItemValue(QStringLiteral("pageToken")),
+           QStringLiteral("next page"));
+  const QUrl tasks = google::tasksRequestUrl(QStringLiteral("list/1"), {});
+  QVERIFY(tasks.toEncoded().contains("lists/list%2F1/tasks"));
+  const QUrlQuery taskQuery(tasks);
+  QCOMPARE(taskQuery.queryItemValue(QStringLiteral("showCompleted")),
+           QStringLiteral("true"));
+  QCOMPARE(taskQuery.queryItemValue(QStringLiteral("showHidden")),
+           QStringLiteral("true"));
+  QVERIFY(google::taskResourceUrl(QStringLiteral("l"), QStringLiteral("t 1"))
+              .toEncoded()
+              .endsWith("lists/l/tasks/t%201"));
+
+  const QJsonObject resource{
+      {QStringLiteral("id"), QStringLiteral("task-1")},
+      {QStringLiteral("etag"), QStringLiteral("\"e1\"")},
+      {QStringLiteral("title"), QStringLiteral("Renew passport")},
+      {QStringLiteral("notes"), QStringLiteral("Photos first")},
+      {QStringLiteral("status"), QStringLiteral("completed")},
+      {QStringLiteral("due"), QStringLiteral("2026-10-05T00:00:00.000Z")},
+      {QStringLiteral("completed"), QStringLiteral("2026-10-04T08:30:00.000Z")},
+      {QStringLiteral("parent"), QStringLiteral("task-0")},
+      {QStringLiteral("position"), QStringLiteral("00000000000000000001")},
+      {QStringLiteral("links"), QJsonArray{}},
+  };
+  const Task task = google::taskFromGoogleJson(resource);
+  QCOMPARE(task.remoteId, QStringLiteral("task-1"));
+  QCOMPARE(task.title, QStringLiteral("Renew passport"));
+  QCOMPARE(task.notes, QStringLiteral("Photos first"));
+  QCOMPARE(task.dueDate, QDate(2026, 10, 5));
+  QVERIFY(!task.dueUtc.isValid());
+  QVERIFY(task.completed);
+  QCOMPARE(task.completedAt, utc(2026, 10, 4, 8).addSecs(30 * 60));
+  QCOMPARE(task.parentId, QStringLiteral("task-0"));
+  QVERIFY(task.rawPayload.contains(QStringLiteral("links")));
+
+  QJsonObject body = google::taskToGoogleJson(task);
+  QCOMPARE(body.value(QStringLiteral("status")).toString(),
+           QStringLiteral("completed"));
+  QCOMPARE(body.value(QStringLiteral("due")).toString(),
+           QStringLiteral("2026-10-05T00:00:00.000Z"));
+  QVERIFY(!body.contains(QStringLiteral("id")));
+  QVERIFY(!body.contains(QStringLiteral("parent")));
+
+  // Reopening and clearing the due day are sent as explicit nulls.
+  Task reopened = task;
+  reopened.completed = false;
+  reopened.dueDate = {};
+  body = google::taskToGoogleJson(reopened);
+  QCOMPARE(body.value(QStringLiteral("status")).toString(),
+           QStringLiteral("needsAction"));
+  QVERIFY(body.value(QStringLiteral("due")).isNull());
+  QVERIFY(body.value(QStringLiteral("completed")).isNull());
+}
 
 void ProviderTest::attachmentsAndConferenceRequests() {
   // Google attachments keep only HTTPS links and fall back to the file name.
@@ -334,7 +395,7 @@ void ProviderTest::googleOAuthLoopbackConfiguration() {
   QVERIFY(sync.isConfigured());
   QCOMPARE(database.account(existing.id).authStatus,
            QStringLiteral("reauthorization_required"));
-  QCOMPARE(database.setting(QStringLiteral("google.oauth.scopeVersion")).toInt(), 3);
+  QCOMPARE(database.setting(QStringLiteral("google.oauth.scopeVersion")).toInt(), 4);
   QSignalSpy authorizationUrl(&sync, &google::GoogleSync::authorizationUrlReady);
 
   const auto googleAccountCount = [&database]() {
@@ -389,6 +450,7 @@ void ProviderTest::googleOAuthLoopbackConfiguration() {
       "https://www.googleapis.com/auth/calendar.calendarlist.readonly")));
   QVERIFY(scopes.contains(
       QStringLiteral("https://www.googleapis.com/auth/calendar.freebusy")));
+  QVERIFY(scopes.contains(QStringLiteral("https://www.googleapis.com/auth/tasks")));
 
   sync.cancelAuthorization(accountId);
   QVERIFY(database.account(accountId).id.isEmpty());
