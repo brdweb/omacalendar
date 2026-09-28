@@ -246,6 +246,7 @@ class AppController final : public QObject {
     QVariantMap options;
     QString undoToken;
     QDateTime expiresAt;
+    quint64 serial = 0;
   };
   static constexpr int kHistoryLimit = 20;
   // Returns true when it handled the error, which suppresses the generic
@@ -277,6 +278,12 @@ class AppController final : public QObject {
                               const QVariantMap& mutationOptions, HistoryMode mode);
   void undeleteWithHistory(const HistoryEntry& entry, HistoryMode mode);
   void recordInverse(HistoryMode mode, const HistoryEntry& inverse);
+  void startHistoryStep(HistoryMode mode);
+  // The step in flight succeeded: drop its entry. Failure leaves the entry
+  // in place so the same undo or redo can be tried again.
+  void finishHistoryStep(HistoryMode mode);
+  void dropHistoryStep(HistoryMode mode);
+  [[nodiscard]] ErrorHandler historyFailureHandler(HistoryMode mode);
   void applyHistoryEntry(const HistoryEntry& entry, HistoryMode mode);
   void setAccountSyncState(const QString& accountId, const QJsonObject& status);
   void refreshAccountSyncStates(bool icsOnly);
@@ -349,6 +356,9 @@ class AppController final : public QObject {
   bool m_interactive = false;
   QTimer m_interactiveRenewal;
   void sendInteractive();
+  quint64 m_historySerial = 0;
+  // The serial of the entry an undo or redo request is applying, or 0.
+  quint64 m_historyInFlight = 0;
   QList<HistoryEntry> m_undoHistory;
   QList<HistoryEntry> m_redoHistory;
 };

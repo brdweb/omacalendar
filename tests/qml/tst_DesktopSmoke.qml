@@ -602,10 +602,15 @@ Item {
             const editSpy = createTemporaryObject(signalSpyFactory, testCase, {
                 "target": row, "signalName": "editRequested"})
             row.clicked()
-            compare(jumpSpy.count, 1, "a click jumps to the result")
+            compare(jumpSpy.count, 0, "the jump waits to rule out a double-click")
+            tryCompare(jumpSpy, "count", 1, 2000, "a single click jumps to the result")
             compare(editSpy.count, 0)
+            // A double-click's first click must not jump.
+            row.clicked()
             row.doubleClicked()
             compare(editSpy.count, 1, "a double-click edits it")
+            wait(Qt.styleHints.mouseDoubleClickInterval + 100)
+            compare(jumpSpy.count, 1, "and does not jump")
 
             row.highlight = ""
             compare(title.textFormat, Text.PlainText)

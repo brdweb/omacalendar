@@ -55,10 +55,28 @@ ItemDelegate {
     Accessible.description: eventDetails.text
                             + (displayStateLabel.length > 0 ? " · " + displayStateLabel : "")
     Accessible.role: Accessible.Button
-    onClicked: jumpOnClick ? jumpRequested(eventData) : editRequested(eventData)
-    onDoubleClicked: {
+    onClicked: {
+        // Wait out the double-click interval: jumping closes the search panel,
+        // which would swallow the second click of a double-click.
         if (jumpOnClick)
+            jumpDelay.restart()
+        else
             editRequested(eventData)
+    }
+    onDoubleClicked: {
+        if (jumpOnClick) {
+            jumpDelay.stop()
+            editRequested(eventData)
+        }
+    }
+    Keys.onReturnPressed: jumpOnClick ? jumpRequested(eventData) : editRequested(eventData)
+    Keys.onEnterPressed: jumpOnClick ? jumpRequested(eventData) : editRequested(eventData)
+
+    Timer {
+        id: jumpDelay
+        objectName: "eventRowJumpDelay"
+        interval: Application.styleHints.mouseDoubleClickInterval
+        onTriggered: root.jumpRequested(root.eventData)
     }
     ToolTip.visible: generatedInstance && hovered
     ToolTip.text: qsTr("Recurring event — choose an occurrence scope when editing")

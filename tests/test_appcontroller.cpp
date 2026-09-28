@@ -64,6 +64,8 @@ class FakeDaemon final : public QObject {
   void setConflicts(const QJsonArray& conflicts) { m_conflicts = conflicts; }
   void setContacts(const QJsonArray& contacts) { m_contacts = contacts; }
   void setAccounts(const QJsonArray& accounts) { m_accounts = accounts; }
+  // Answer this method with a revision conflict until cleared.
+  void setFailingMethod(const QString& method) { m_failingMethod = method; }
   // Event mutations and sync.setInteractive requests received, oldest first,
   // as {method, params}.
   [[nodiscard]] QList<QPair<QString, QJsonObject>> mutations() const {
@@ -159,6 +161,19 @@ class FakeDaemon final : public QObject {
         response.insert(QStringLiteral("result"),
                         QJsonObject{{QStringLiteral("items"), m_operations},
                                     {QStringLiteral("count"), m_operations.size()}});
+      } else if (!m_failingMethod.isEmpty() && method == m_failingMethod) {
+        m_mutations.append({method, params});
+        response.remove(QStringLiteral("result"));
+        response.insert(
+            QStringLiteral("error"),
+            QJsonObject{
+                {QStringLiteral("code"), QStringLiteral("conflict")},
+                {QStringLiteral("message"), QStringLiteral("The event changed")},
+                {QStringLiteral("retryable"), false}});
+      } else if (method == QStringLiteral("events.search")) {
+        m_mutations.append({method, params});
+        response.insert(QStringLiteral("result"),
+                        QJsonObject{{QStringLiteral("events"), QJsonArray{}}});
       } else if (method == QStringLiteral("events.update") ||
                  method == QStringLiteral("events.create")) {
         m_mutations.append({method, params});
@@ -265,6 +280,7 @@ class FakeDaemon final : public QObject {
   QJsonArray m_contacts;
   QJsonArray m_accounts;
   QList<QPair<QString, QJsonObject>> m_mutations;
+  QString m_failingMethod;
   int m_revision = 10;
   QHash<QString, QJsonObject> m_syncStatuses;
   QJsonArray m_calendars{
@@ -317,6 +333,8 @@ class AppControllerTest final : public QObject {
   void undoAndRedoWalkTheHistory();
   void secondaryTimeLabelsFollowBothZones();
   void windowActivityReachesTheDaemon();
+  void failedUndoStaysAvailable();
+  void guestOnlySearchReachesTheDaemon();
 
  private:
   QTemporaryDir m_xdgRoot;
@@ -1118,6 +1136,8 @@ void AppControllerTest::undoAndRedoWalkTheHistory() {
   QCOMPARE(last().second.value("eventRef").toObject().value("eventId").toString(),
            QStringLiteral("restored"));
   QCOMPARE(last().second.value("expectedLocalRevision").toInt(), 70);
+  // One step at a time: the next undo waits for this redo to finish.
+  QTRY_VERIFY(!controller.canRedo());
 
   // A new change drops the redo steps; undoing a create deletes it.
   controller.undo();
@@ -1194,6 +1214,46 @@ void AppControllerTest::windowActivityReachesTheDaemon() {
   controller.setInteractive(true);
   controller.setInteractive(false);
   QTRY_COMPARE(interactiveRequests(), (QList<bool>{true, false}));
+}
+
+void AppControllerTest::failedUndoStaysAvailable() {
+  FakeDaemon daemon(1);
+  QVERIFY(daemon.listen());
+  AppController controller;
+  controller.loadRange(QDate(2026, 9, 1), QDate(2026, 10, 1));
+  QTRY_COMPARE(controller.events().size(), 1);
+  QVariantMap edited = controller.events().first().toMap();
+  edited.insert(QStringLiteral("summary"), QStringLiteral("Renamed"));
+  edited.insert(QStringLiteral("localRevision"), 3);
+  controller.saveEvent(edited, {});
+  QTRY_VERIFY(controller.canUndo());
+
+  // A rejected undo leaves the step in place to try again.
+  daemon.setFailingMethod(QStringLiteral("events.update"));
+  controller.undo();
+  QTRY_COMPARE(daemon.mutations().size(), 2);
+  QTRY_VERIFY(!controller.lastError().isEmpty());
+  QVERIFY(controller.canUndo());
+  QVERIFY(!controller.canRedo());
+
+  daemon.setFailingMethod({});
+  controller.undo();
+  QTRY_COMPARE(daemon.mutations().size(), 3);
+  QTRY_VERIFY(controller.canRedo());
+  QVERIFY(!controller.canUndo());
+}
+
+void AppControllerTest::guestOnlySearchReachesTheDaemon() {
+  FakeDaemon daemon(0);
+  QVERIFY(daemon.listen());
+  AppController controller;
+  QTRY_VERIFY(controller.connected());
+  controller.searchEvents(QString(),
+                          {{QStringLiteral("attendee"), QStringLiteral("sam")}});
+  QTRY_COMPARE(daemon.mutations().size(), 1);
+  QCOMPARE(daemon.mutations().first().first, QStringLiteral("events.search"));
+  QCOMPARE(daemon.mutations().first().second.value("attendee").toString(),
+           QStringLiteral("sam"));
 }
 
 #include "test_appcontroller.moc"

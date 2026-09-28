@@ -147,6 +147,8 @@ AppController::AppController(QObject* parent) : QObject(parent) {
       refresh();
       processPendingDeepLink();
     } else {
+      // Requests in flight are lost; an undo among them can be tried again.
+      m_historyInFlight = 0;
       m_pending.clear();
       m_pendingErrors.clear();
       m_backgroundRequests.clear();
@@ -783,6 +785,7 @@ void AppController::saveEventWithHistory(const QVariantMap& values,
       updating && !sourceCalendarId.isEmpty() && sourceCalendarId != targetCalendarId;
   const ResultHandler saved = [this, mode, updating, priorEvent, inverseOptions, values,
                                calendarChanged](const QJsonValue& value) {
+    finishHistoryStep(mode);
     QJsonObject responseEvent = value.toObject();
     if (responseEvent.value(QStringLiteral("event")).isObject()) {
       responseEvent = responseEvent.value(QStringLiteral("event")).toObject();
@@ -856,7 +859,8 @@ void AppController::saveEventWithHistory(const QVariantMap& values,
         {QStringLiteral("confirmedCrossProvider"),
          mutationOptions.value(QStringLiteral("confirmedCrossProvider")).toBool()},
     };
-    send(QStringLiteral("events.move"), params, saved);
+    send(QStringLiteral("events.move"), params, saved, true,
+         historyFailureHandler(mode));
     return;
   }
   QJsonObject params{
@@ -874,7 +878,7 @@ void AppController::saveEventWithHistory(const QVariantMap& values,
                .toString())},
   };
   send(updating ? QStringLiteral("events.update") : QStringLiteral("events.create"),
-       params, saved);
+       params, saved, true, historyFailureHandler(mode));
 }
 
 void AppController::requestDeleteEvent(const QString& eventId,
@@ -923,34 +927,39 @@ void AppController::deleteEventWithHistory(const QString& eventId,
                .value(QStringLiteral("guestNotificationPolicy"), QStringLiteral("none"))
                .toString())},
   };
-  send(QStringLiteral("events.remove"), params,
-       [this, mode, eventId, recurrenceId, mutationOptions](const QJsonValue& value) {
-         const QString undoToken =
-             value.toObject().value(QStringLiteral("undoToken")).toString();
-         if (!undoToken.isEmpty()) {
-           // The daemon holds a delete back briefly; its token restores the
-           // event until then.
-           HistoryEntry inverse;
-           inverse.kind = HistoryEntry::Kind::Undelete;
-           inverse.undoToken = undoToken;
-           inverse.event = {{QStringLiteral("id"), eventId},
-                            {QStringLiteral("recurrenceId"), recurrenceId}};
-           inverse.options = mutationOptions;
-           inverse.expiresAt = QDateTime::currentDateTimeUtc().addSecs(10);
-           recordInverse(mode, inverse);
-         }
-         if (mode == HistoryMode::Record) {
-           setStatus(tr("Event deleted"));
-           emit mutationCompleted(tr("Event deleted"), !undoToken.isEmpty());
-         } else {
-           setStatus(mode == HistoryMode::Undo ? tr("Undone") : tr("Redone"));
-         }
-         loadRange(m_rangeStart, m_rangeEnd);
-       });
+  send(
+      QStringLiteral("events.remove"), params,
+      [this, mode, eventId, recurrenceId, mutationOptions](const QJsonValue& value) {
+        finishHistoryStep(mode);
+        const QString undoToken =
+            value.toObject().value(QStringLiteral("undoToken")).toString();
+        if (!undoToken.isEmpty()) {
+          // The daemon holds a delete back briefly; its token restores the
+          // event until then.
+          HistoryEntry inverse;
+          inverse.kind = HistoryEntry::Kind::Undelete;
+          inverse.undoToken = undoToken;
+          inverse.event = {{QStringLiteral("id"), eventId},
+                           {QStringLiteral("recurrenceId"), recurrenceId}};
+          inverse.options = mutationOptions;
+          inverse.expiresAt = QDateTime::currentDateTimeUtc().addSecs(10);
+          recordInverse(mode, inverse);
+        }
+        if (mode == HistoryMode::Record) {
+          setStatus(tr("Event deleted"));
+          emit mutationCompleted(tr("Event deleted"), !undoToken.isEmpty());
+        } else {
+          setStatus(mode == HistoryMode::Undo ? tr("Undone") : tr("Redone"));
+        }
+        loadRange(m_rangeStart, m_rangeEnd);
+      },
+      true, historyFailureHandler(mode));
 }
 
 void AppController::searchEvents(const QString& query, const QVariantMap& filters) {
-  if (query.trimmed().isEmpty()) {
+  // The daemon accepts a guest filter alone.
+  if (query.trimmed().isEmpty() &&
+      filters.value(QStringLiteral("attendee")).toString().trimmed().isEmpty()) {
     m_searchResults.clear();
     m_searchResultsModel.clear();
     emit searchResultsChanged();
@@ -1579,9 +1588,7 @@ void AppController::undo() {
     setStatus(tr("Nothing to undo"));
     return;
   }
-  const HistoryEntry entry = m_undoHistory.takeLast();
-  emit historyChanged();
-  applyHistoryEntry(entry, HistoryMode::Undo);
+  startHistoryStep(HistoryMode::Undo);
 }
 
 void AppController::redo() {
@@ -1589,9 +1596,53 @@ void AppController::redo() {
     setStatus(tr("Nothing to redo"));
     return;
   }
-  const HistoryEntry entry = m_redoHistory.takeLast();
-  emit historyChanged();
-  applyHistoryEntry(entry, HistoryMode::Redo);
+  startHistoryStep(HistoryMode::Redo);
+}
+
+void AppController::startHistoryStep(const HistoryMode mode) {
+  if (m_historyInFlight != 0) {
+    setStatus(tr("Still applying the previous undo"));
+    return;
+  }
+  if (!connected()) {
+    setError(tr("Calendar service is not connected"));
+    return;
+  }
+  const HistoryEntry entry =
+      mode == HistoryMode::Undo ? m_undoHistory.last() : m_redoHistory.last();
+  m_historyInFlight = entry.serial;
+  applyHistoryEntry(entry, mode);
+}
+
+void AppController::finishHistoryStep(const HistoryMode mode) {
+  if (mode == HistoryMode::Record) {
+    return;
+  }
+  dropHistoryStep(mode);
+}
+
+void AppController::dropHistoryStep(const HistoryMode mode) {
+  QList<HistoryEntry>& source =
+      mode == HistoryMode::Undo ? m_undoHistory : m_redoHistory;
+  const quint64 serial = std::exchange(m_historyInFlight, 0);
+  for (qsizetype index = source.size() - 1; index >= 0; --index) {
+    if (source.at(index).serial == serial) {
+      source.removeAt(index);
+      emit historyChanged();
+      return;
+    }
+  }
+}
+
+AppController::ErrorHandler AppController::historyFailureHandler(
+    const HistoryMode mode) {
+  if (mode == HistoryMode::Record) {
+    return {};
+  }
+  return [this](const QJsonObject&) {
+    m_historyInFlight = 0;
+    return false;
+  };
 }
 
 void AppController::recordInverse(const HistoryMode mode, const HistoryEntry& inverse) {
@@ -1600,7 +1651,9 @@ void AppController::recordInverse(const HistoryMode mode, const HistoryEntry& in
   if (mode == HistoryMode::Record) {
     m_redoHistory.clear();
   }
-  target.append(inverse);
+  HistoryEntry entry = inverse;
+  entry.serial = ++m_historySerial;
+  target.append(entry);
   while (target.size() > kHistoryLimit) {
     target.removeFirst();
   }
@@ -1625,6 +1678,7 @@ void AppController::applyHistoryEntry(const HistoryEntry& entry,
     }
     case HistoryEntry::Kind::Undelete:
       if (QDateTime::currentDateTimeUtc() > entry.expiresAt) {
+        dropHistoryStep(mode);
         setStatus(tr("The delete can no longer be undone"));
         return;
       }
@@ -1640,6 +1694,7 @@ void AppController::undeleteWithHistory(const HistoryEntry& entry,
       {{QStringLiteral("clientMutationId"), newUuid()},
        {QStringLiteral("undoToken"), entry.undoToken}},
       [this, entry, mode](const QJsonValue& value) {
+        finishHistoryStep(mode);
         // Deleting the restored event again redoes (or re-undoes) the step.
         HistoryEntry inverse;
         inverse.kind = HistoryEntry::Kind::Remove;
@@ -1654,12 +1709,15 @@ void AppController::undeleteWithHistory(const HistoryEntry& entry,
         refresh();
       },
       true,
-      [this](const QJsonObject& error) {
+      [this, mode](const QJsonObject& error) {
         if (error.value(QStringLiteral("code")).toString() ==
             QStringLiteral("undo_expired")) {
+          // The token is spent for good, so the entry goes too.
+          dropHistoryStep(mode);
           setStatus(tr("The delete can no longer be undone"));
           return true;
         }
+        m_historyInFlight = 0;
         return false;
       });
 }
