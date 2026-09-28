@@ -378,6 +378,11 @@ class AppController final : public QObject {
   QVariantList m_tasks;
   bool m_tasksSupported = true;
   void loadTasks();
+  void requestTaskPage(const QVariantList& lists, QVariantList tasks, int offset,
+                       quint64 generation);
+  // A newer load supersedes pages still in flight.
+  quint64 m_taskGeneration = 0;
+  static constexpr int kTaskPageLimit = 1000;
   void subscribe(bool includeTasks);
   void sendTaskMutation(const QString& method, const QJsonObject& params);
   QVariantList m_operations;

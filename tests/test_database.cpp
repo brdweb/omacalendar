@@ -1128,6 +1128,13 @@ class DatabaseTest final : public QObject {
     QCOMPARE(dueTasks.size(), 1);
     QCOMPARE(dueTasks.first().id, buy.id);
 
+    TaskQuery page;
+    page.limit = 1;
+    page.offset = 1;
+    const QList<Task> second = db.tasks(page, &error);
+    QCOMPARE(second.size(), 1);
+    QVERIFY(second.first().id != db.tasks({}, &error).first().id);
+
     QVERIFY2(db.removeLocalTask(later.id, &error), qPrintable(error));
     QCOMPARE(db.tasks({}, &error).size(), 1);
 

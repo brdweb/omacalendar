@@ -77,6 +77,7 @@ struct TaskQuery {
   QDate dueStart;
   QDate dueEnd;
   int limit = 2000;
+  int offset = 0;
 };
 
 class Database final {

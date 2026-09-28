@@ -1,6 +1,7 @@
 // tasks.* and taskLists.* IPC handlers.
 
 #include <QJsonArray>
+#include <algorithm>
 
 #include "daemon.h"
 
@@ -37,6 +38,7 @@ bool applyTaskDraft(const QJsonObject& draft, Task* task, ipc::Error* error) {
   if (draft.contains(QStringLiteral("notes"))) {
     task->notes = draft.value(QStringLiteral("notes")).toString();
   }
+  const QDate previousDueDate = task->dueDate;
   if (draft.contains(QStringLiteral("dueDate"))) {
     const QString due = draft.value(QStringLiteral("dueDate")).toString();
     task->dueDate = QDate::fromString(due, Qt::ISODate);
@@ -44,7 +46,11 @@ bool applyTaskDraft(const QJsonObject& draft, Task* task, ipc::Error* error) {
       invalid(error, QStringLiteral("dueDate must be a yyyy-MM-dd date"));
       return false;
     }
-    if (!task->dueDate.isValid()) {
+    // A new day without a new time drops the old time, which belonged to the
+    // old day.
+    if (!task->dueDate.isValid() ||
+        (!draft.contains(QStringLiteral("dueUtc")) && task->dueUtc.isValid() &&
+         task->dueDate != previousDueDate)) {
       task->dueUtc = {};
     }
   }
@@ -143,20 +149,33 @@ QJsonValue Daemon::onTasksList(const QJsonObject& params, ipc::Error* error) con
     invalid(error, QStringLiteral("dueEnd must not be before dueStart"));
     return {};
   }
-  filter.limit = params.value(QStringLiteral("limit")).toInt(filter.limit);
+  const int limit =
+      std::clamp(params.value(QStringLiteral("limit")).toInt(filter.limit), 1, 2000);
+  filter.offset = std::max(0, params.value(QStringLiteral("offset")).toInt());
+  // One extra row tells whether another page follows.
+  filter.limit = limit + 1;
   QString dbError;
-  const QList<Task> tasks = m_database.tasks(filter, &dbError);
+  QList<Task> tasks = m_database.tasks(filter, &dbError);
   if (!dbError.isEmpty()) {
     if (error != nullptr) {
       *error = {QStringLiteral("database_error"), dbError, false};
     }
     return {};
   }
+  const bool hasMore = tasks.size() > limit;
+  if (hasMore) {
+    tasks.removeLast();
+  }
   QJsonArray encoded;
   for (const Task& task : tasks) {
     encoded.append(toJson(task));
   }
-  return QJsonObject{{QStringLiteral("tasks"), encoded}};
+  return QJsonObject{
+      {QStringLiteral("tasks"), encoded},
+      {QStringLiteral("offset"), filter.offset},
+      {QStringLiteral("hasMore"), hasMore},
+      {QStringLiteral("nextOffset"), filter.offset + static_cast<int>(tasks.size())},
+  };
 }
 
 QJsonValue Daemon::onTasksCreate(const QJsonObject& params, ipc::Error* error) {

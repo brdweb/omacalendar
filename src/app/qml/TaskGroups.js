@@ -9,6 +9,14 @@ function dayKey(dateValue) {
     return dateValue.getFullYear() + "-" + month + "-" + day
 }
 
+// Whether a list's tasks can be changed.
+function isReadOnly(lists, listId) {
+    for (let index = 0; index < (lists || []).length; ++index)
+        if (String(lists[index].id) === String(listId))
+            return lists[index].readOnly === true
+    return false
+}
+
 // Lists a task may be shown from: the chosen list, or every enabled list.
 function visibleListIds(lists, listId) {
     if (listId)
@@ -43,13 +51,16 @@ function groupKey(task, todayKey) {
 }
 
 // Rows for a ListView: {kind: "header", key, count} and {kind: "task", task,
-// group, color}. Groups keep this order and empty ones are left out.
+// group, color, readOnly}. Groups keep this order and empty ones are left out.
 function rows(tasks, lists, todayKey, listId, showCompleted) {
     const order = ["overdue", "today", "upcoming", "undated", "completed"]
     const visible = visibleListIds(lists, listId)
     const colors = {}
-    for (let index = 0; index < (lists || []).length; ++index)
+    const readOnly = {}
+    for (let index = 0; index < (lists || []).length; ++index) {
         colors[String(lists[index].id)] = String(lists[index].color || "")
+        readOnly[String(lists[index].id)] = lists[index].readOnly === true
+    }
     const groups = {}
     for (let index = 0; index < (tasks || []).length; ++index) {
         const task = tasks[index]
@@ -72,7 +83,8 @@ function rows(tasks, lists, todayKey, listId, showCompleted) {
         result.push({"kind": "header", "key": key, "count": members.length})
         for (let index = 0; index < members.length; ++index)
             result.push({"kind": "task", "task": members[index], "group": key,
-                         "color": colors[String(members[index].listId)] || ""})
+                         "color": colors[String(members[index].listId)] || "",
+                         "readOnly": readOnly[String(members[index].listId)] === true})
     }
     return result
 }

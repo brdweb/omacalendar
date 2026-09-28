@@ -808,8 +808,19 @@ Item {
             compare(completed.signalArguments[0][0], "late")
             compare(completed.signalArguments[0][1], true)
 
+            verify(!findChild(content, "taskDone-now").enabled,
+                   "tasks in a read-only list cannot be ticked off")
+
             panel.showCompleted = true
             compare(panel.rows[panel.rows.length - 1].task.id, "done")
+
+            // The owner advances the day; the groups follow while it is open.
+            panel.today = new Date(today.getFullYear(), today.getMonth(),
+                                   today.getDate() + 1)
+            compare(panel.rows[0].key, "overdue")
+            compare(panel.rows.filter(function(row) {
+                return row.kind === "task" && row.group === "overdue"
+            }).length, 2, "yesterday's today is now overdue")
             panel.close()
         }
 

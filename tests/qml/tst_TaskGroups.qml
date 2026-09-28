@@ -49,6 +49,15 @@ TestCase {
                 ["secret"], "a hidden list still shows when chosen")
     }
 
+    function test_read_only_lists() {
+        const readOnlyLists = [{"id": "home"}, {"id": "shared", "readOnly": true}]
+        verify(TaskGroups.isReadOnly(readOnlyLists, "shared"))
+        verify(!TaskGroups.isReadOnly(readOnlyLists, "home"))
+        const rows = TaskGroups.rows([{"id": "t", "listId": "shared", "title": "x"}],
+                                     readOnlyLists, "2026-09-28", "", false)
+        compare(rows[1].readOnly, true)
+    }
+
     function test_due_counts() {
         compare(TaskGroups.dueCount(tasks, lists, "2026-09-28"), 2,
                 "overdue and today, open, in visible lists")

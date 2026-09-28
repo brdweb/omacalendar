@@ -252,9 +252,11 @@ Google task lists join it when their sync lands.
   names the list's provider. `taskLists.setEnabled` takes `listId` and
   `enabled`; disabled lists are left out of the app's "All lists" view.
 - `tasks.list` returns `tasks` sorted open first, then by due day (undated
-  last). It takes optional `listIds`, `includeCompleted` (default true), and
+  last). It takes optional `listIds`, `includeCompleted` (default true),
   inclusive `dueStart`/`dueEnd` days (`yyyy-MM-dd`; either one leaves out
-  undated tasks). A task is `{id, listId, title, notes, dueDate, dueUtc,
+  undated tasks), and `offset`/`limit` (at most 2000 per page). Each page
+  reports `hasMore` and `nextOffset`; clients read pages until `hasMore` is
+  false. A task is `{id, listId, title, notes, dueDate, dueUtc,
   completed, completedAt, priority, parentId, position, dirty, localRevision,
   createdAt, updatedAt}`; `dueDate` is `yyyy-MM-dd` or empty and `dueUtc` holds
   a due time only when the provider keeps one.
@@ -262,7 +264,8 @@ Google task lists join it when their sync lands.
   (default `local-tasks`), `notes`, `dueDate`, `dueUtc`, `completed` and
   `priority` (0–9). `tasks.update` takes `task` with `id` plus the fields to
   change, and optional `expectedLocalRevision`; a task cannot move to another
-  list yet. `tasks.remove` takes `taskId`. Invalid dates answer
+  list yet. A new `dueDate` without `dueUtc` drops a due time set for the old
+  day. `tasks.remove` takes `taskId`. Invalid dates answer
   `invalid_params`; an empty title, a read-only or missing list, or a stale
   revision answers `task_rejected`.
 - Completing a task stamps `completedAt`; reopening it clears it. Writes to a

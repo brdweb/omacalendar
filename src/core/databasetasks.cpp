@@ -288,9 +288,10 @@ QList<Task> Database::tasks(const TaskQuery& filter, QString* errorMessage) cons
   // Open tasks first, then by due day (undated last), then oldest first.
   query.prepare(QStringLiteral("SELECT %1 FROM tasks WHERE %2 ORDER BY completed, "
                                "due_date='' , due_date, due_utc, created_at, id "
-                               "LIMIT %3")
+                               "LIMIT %3 OFFSET %4")
                     .arg(kTaskColumns, conditions.join(QStringLiteral(" AND ")))
-                    .arg(limit));
+                    .arg(limit)
+                    .arg(std::max(0, filter.offset)));
   for (const QVariant& value : std::as_const(bindings)) {
     query.addBindValue(value);
   }

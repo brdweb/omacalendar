@@ -89,6 +89,7 @@ class FakeDaemon final : public QObject {
   }
   void setTasksSupported(const bool supported) { m_tasksSupported = supported; }
   [[nodiscard]] int subscribeCount() const { return m_subscribeCount; }
+  [[nodiscard]] int taskPageRequests() const { return m_taskPageRequests; }
 
   // Reported as events.list coverage, like a range still being hydrated.
   void setCoverage(const QJsonObject& coverage) { m_coverage = coverage; }
@@ -204,8 +205,19 @@ class FakeDaemon final : public QObject {
           response.insert(QStringLiteral("result"),
                           QJsonObject{{QStringLiteral("lists"), m_taskLists}});
         } else {
-          response.insert(QStringLiteral("result"),
-                          QJsonObject{{QStringLiteral("tasks"), m_tasks}});
+          // Pages hold at most two tasks, so loading more takes several.
+          const int offset = params.value(QStringLiteral("offset")).toInt();
+          QJsonArray page;
+          for (int index = offset; index < std::min(offset + 2, int(m_tasks.size()));
+               ++index) {
+            page.append(m_tasks.at(index));
+          }
+          ++m_taskPageRequests;
+          response.insert(
+              QStringLiteral("result"),
+              QJsonObject{{QStringLiteral("tasks"), page},
+                          {QStringLiteral("hasMore"), offset + 2 < m_tasks.size()},
+                          {QStringLiteral("nextOffset"), offset + int(page.size())}});
         }
       } else if (method.startsWith(QStringLiteral("tasks.")) ||
                  method.startsWith(QStringLiteral("taskLists."))) {
@@ -348,6 +360,7 @@ class FakeDaemon final : public QObject {
   QJsonArray m_tasks;
   bool m_tasksSupported = true;
   int m_subscribeCount = 0;
+  int m_taskPageRequests = 0;
   QJsonArray m_calendars{
       QJsonObject{{QStringLiteral("id"), QStringLiteral("local-default")},
                   {QStringLiteral("enabled"), true}},
@@ -687,6 +700,19 @@ void AppControllerTest::tasksLoadRefreshAndMutate() {
   QCOMPARE(controller.taskLists().size(), 1);
   QVERIFY(controller.tasksSupported());
   QVERIFY(daemon.subscribedTopics().contains(QStringLiteral("tasks")));
+
+  // Every page is read.
+  QJsonArray many;
+  for (int index = 0; index < 5; ++index) {
+    many.append(QJsonObject{{QStringLiteral("id"), QStringLiteral("t%1").arg(index)},
+                            {QStringLiteral("listId"), QStringLiteral("local-tasks")}});
+  }
+  daemon.setTasks({QJsonObject{{QStringLiteral("id"), QStringLiteral("local-tasks")}}},
+                  many);
+  const int pagesBefore = daemon.taskPageRequests();
+  daemon.broadcast(QStringLiteral("tasks.changed"));
+  QTRY_COMPARE(controller.tasks().size(), 5);
+  QCOMPARE(daemon.taskPageRequests() - pagesBefore, 3);
 
   // A change notification reloads the tasks.
   daemon.setTasks({QJsonObject{{QStringLiteral("id"), QStringLiteral("local-tasks")}}},

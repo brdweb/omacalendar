@@ -177,6 +177,8 @@ Item {
                         spacing: Theme.spacingSM
                         AppCheckBox {
                             checked: false
+                            enabled: !TaskGroups.isReadOnly(root.taskLists,
+                                                            taskRow.modelData.listId)
                             Accessible.name: qsTr("Mark %1 done").arg(
                                                  String(taskRow.modelData.title || ""))
                             onToggled: root.taskCompletionRequested(

@@ -68,10 +68,11 @@ ApplicationWindow {
     readonly property var taskItems: appList("tasks")
     readonly property var taskLists: appList("taskLists")
     // Re-evaluated every minute through clockTick so it rolls over at midnight.
-    readonly property string todayKey: {
+    readonly property date todayDate: {
         window.clockTick
-        return TaskGroups.dayKey(new Date())
+        return new Date()
     }
+    readonly property string todayKey: TaskGroups.dayKey(todayDate)
     property string pendingGoogleDisplayName: ""
     // Timeline scroll positions survive switching away from a view; negative
     // lets the view choose (the current time today, else the work day).
@@ -738,6 +739,7 @@ ApplicationWindow {
         id: tasksPanel
         tasks: window.taskItems
         taskLists: window.taskLists
+        today: window.todayDate
         onCreateRequested: task => window.callApp("createTask", [task])
         onCompletionRequested: (taskId, completed) =>
                                    window.callApp("setTaskCompleted", [taskId, completed])

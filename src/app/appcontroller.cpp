@@ -311,19 +311,37 @@ void AppController::loadTasks() {
   };
   send(
       QStringLiteral("taskLists.list"), {},
-      [this, unsupported](const QJsonValue& value) {
-        QVariantList lists = variantList(value, QStringLiteral("lists"));
-        send(
-            QStringLiteral("tasks.list"), {},
-            [this, lists](const QJsonValue& tasksValue) {
-              m_taskLists = lists;
-              m_tasks = variantList(tasksValue, QStringLiteral("tasks"));
-              m_tasksSupported = true;
-              emit tasksChanged();
-            },
-            false, unsupported);
+      [this](const QJsonValue& value) {
+        requestTaskPage(variantList(value, QStringLiteral("lists")), {}, 0,
+                        ++m_taskGeneration);
       },
       false, unsupported);
+}
+
+void AppController::requestTaskPage(const QVariantList& lists, QVariantList tasks,
+                                    const int offset, const quint64 generation) {
+  send(
+      QStringLiteral("tasks.list"),
+      {{QStringLiteral("offset"), offset}, {QStringLiteral("limit"), kTaskPageLimit}},
+      [this, lists, tasks = std::move(tasks), offset,
+       generation](const QJsonValue& value) mutable {
+        if (generation != m_taskGeneration) {
+          return;
+        }
+        tasks.append(variantList(value, QStringLiteral("tasks")));
+        const QJsonObject page = value.toObject();
+        const int nextOffset = page.value(QStringLiteral("nextOffset")).toInt(-1);
+        // Keep reading until the daemon reports the last page.
+        if (page.value(QStringLiteral("hasMore")).toBool() && nextOffset > offset) {
+          requestTaskPage(lists, std::move(tasks), nextOffset, generation);
+          return;
+        }
+        m_taskLists = lists;
+        m_tasks = std::move(tasks);
+        m_tasksSupported = true;
+        emit tasksChanged();
+      },
+      false);
 }
 
 void AppController::sendTaskMutation(const QString& method, const QJsonObject& params) {

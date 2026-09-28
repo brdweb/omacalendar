@@ -11,7 +11,8 @@ Drawer {
 
     property var tasks: []
     property var taskLists: []
-    // Recomputed when the day changes, so "Today" stays right overnight.
+    // The owner keeps this current (it ticks with the app clock), so "Today"
+    // stays right overnight while the panel is open.
     property date today: new Date()
     readonly property string todayKey: TaskGroups.dayKey(today)
     readonly property var writableLists: taskLists.filter(function(list) {
@@ -33,10 +34,7 @@ Drawer {
     modal: false
     dim: false
 
-    onOpened: {
-        today = new Date()
-        addField.forceActiveFocus()
-    }
+    onOpened: addField.forceActiveFocus()
 
     function groupTitle(key) {
         if (key === "overdue")
@@ -196,6 +194,7 @@ Drawer {
                             AppCheckBox {
                                 objectName: "taskDone-" + delegateItem.task.id
                                 checked: delegateItem.task.completed === true
+                                enabled: rowLoader.modelData.readOnly !== true
                                 Accessible.name: checked
                                                  ? qsTr("Mark %1 not done")
                                                    .arg(delegateItem.task.title)

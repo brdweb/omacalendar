@@ -1684,6 +1684,20 @@ def run_tasks_contract(harness: DaemonHarness) -> None:
          "tasks.remove of a missing task"),
     ):
         assert_ipc_error(harness.call_error(method, params), code, context)
+    first_page = harness.call("tasks.list", {"limit": 1})
+    require(len(first_page["tasks"]) == 1 and first_page["hasMore"] is True
+            and first_page["nextOffset"] == 1,
+            f"tasks.list did not page: {first_page}")
+    second_page = harness.call("tasks.list", {"limit": 1, "offset": 1})
+    require(len(second_page["tasks"]) == 1 and second_page["hasMore"] is False,
+            f"tasks.list second page: {second_page}")
+    timed = harness.call("tasks.create", {"task": {"title": "Call", "dueDate": "2026-11-05",
+                                                   "dueUtc": "2026-11-05T09:00:00Z"}})
+    moved = harness.call("tasks.update", {"task": {"id": timed["id"],
+                                                   "dueDate": "2026-11-06"}})
+    require(moved["dueDate"] == "2026-11-06" and moved["dueUtc"] == "",
+            f"moving the due day kept the old due time: {moved}")
+    harness.call("tasks.remove", {"taskId": timed["id"]})
     harness.call("tasks.remove", {"taskId": undated["id"]})
     remaining = harness.call("tasks.list", {})["tasks"]
     require([task["id"] for task in remaining] == [created["id"]],
