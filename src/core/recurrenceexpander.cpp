@@ -670,9 +670,179 @@ void sortOccurrences(QList<Event>* events) {
 
 }  // namespace
 
+std::optional<RecurrenceSeriesEnd> RecurrenceExpander::finiteEnd(
+    const Event& master) {
+  if (master.recurrenceRule.isEmpty() || !master.recurrenceId.isEmpty()) {
+    return std::nullopt;
+  }
+  QStringList warnings;
+  RecurrenceComponent component = componentFor(master, &warnings);
+  if (component.event == nullptr || !component.hasRecurrence || !warnings.isEmpty()) {
+    return std::nullopt;
+  }
+
+  const icaltimetype dtstart = icalcomponent_get_dtstart(component.event);
+  if (icaltime_is_null_time(dtstart) || !icaltime_is_valid_time(dtstart)) {
+    return std::nullopt;
+  }
+  const qint64 durationSeconds =
+      master.startUtc.isValid() && master.endUtc.isValid()
+          ? std::max<qint64>(0, master.startUtc.secsTo(master.endUtc))
+          : 0;
+  const qint64 durationDays =
+      master.startDate.isValid() && master.endDate.isValid()
+          ? std::max<qint64>(1, master.startDate.daysTo(master.endDate))
+          : 1;
+  QDate lastDate = master.startDate;
+  QDateTime lastUtc = master.startUtc;
+  bool countRule = false;
+  const auto include = [&](const Event& occurrence) {
+    if (occurrence.allDay != master.allDay) {
+      return false;
+    }
+    if (master.allDay) {
+      if (!occurrence.endDate.isValid()) {
+        return false;
+      }
+      lastDate = std::max(lastDate, occurrence.endDate);
+    } else {
+      if (!occurrence.endUtc.isValid()) {
+        return false;
+      }
+      lastUtc = std::max(lastUtc, occurrence.endUtc);
+    }
+    return true;
+  };
+  if (!include(occurrenceFrom(master, dtstart))) {
+    return std::nullopt;
+  }
+
+  for (icalproperty* property =
+           icalcomponent_get_first_property(component.event, ICAL_RRULE_PROPERTY);
+       property != nullptr;
+       property = icalcomponent_get_next_property(component.event,
+                                                 ICAL_RRULE_PROPERTY)) {
+    icalrecurrencetype* rule = icalproperty_get_rrule(property);
+    if (rule == nullptr) {
+      return std::nullopt;
+    }
+    if (rule->count > 0) {
+      countRule = true;
+      // A finite COUNT is not a bound until iteration actually terminates:
+      // complex BY* rules can require more work than their COUNT suggests.
+      RecurrenceIteratorPtr iterator(icalrecur_iterator_new(rule, dtstart));
+      if (!iterator) {
+        return std::nullopt;
+      }
+      bool finished = false;
+      for (int step = 0; step < 10000; ++step) {
+        const icaltimetype next = icalrecur_iterator_next(iterator.get());
+        if (icaltime_is_null_time(next)) {
+          finished = true;
+          break;
+        }
+        if (!include(occurrenceFrom(master, next))) {
+          return std::nullopt;
+        }
+      }
+      if (!finished) {
+        return std::nullopt;
+      }
+    } else if (!icaltime_is_null_time(rule->until) &&
+               icaltime_is_valid_time(rule->until)) {
+      // UNTIL is inclusive; add a conservative two-day zone/DST margin. A
+      // later RDATE (including a period with its own end) is handled below.
+      if (master.allDay) {
+        const QDate until(rule->until.year, rule->until.month, rule->until.day);
+        if (!until.isValid()) {
+          return std::nullopt;
+        }
+        const QDate end = until.addDays(durationDays + 2);
+        if (!end.isValid()) {
+          return std::nullopt;
+        }
+        lastDate = std::max(lastDate, end);
+      } else {
+        const QDateTime until = occurrenceUtc(rule->until, master);
+        if (!until.isValid()) {
+          return std::nullopt;
+        }
+        const QDateTime end = until.addSecs(durationSeconds + 2 * 86400);
+        if (!end.isValid()) {
+          return std::nullopt;
+        }
+        lastUtc = std::max(lastUtc, end);
+      }
+    } else {
+      return std::nullopt;
+    }
+  }
+
+  WorkBudget budget{10000};
+  QList<Event> extraDates;
+  if (!enumerateDateProperties(component.event, ICAL_RDATE_PROPERTY, master, &budget,
+                               &extraDates)) {
+    return std::nullopt;
+  }
+  for (const Event& occurrence : std::as_const(extraDates)) {
+    if (!include(occurrence)) {
+      return std::nullopt;
+    }
+  }
+  if (countRule) {
+    // Use the same expansion path as events.list for COUNT, including raw
+    // provider RDATE/EXDATE. A capped or invalid expansion cannot establish a
+    // safe bound and must leave the series unbounded.
+    const QDateTime start = master.allDay
+                                ? QDateTime(master.startDate.addDays(-2), QTime(0, 0),
+                                            QTimeZone::UTC)
+                                : master.startUtc.addDays(-2);
+    const QDateTime end = master.allDay
+                              ? QDateTime(lastDate.addDays(2), QTime(0, 0),
+                                          QTimeZone::UTC)
+                              : lastUtc.addDays(2);
+    const RecurrenceExpansionResult expansion =
+        expand({master}, start, end, 10000, 100000);
+    if (expansion.truncated || !expansion.warnings.isEmpty()) {
+      return std::nullopt;
+    }
+    for (const Event& occurrence : expansion.occurrences) {
+      if (!include(occurrence)) {
+        return std::nullopt;
+      }
+    }
+  }
+  if (master.allDay) {
+    if (!lastDate.isValid()) {
+      return std::nullopt;
+    }
+    return RecurrenceSeriesEnd{QDateTime{}, lastDate};
+  }
+  if (!lastUtc.isValid()) {
+    return std::nullopt;
+  }
+  // Date comparisons for floating series must err on the inclusive side of
+  // time-zone changes; the UTC bound remains exact for zoned series.
+  const QDate floatingEnd = master.timeKind == TimeKind::Floating
+                                ? lastUtc.date().addDays(2)
+                                : QDate{};
+  if (master.timeKind == TimeKind::Floating && !floatingEnd.isValid()) {
+    return std::nullopt;
+  }
+  return RecurrenceSeriesEnd{lastUtc, floatingEnd};
+}
+
+void RecurrenceExpansionCache::invalidateIfChanged(const qint64 revision) {
+  if (m_revision != revision) {
+    m_entries.clear();
+    m_revision = revision;
+  }
+}
+
 RecurrenceExpansionResult RecurrenceExpander::expand(
     const QList<Event>& events, const QDateTime& startUtc, const QDateTime& endUtc,
-    const qsizetype maximumOccurrences, const qsizetype maximumExpansionSteps) {
+    const qsizetype maximumOccurrences, const qsizetype maximumExpansionSteps,
+    RecurrenceExpansionCache* cache) {
   RecurrenceExpansionResult result;
   if (!startUtc.isValid() || !endUtc.isValid() || startUtc >= endUtc) {
     result.warnings.append(QStringLiteral("invalid_expansion_range"));
@@ -771,10 +941,35 @@ RecurrenceExpansionResult RecurrenceExpander::expand(
     }
 
     bool masterTruncated = false;
-    QList<Event> generated =
-        expandMaster(master, startUtc, endUtc,
-                     std::max<qsizetype>(1, limit - result.occurrences.size()), &budget,
-                     &masterTruncated, &result.warnings);
+    const qsizetype remainingLimit =
+        std::max<qsizetype>(1, limit - result.occurrences.size());
+    QString cacheKey;
+    CachedSeriesExpansion* cached = nullptr;
+    if (cache != nullptr && !master.id.isEmpty()) {
+      cacheKey = master.id + QLatin1Char('\n') +
+                 QString::number(master.localRevision) + QLatin1Char('\n') +
+                 QString::number(startUtc.toMSecsSinceEpoch()) + QLatin1Char('\n') +
+                 QString::number(endUtc.toMSecsSinceEpoch());
+      cached = cache->m_entries.object(cacheKey);
+    }
+    QList<Event> generated;
+    if (cached != nullptr && cached->occurrences.size() <= remainingLimit &&
+        cached->workSteps <= budget.remaining) {
+      budget.remaining -= cached->workSteps;
+      generated = cached->occurrences;
+    } else {
+      const qsizetype workBefore = budget.remaining;
+      const qsizetype warningCount = result.warnings.size();
+      generated = expandMaster(master, startUtc, endUtc, remainingLimit, &budget,
+                               &masterTruncated, &result.warnings);
+      if (cache != nullptr && !cacheKey.isEmpty() && !masterTruncated &&
+          !budget.exhausted && warningCount == result.warnings.size()) {
+        cache->m_entries.insert(
+            cacheKey,
+            new CachedSeriesExpansion{generated, workBefore - budget.remaining},
+            std::max(1, static_cast<int>(generated.size())));
+      }
+    }
     result.truncated = result.truncated || masterTruncated;
     if (budget.exhausted) {
       markWorkLimit();

@@ -205,6 +205,30 @@ class RecurrenceTest final : public QObject {
                 .contains(QStringLiteral("recurrence_component_limit_exceeded")));
   }
 
+  void finiteEndIncludesDurationAndExplicitDates() {
+    Event count = timedEvent(QStringLiteral("count-end"), utc(2026, 1, 1, 9), 7200);
+    count.recurrenceRule = QStringLiteral("FREQ=DAILY;COUNT=3");
+    const auto countEnd = RecurrenceExpander::finiteEnd(count);
+    QVERIFY(countEnd.has_value());
+    QCOMPARE(countEnd->utc, utc(2026, 1, 3, 11));
+
+    Event dates = timedEvent(QStringLiteral("rdate-end"), utc(2026, 1, 1, 9));
+    dates.recurrenceRule = QStringLiteral(
+        "RRULE:FREQ=DAILY;UNTIL=20260102T090000Z\n"
+        "RDATE;VALUE=PERIOD:20260201T090000Z/20260203T090000Z");
+    const auto dateEnd = RecurrenceExpander::finiteEnd(dates);
+    QVERIFY(dateEnd.has_value());
+    QVERIFY(dateEnd->utc >= utc(2026, 2, 3, 9));
+
+    Event large = count;
+    large.recurrenceRule = QStringLiteral("FREQ=SECONDLY;COUNT=12000");
+    QVERIFY(!RecurrenceExpander::finiteEnd(large).has_value());
+
+    Event endless = count;
+    endless.recurrenceRule = QStringLiteral("FREQ=DAILY");
+    QVERIFY(!RecurrenceExpander::finiteEnd(endless).has_value());
+  }
+
   void expandsSeriesWithoutChangingOrdinaryEvents() {
     Event master = timedEvent(QStringLiteral("series"), utc(2026, 8, 28, 13));
     master.recurrenceRule = QStringLiteral("FREQ=DAILY;COUNT=3");

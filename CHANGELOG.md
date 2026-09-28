@@ -18,6 +18,9 @@ Versioning once public releases begin.
   instead of rebuilding, so they keep their scroll position and focus.
 - The calendar database keeps temporary data in memory, uses a larger page
   cache and memory-mapped reads, and refreshes its query statistics on close.
+- Bound historical recurring-series reads by their last occurrence, with a
+  schema-3 backfill, indexed exception identities, and a revision-aware
+  per-series expansion cache (#41).
 
 ### Added
 

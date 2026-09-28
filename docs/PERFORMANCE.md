@@ -1,21 +1,37 @@
 # Release performance gate
 
-OmaCalendar's release harness creates a disposable schema-2 database through the
+OmaCalendar's release harness creates a disposable schema-3 database through the
 built daemon, stops the daemon, inserts 100,000 deterministic events in one SQLite
-transaction, and restarts the daemon for warm IPC measurements. It never uses the
-current user's database, socket, accounts, keyring, notification bus, or XDG paths.
+transaction, and restarts the daemon for warm IPC measurements. It then adds
+20,000 finished historical recurring series, restarts the daemon, and repeats the
+seven-day `events.list` measurement. It never uses the current user's database,
+socket, accounts, keyring, notification bus, or XDG paths.
 
-The dataset spans 2018–2034 across eight calendars and includes timed, all-day,
-multi-day, floating, zoned, recurring, invitation, pending, conflict, read-only,
-and deleted records. FTS5 receives the rows through the production triggers. The
-report verifies database integrity, event/FTS row counts, and that SQLite selects
-the FTS virtual-table index.
+The base dataset spans 2018–2034 across eight calendars and includes timed,
+all-day, multi-day, floating, zoned, recurring, invitation, pending, conflict,
+read-only, and deleted records. The additional historical series ended between
+2000 and 2011; their COUNT-based UTC/date bounds are stored just as schema 3
+stores them for daemon writes and upgrades. FTS5 receives all rows through the
+production triggers. The report verifies database integrity, event/FTS row
+counts, and that SQLite selects the bounded-series indexes.
 
 Measured gates use the nearest-rank p95 after warm-up:
 
 - Bounded seven-day `events.list`: at most 200 ms.
+- History-size regression: after adding 20,000 finished series, seven-day
+  `events.list` p95 stays within the larger of 1.25× baseline or baseline
+  plus 10 ms (allowing for host noise).
 - Indexed `events.search`: at most 250 ms.
 - Full warm `widget.snapshot`: at most 100 ms.
+
+The report includes `boundedAgendaWithoutHistory` and `boundedAgenda` samples,
+their p95 ratio, and the historical series count. The two calls must return the
+same total: finished series cannot appear in the contemporary week. The
+relative p95 gate above detects history-size sensitivity in addition to the
+absolute 200 ms limit. Use `--historical-series 0` to skip the comparison or
+increase it to stress larger archives. Warm samples exercise the per-series
+expansion cache; SQLite range indexes exclude finished series before hydration
+and expansion.
 
 The report also measures the widget's revision-based unchanged fast path, but that
 shortcut is not substituted for the full-snapshot gate.
@@ -35,6 +51,7 @@ cmake --build build-performance --target omacalendard
 python3 scripts/performance/release_performance.py \
   --daemon build-performance/omacalendard \
   --events 100000 \
+  --historical-series 20000 \
   --warmups 5 \
   --samples 15 \
   --enforce-gates \
@@ -43,17 +60,19 @@ python3 scripts/performance/release_performance.py \
 ```
 
 Archive `release-performance.json` with the acceptance record. It contains every
-sample, median/p95/max, query plans, database size, seed time, daemon hash and
-reported protocol/version, source revision/dirty state, CPU, kernel, Python, and
-SQLite versions. A dirty source tree or non-Release build should not be used as a
-final release result even though the script records it.
+sample (including the before/after history comparison), median/p95/max, query
+plans, database size, seed time, daemon hash and reported protocol/version,
+source revision/dirty state, CPU, kernel, Python, and SQLite versions. A dirty
+source tree or non-Release build should not be used as a final release result
+even though the script records it.
 
 ## CTest modes
 
-The default deterministic smoke test uses the same 100,000-event dataset with
-three samples. It validates schema creation, seeding, query results, FTS index use,
-widget snapshot behavior, and report generation, but only reports timings. It does
-not fail a shared CI worker for noisy latency:
+The default deterministic smoke test uses the same 100,000-event base dataset
+and 20,000 finished series with three samples. It validates schema creation,
+seeding, seven-day result parity, FTS index use, widget snapshot behavior, and
+report generation, but only reports timings. It does not fail a shared CI
+worker for noisy latency:
 
 ```sh
 ctest --test-dir build-performance \

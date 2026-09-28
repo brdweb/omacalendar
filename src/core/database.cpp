@@ -10,6 +10,7 @@
 #include <QSqlQuery>
 #include <QSqlRecord>
 #include <QUuid>
+#include <QVariant>
 #include <algorithm>
 
 #include "core/recurrenceexpander.h"
@@ -17,7 +18,7 @@
 namespace omacalendar {
 namespace {
 
-constexpr int kCurrentSchemaVersion = 2;
+constexpr int kCurrentSchemaVersion = 3;
 
 QString compactJson(const QJsonValue& value) {
   if (value.isArray()) {
@@ -151,6 +152,55 @@ QString unusedLegacyBackupPath(const QString& path) {
     candidate = prefix + QStringLiteral("-%1.backup").arg(discriminator++);
   }
   return candidate;
+}
+
+struct RecurrenceStoredBounds {
+  QVariant untilUtc;
+  QVariant untilDate;
+  QVariant originalUtc;
+  QVariant originalDate;
+};
+
+RecurrenceStoredBounds recurrenceBounds(const Event& event) {
+  RecurrenceStoredBounds bounds;
+  if (!event.recurrenceId.isEmpty()) {
+    const QString canonical = canonicalRecurrenceIdentity(
+        event.recurrenceId, event.allDay, event.timeKind, event.startTimeZone);
+    if (canonical.startsWith(QStringLiteral("D:"))) {
+      const QDate date = QDate::fromString(canonical.sliced(2), Qt::ISODate);
+      if (date.isValid()) {
+        bounds.originalDate = date.toString(Qt::ISODate);
+      }
+    } else if (canonical.startsWith(QStringLiteral("Z:"))) {
+      const QDateTime instant = dateTimeFromIso(canonical.sliced(2));
+      if (instant.isValid()) {
+        bounds.originalUtc = isoUtc(instant);
+      }
+    } else if (canonical.startsWith(QStringLiteral("F:")) &&
+               !canonical.startsWith(QStringLiteral("F:offset:"))) {
+      const QDateTime wall =
+          QDateTime::fromString(canonical.sliced(2), Qt::ISODateWithMs);
+      if (wall.isValid()) {
+        const QDateTime local(wall.date(), wall.time(), QTimeZone::LocalTime);
+        bounds.originalUtc = isoUtc(local);
+      }
+    }
+    return bounds;
+  }
+  if (event.recurrenceRule.isEmpty()) {
+    return bounds;
+  }
+  const auto end = RecurrenceExpander::finiteEnd(event);
+  if (end.has_value()) {
+    if (event.allDay || event.timeKind == TimeKind::Floating) {
+      if (end->date.isValid()) {
+        bounds.untilDate = end->date.toString(Qt::ISODate);
+      }
+    } else if (end->utc.isValid()) {
+      bounds.untilUtc = isoUtc(end->utc);
+    }
+  }
+  return bounds;
 }
 
 }  // namespace
@@ -354,6 +404,7 @@ bool Database::archiveLegacyDatabase(const QString& path, QString* errorMessage)
 }
 
 void Database::close() {
+  m_expansionCache.invalidateIfChanged(-1);
   if (!m_database.isValid()) {
     return;
   }
@@ -426,6 +477,15 @@ bool Database::migrate(QString* errorMessage) {
       *errorMessage = QStringLiteral("Database schema is newer than this build");
     }
     return false;
+  }
+  if (schemaVersion() == 2) {
+    return ensureOutboxMoveSchema(errorMessage) &&
+           ensureConflictUniquenessSchema(errorMessage) &&
+           ensureReminderDeliverySchema(errorMessage) &&
+           ensureSyncCoverageSchema(errorMessage) &&
+           ensureProviderResourcesSchema(errorMessage) &&
+           repairInclusiveAllDayEndDates(errorMessage) &&
+           migrateSeriesBounds(errorMessage);
   }
   if (schemaVersion() == kCurrentSchemaVersion) {
     return ensureOutboxMoveSchema(errorMessage) &&
@@ -513,6 +573,10 @@ bool Database::migrate(QString* errorMessage) {
           visibility TEXT NOT NULL DEFAULT 'default',
           recurrence_rule TEXT NOT NULL DEFAULT '',
           recurrence_id TEXT NOT NULL DEFAULT '',
+          series_until_utc TEXT,
+          series_until_date TEXT,
+          original_start_utc TEXT,
+          original_start_date TEXT,
           sequence INTEGER NOT NULL DEFAULT 0,
           organizer_json TEXT NOT NULL DEFAULT '{}',
           attendees_json TEXT NOT NULL DEFAULT '[]',
@@ -795,7 +859,7 @@ bool Database::migrate(QString* errorMessage) {
         INSERT INTO calendar_set_members(set_id,calendar_id,position)
         VALUES ('all-calendars','local-default',0)
       )SQL"),
-      QStringLiteral("PRAGMA user_version = 2"),
+      QStringLiteral("PRAGMA user_version = 3"),
   };
 
   for (const QString& statement : statements) {
@@ -1288,11 +1352,16 @@ bool Database::repairInclusiveAllDayEndDates(QString* errorMessage) {
 }
 
 bool Database::ensureReadPerformanceIndexes(QString* errorMessage) {
-  // Schema 2 remains the development schema, so install these idempotently for
-  // both new and existing databases. The leading range columns support views
-  // that do not filter calendars; the original calendar-leading indexes remain
-  // useful for a small calendar subset.
+  // Both the ordinary event ranges and the finite-series upper bounds use
+  // partial indexes; NULL bounds are deliberately retained for infinite or
+  // unparseable recurrences.
+  // Coalesce NULL (infinite) to a high sort key in the index and predicate.
+  // A plain "IS NULL OR > start" prevents SQLite from using the bound as a
+  // range constraint, even when INDEXED BY forces the right partial index.
   const QStringList statements = {
+      QStringLiteral("DROP INDEX IF EXISTS events_series_utc_index"),
+      QStringLiteral("DROP INDEX IF EXISTS events_series_date_index"),
+      QStringLiteral("DROP INDEX IF EXISTS events_series_floating_index"),
       QStringLiteral(R"SQL(
         CREATE INDEX IF NOT EXISTS events_timed_range_active_index
         ON events(start_utc, end_utc, calendar_id)
@@ -1310,11 +1379,106 @@ bool Database::ensureReadPerformanceIndexes(QString* errorMessage) {
         ON events(calendar_id, uid, recurrence_id)
         WHERE deleted=0 AND (recurrence_rule<>'' OR recurrence_id<>'')
       )SQL"),
+      QStringLiteral(R"SQL(
+        CREATE INDEX IF NOT EXISTS events_series_utc_bound_index
+        ON events(COALESCE(series_until_utc,'~'), start_utc, calendar_id)
+        WHERE deleted=0 AND recurrence_rule<>'' AND recurrence_id=''
+          AND all_day=0 AND time_kind<>'floating'
+      )SQL"),
+      QStringLiteral(R"SQL(
+        CREATE INDEX IF NOT EXISTS events_series_date_bound_index
+        ON events(COALESCE(series_until_date,'~'), start_date, calendar_id)
+        WHERE deleted=0 AND recurrence_rule<>'' AND recurrence_id=''
+          AND all_day=1
+      )SQL"),
+      QStringLiteral(R"SQL(
+        CREATE INDEX IF NOT EXISTS events_series_floating_bound_index
+        ON events(COALESCE(series_until_date,'~'), start_utc, calendar_id)
+        WHERE deleted=0 AND recurrence_rule<>'' AND recurrence_id=''
+          AND all_day=0 AND time_kind='floating'
+      )SQL"),
+      QStringLiteral(R"SQL(
+        CREATE INDEX IF NOT EXISTS events_exception_utc_index
+        ON events(original_start_utc, start_utc, end_utc)
+        WHERE recurrence_id<>''
+      )SQL"),
+      QStringLiteral(R"SQL(
+        CREATE INDEX IF NOT EXISTS events_exception_date_index
+        ON events(original_start_date, start_date, end_date)
+        WHERE recurrence_id<>''
+      )SQL"),
   };
   for (const QString& statement : statements) {
     if (!execute(statement, errorMessage)) {
       return false;
     }
+  }
+  return true;
+}
+
+bool Database::repairSeriesBounds(QString* errorMessage) {
+  QSqlQuery rows(m_database);
+  if (!rows.exec(QStringLiteral(R"SQL(
+        SELECT * FROM events WHERE recurrence_rule<>'' OR recurrence_id<>''
+      )SQL"))) {
+    if (errorMessage != nullptr) {
+      *errorMessage = sqlError(rows, QStringLiteral("read recurring rows for upgrade"));
+    }
+    return false;
+  }
+  QSqlQuery update(m_database);
+  update.prepare(QStringLiteral(R"SQL(
+    UPDATE events SET series_until_utc=?,series_until_date=?,
+      original_start_utc=?,original_start_date=? WHERE id=?
+  )SQL"));
+  while (rows.next()) {
+    Event event = eventFromQuery(rows);
+    if (!hydrateProviderResource(&event, errorMessage)) {
+      return false;
+    }
+    const RecurrenceStoredBounds bounds = recurrenceBounds(event);
+    update.bindValue(0, bounds.untilUtc);
+    update.bindValue(1, bounds.untilDate);
+    update.bindValue(2, bounds.originalUtc);
+    update.bindValue(3, bounds.originalDate);
+    update.bindValue(4, event.id);
+    if (!update.exec()) {
+      if (errorMessage != nullptr) {
+        *errorMessage = sqlError(update, QStringLiteral("backfill series bounds"));
+      }
+      return false;
+    }
+  }
+  return true;
+}
+
+bool Database::migrateSeriesBounds(QString* errorMessage) {
+  if (!m_database.transaction()) {
+    if (errorMessage != nullptr) {
+      *errorMessage = m_database.lastError().text();
+    }
+    return false;
+  }
+  for (const QString& sql : {
+           QStringLiteral("ALTER TABLE events ADD COLUMN series_until_utc TEXT"),
+           QStringLiteral("ALTER TABLE events ADD COLUMN series_until_date TEXT"),
+           QStringLiteral("ALTER TABLE events ADD COLUMN original_start_utc TEXT"),
+           QStringLiteral("ALTER TABLE events ADD COLUMN original_start_date TEXT")}) {
+    if (!execute(sql, errorMessage)) {
+      m_database.rollback();
+      return false;
+    }
+  }
+  if (!repairSeriesBounds(errorMessage) || !ensureReadPerformanceIndexes(errorMessage) ||
+      !execute(QStringLiteral("PRAGMA user_version = 3"), errorMessage)) {
+    m_database.rollback();
+    return false;
+  }
+  if (!m_database.commit()) {
+    if (errorMessage != nullptr) {
+      *errorMessage = m_database.lastError().text();
+    }
+    return false;
   }
   return true;
 }
@@ -2148,13 +2312,14 @@ bool Database::upsertEventRecord(const Event& event, QString* errorMessage,
       (id, calendar_id, remote_id, uid, etag, summary, description, location,
        url, conference_url, start_utc, end_utc, start_date, end_date,
        start_timezone, end_timezone, all_day, time_kind, status, transparency,
-       visibility, recurrence_rule, recurrence_id, sequence, organizer_json,
-       attendees_json, reminders_json, raw_payload, raw_format, dirty, deleted,
-       local_revision, sync_state, created_at, updated_at)
+       visibility, recurrence_rule, recurrence_id, series_until_utc,
+       series_until_date, original_start_utc, original_start_date, sequence,
+       organizer_json, attendees_json, reminders_json, raw_payload, raw_format,
+       dirty, deleted, local_revision, sync_state, created_at, updated_at)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
             ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
             ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-            ?, ?, ?, ?, ?)
+            ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(id) DO UPDATE SET
       calendar_id=excluded.calendar_id,
       remote_id=excluded.remote_id,
@@ -2178,6 +2343,10 @@ bool Database::upsertEventRecord(const Event& event, QString* errorMessage,
       visibility=excluded.visibility,
       recurrence_rule=excluded.recurrence_rule,
       recurrence_id=excluded.recurrence_id,
+      series_until_utc=excluded.series_until_utc,
+      series_until_date=excluded.series_until_date,
+      original_start_utc=excluded.original_start_utc,
+      original_start_date=excluded.original_start_date,
       sequence=excluded.sequence,
       organizer_json=excluded.organizer_json,
       attendees_json=excluded.attendees_json,
@@ -2219,6 +2388,11 @@ bool Database::upsertEventRecord(const Event& event, QString* errorMessage,
   query.addBindValue(nonNull(event.visibility));
   query.addBindValue(nonNull(event.recurrenceRule));
   query.addBindValue(nonNull(event.recurrenceId));
+  const RecurrenceStoredBounds bounds = recurrenceBounds(event);
+  query.addBindValue(bounds.untilUtc);
+  query.addBindValue(bounds.untilDate);
+  query.addBindValue(bounds.originalUtc);
+  query.addBindValue(bounds.originalDate);
   query.addBindValue(event.sequence);
   query.addBindValue(compactJson(event.organizer));
   query.addBindValue(compactJson(event.attendees));
@@ -3835,7 +4009,9 @@ QList<Event> Database::eventsBetweenInternal(const QDateTime& startUtc,
   QString calendarClause;
   if (!calendarIds.isEmpty()) {
     QStringList placeholders;
-    placeholders.fill(QStringLiteral("?"), calendarIds.size());
+    for (qsizetype index = 0; index < calendarIds.size(); ++index) {
+      placeholders.append(QStringLiteral(":calendar%1").arg(index));
+    }
     calendarClause = QStringLiteral(" AND e.calendar_id IN (%1)")
                          .arg(placeholders.join(QLatin1Char(',')));
   }
@@ -3863,45 +4039,105 @@ QList<Event> Database::eventsBetweenInternal(const QDateTime& startUtc,
                                     .arg(invitationPredicate);
   }
 
-  // Splitting timed, all-day, and recurrence candidates into UNION branches
-  // lets SQLite use a bounded partial index for each kind. The prior top-level
-  // OR forced a full events-table scan even for a seven-day view.
+  // Fetch only the fields consumed by Event and recurrence expansion, not the
+  // schema-3 bound columns (or future storage-only metadata).
+  const QString columns = QStringLiteral(
+      "e.id,e.calendar_id,e.remote_id,e.uid,e.etag,e.summary,e.description,"
+      "e.location,e.url,e.conference_url,e.start_utc,e.end_utc,e.start_date,"
+      "e.end_date,e.start_timezone,e.end_timezone,e.all_day,e.time_kind,e.status,"
+      "e.transparency,e.visibility,e.recurrence_rule,e.recurrence_id,e.sequence,"
+      "e.organizer_json,e.attendees_json,e.reminders_json,e.raw_payload,e.raw_format,"
+      "e.dirty,e.deleted,e.local_revision,e.sync_state,e.created_at,e.updated_at");
   const QString sql = QStringLiteral(R"SQL(
     SELECT * FROM (
-      SELECT e.* FROM events AS e
+      SELECT %4 FROM events AS e
       WHERE e.deleted=0 AND e.all_day=0
         AND e.recurrence_rule='' AND e.recurrence_id=''
-        AND e.end_utc>? AND e.start_utc<?%1%2
+        AND e.end_utc>:startUtc AND e.start_utc<:endUtc%1%2
       UNION ALL
-      SELECT e.* FROM events AS e
+      SELECT %4 FROM events AS e
       WHERE e.deleted=0 AND e.all_day=1
         AND e.recurrence_rule='' AND e.recurrence_id=''
-        AND e.end_date>? AND e.start_date<?%1%2
+        AND e.end_date>:startDate AND e.start_date<:endDate%1%2
       UNION ALL
-      SELECT e.* FROM events AS e
-      WHERE (e.deleted=0 OR e.recurrence_id<>'')
-        AND (e.recurrence_rule<>'' OR e.recurrence_id<>'')%3%2
+      SELECT %4 FROM events AS e INDEXED BY events_series_utc_bound_index
+      WHERE e.deleted=0 AND e.recurrence_rule<>'' AND e.recurrence_id=''
+        AND e.all_day=0 AND e.time_kind<>'floating'
+        AND (e.start_utc='' OR e.start_utc<:endUtc
+             OR e.recurrence_rule LIKE '%RDATE%'
+             OR e.raw_format='text/calendar'
+             OR EXISTS (
+               SELECT 1 FROM provider_resources AS resource
+               WHERE resource.calendar_id=e.calendar_id
+                 AND resource.canonical_key=
+                   substr(e.remote_id,1,
+                     CASE WHEN instr(e.remote_id,'#')=0 THEN length(e.remote_id)
+                          ELSE instr(e.remote_id,'#')-1 END)
+                 AND resource.raw_payload LIKE '%RDATE%'))
+        AND COALESCE(e.series_until_utc,'~')>:startUtc%3%2
+      UNION ALL
+      SELECT %4 FROM events AS e INDEXED BY events_series_floating_bound_index
+      WHERE e.deleted=0 AND e.recurrence_rule<>'' AND e.recurrence_id=''
+        AND e.all_day=0 AND e.time_kind='floating'
+        AND (e.start_utc='' OR e.start_utc<:endUtc
+             OR e.recurrence_rule LIKE '%RDATE%'
+             OR e.raw_format='text/calendar'
+             OR EXISTS (
+               SELECT 1 FROM provider_resources AS resource
+               WHERE resource.calendar_id=e.calendar_id
+                 AND resource.canonical_key=
+                   substr(e.remote_id,1,
+                     CASE WHEN instr(e.remote_id,'#')=0 THEN length(e.remote_id)
+                          ELSE instr(e.remote_id,'#')-1 END)
+                 AND resource.raw_payload LIKE '%RDATE%'))
+        AND COALESCE(e.series_until_date,'~')>:startDate%3%2
+      UNION ALL
+      SELECT %4 FROM events AS e INDEXED BY events_series_date_bound_index
+      WHERE e.deleted=0 AND e.recurrence_rule<>'' AND e.recurrence_id=''
+        AND e.all_day=1
+        AND (e.start_date='' OR e.start_date<:endDate
+             OR e.recurrence_rule LIKE '%RDATE%'
+             OR e.raw_format='text/calendar'
+             OR EXISTS (
+               SELECT 1 FROM provider_resources AS resource
+               WHERE resource.calendar_id=e.calendar_id
+                 AND resource.canonical_key=
+                   substr(e.remote_id,1,
+                     CASE WHEN instr(e.remote_id,'#')=0 THEN length(e.remote_id)
+                          ELSE instr(e.remote_id,'#')-1 END)
+                 AND resource.raw_payload LIKE '%RDATE%'))
+        AND COALESCE(e.series_until_date,'~')>:startDate%3%2
+      UNION ALL
+      SELECT %4 FROM events AS e INDEXED BY events_exception_utc_index
+      WHERE e.recurrence_id<>'' AND (
+        (e.all_day=0 AND e.start_utc<:endUtc AND
+          (e.end_utc>:startUtc OR
+           (e.end_utc=e.start_utc AND e.start_utc>=:startUtc)))
+        OR (e.all_day=1 AND e.start_date<:endDate AND
+            e.end_date>:startDate)
+        OR (e.original_start_utc>=:startUtc AND e.original_start_utc<:endUtc)
+        OR (e.original_start_date>=:startDate AND
+            e.original_start_date<:endDate)
+        OR (e.recurrence_id LIKE '%RANGE=THISANDFUTURE%' AND
+            (e.original_start_utc<:endUtc OR e.original_start_date<:endDate))
+        OR (e.original_start_utc IS NULL AND e.original_start_date IS NULL)
+      )%3%2
     ) AS bounded_events
     ORDER BY all_day DESC, COALESCE(NULLIF(start_utc,''), start_date), id
   )SQL")
-                          .arg(invitedOnly, calendarClause, recurringInvitationFilter);
+                          .arg(invitedOnly, calendarClause, recurringInvitationFilter,
+                               columns);
 
   QSqlQuery query(m_database);
   query.prepare(sql);
-  query.addBindValue(isoUtc(startUtc));
-  query.addBindValue(isoUtc(endUtc));
-  for (const QString& calendarId : calendarIds) {
-    query.addBindValue(calendarId);
-  }
-  query.addBindValue(startUtc.date().toString(Qt::ISODate));
+  query.bindValue(QStringLiteral(":startUtc"), isoUtc(startUtc));
+  query.bindValue(QStringLiteral(":endUtc"), isoUtc(endUtc));
+  query.bindValue(QStringLiteral(":startDate"), startUtc.date().toString(Qt::ISODate));
   const QDate allDayEnd =
       endUtc.time() == QTime(0, 0) ? endUtc.date() : endUtc.date().addDays(1);
-  query.addBindValue(allDayEnd.toString(Qt::ISODate));
-  for (const QString& calendarId : calendarIds) {
-    query.addBindValue(calendarId);
-  }
-  for (const QString& calendarId : calendarIds) {
-    query.addBindValue(calendarId);
+  query.bindValue(QStringLiteral(":endDate"), allDayEnd.toString(Qt::ISODate));
+  for (qsizetype index = 0; index < calendarIds.size(); ++index) {
+    query.bindValue(QStringLiteral(":calendar%1").arg(index), calendarIds.at(index));
   }
   if (!query.exec()) {
     if (errorMessage != nullptr) {
@@ -3915,8 +4151,81 @@ QList<Event> Database::eventsBetweenInternal(const QDateTime& startUtc,
   if (!hydrateProviderResources(&candidates, errorMessage)) {
     return {};
   }
+  // A detached occurrence can move into this window from an expired series.
+  // Keep its master when present: cancelled masters and RANGE exceptions
+  // consume their children even if the master's final generated end is old.
+  // Look up only parents of selected exceptions, never every historical series.
+  const auto parentIdentity = [](const QString& kind, const QString& calendar,
+                                 const QString& value) {
+    return kind + QLatin1Char('\n') + calendar + QLatin1Char('\n') + value;
+  };
+  QSet<QString> knownMasters;
+  for (const Event& candidate : std::as_const(candidates)) {
+    if (candidate.recurrenceId.isEmpty() && !candidate.recurrenceRule.isEmpty()) {
+      knownMasters.insert(parentIdentity(QStringLiteral("uid"), candidate.calendarId,
+                                         candidate.uid));
+      if (!candidate.remoteId.isEmpty()) {
+        knownMasters.insert(parentIdentity(QStringLiteral("google"),
+                                           candidate.calendarId, candidate.remoteId));
+      }
+    }
+  }
+  QSet<QString> checkedParents;
+  const qsizetype selectedCount = candidates.size();
+  for (qsizetype index = 0; index < selectedCount; ++index) {
+    const Event& exception = candidates.at(index);
+    if (exception.recurrenceId.isEmpty()) {
+      continue;
+    }
+    QString googleParent;
+    if (exception.rawFormat == QStringLiteral("google-json") &&
+        !exception.rawPayload.isEmpty()) {
+      googleParent =
+          QJsonDocument::fromJson(exception.rawPayload.toUtf8())
+              .object()
+              .value(QStringLiteral("recurringEventId"))
+              .toString();
+    }
+    const QString identity = parentIdentity(
+        googleParent.isEmpty() ? QStringLiteral("uid") : QStringLiteral("google"),
+        exception.calendarId, googleParent.isEmpty() ? exception.uid : googleParent);
+    if (knownMasters.contains(identity) || checkedParents.contains(identity)) {
+      continue;
+    }
+    checkedParents.insert(identity);
+    QSqlQuery parent(m_database);
+    parent.prepare(
+        QStringLiteral("SELECT %1 FROM events AS e WHERE e.calendar_id=? "
+                       "AND e.recurrence_rule<>'' AND e.recurrence_id='' "
+                       "AND e.deleted=0 AND %2=? LIMIT 1")
+            .arg(columns, googleParent.isEmpty() ? QStringLiteral("e.uid")
+                                                  : QStringLiteral("e.remote_id")));
+    parent.addBindValue(exception.calendarId);
+    parent.addBindValue(googleParent.isEmpty() ? exception.uid : googleParent);
+    if (!parent.exec()) {
+      if (errorMessage != nullptr) {
+        *errorMessage = sqlError(parent, QStringLiteral("load exception parent"));
+      }
+      return {};
+    }
+    if (parent.next()) {
+      Event master = eventFromQuery(parent);
+      if (!hydrateProviderResource(&master, errorMessage)) {
+        return {};
+      }
+      knownMasters.insert(parentIdentity(QStringLiteral("uid"), master.calendarId,
+                                         master.uid));
+      if (!master.remoteId.isEmpty()) {
+        knownMasters.insert(parentIdentity(QStringLiteral("google"),
+                                           master.calendarId, master.remoteId));
+      }
+      candidates.append(std::move(master));
+    }
+  }
+  m_expansionCache.invalidateIfChanged(changeRevision());
   const RecurrenceExpansionResult expansion =
-      RecurrenceExpander::expand(candidates, startUtc, endUtc);
+      RecurrenceExpander::expand(candidates, startUtc, endUtc, 10000, 100000,
+                                 &m_expansionCache);
   if (expansion.truncated) {
     if (errorMessage != nullptr) {
       *errorMessage =
@@ -4248,15 +4557,28 @@ bool Database::completeOutboxInternal(const qint64 id, const Event* remoteEvent,
     }
   } else if (remoteEvent != nullptr) {
     if (hasLaterMutation) {
+      Event current = event(eventId, errorMessage);
+      if (current.id.isEmpty()) {
+        rollback();
+        return false;
+      }
+      current.recurrenceId = remoteEvent->recurrenceId;
+      const RecurrenceStoredBounds bounds = recurrenceBounds(current);
       QSqlQuery revisionQuery(m_database);
       revisionQuery.prepare(QStringLiteral(R"SQL(
-        UPDATE events SET remote_id=?, etag=?, recurrence_id=?, raw_payload=?,
-          raw_format=?, dirty=1
+        UPDATE events SET remote_id=?, etag=?, recurrence_id=?,
+          series_until_utc=?, series_until_date=?,
+          original_start_utc=?, original_start_date=?,
+          raw_payload=?, raw_format=?, dirty=1
         WHERE id=?
       )SQL"));
       revisionQuery.addBindValue(nonNull(remoteEvent->remoteId));
       revisionQuery.addBindValue(nonNull(remoteEvent->etag));
       revisionQuery.addBindValue(nonNull(remoteEvent->recurrenceId));
+      revisionQuery.addBindValue(bounds.untilUtc);
+      revisionQuery.addBindValue(bounds.untilDate);
+      revisionQuery.addBindValue(bounds.originalUtc);
+      revisionQuery.addBindValue(bounds.originalDate);
       revisionQuery.addBindValue(nonNull(remoteEvent->rawPayload));
       revisionQuery.addBindValue(nonNull(remoteEvent->rawFormat));
       // Advancing an earlier acknowledgement must not redate the newer local
@@ -5689,9 +6011,17 @@ bool Database::refreshCalDavTimeKinds(const QString& accountId,
     const TimeKind previous = value.timeKind;
     if (!normalize(&value)) return rollback();
     if (value.timeKind == previous) continue;
+    if (!hydrateProviderResource(&value, errorMessage)) return rollback();
+    const RecurrenceStoredBounds bounds = recurrenceBounds(value);
     QSqlQuery update(m_database);
-    update.prepare(QStringLiteral("UPDATE events SET time_kind=? WHERE id=?"));
+    update.prepare(QStringLiteral(
+        "UPDATE events SET time_kind=?,series_until_utc=?,series_until_date=?,"
+        "original_start_utc=?,original_start_date=? WHERE id=?"));
     update.addBindValue(timeKindToString(value.timeKind));
+    update.addBindValue(bounds.untilUtc);
+    update.addBindValue(bounds.untilDate);
+    update.addBindValue(bounds.originalUtc);
+    update.addBindValue(bounds.originalDate);
     update.addBindValue(value.id);
     if (!update.exec()) {
       if (errorMessage != nullptr)

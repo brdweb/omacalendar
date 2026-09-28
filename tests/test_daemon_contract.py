@@ -28,7 +28,7 @@ from typing import Any
 
 PROTOCOL_MAJOR = 2
 PROTOCOL_MINOR = 1
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 
 class ContractError(AssertionError):
@@ -1526,7 +1526,7 @@ def run_contract(harness: DaemonHarness) -> None:
     )
 
     schema, database_revision = read_schema(harness.database_path)
-    require(schema == SCHEMA_VERSION, "database PRAGMA user_version is not schema 2")
+    require(schema == SCHEMA_VERSION, "database PRAGMA user_version is not schema 3")
     require(database_revision == initial_revision, "database/API revision mismatch")
     run_settings_get_many_contract(harness)
     for owned_directory in (

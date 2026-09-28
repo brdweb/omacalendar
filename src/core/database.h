@@ -10,6 +10,7 @@
 #include <functional>
 
 #include "core/domain.h"
+#include "core/recurrenceexpander.h"
 
 namespace omacalendar {
 
@@ -349,6 +350,8 @@ class Database final {
   bool ensureProviderResourcesSchema(QString* errorMessage);
   bool ensureReadPerformanceIndexes(QString* errorMessage);
   bool repairInclusiveAllDayEndDates(QString* errorMessage);
+  bool migrateSeriesBounds(QString* errorMessage);
+  bool repairSeriesBounds(QString* errorMessage);
   bool archiveLegacyDatabase(const QString& path, QString* errorMessage);
   bool execute(const QString& sql, QString* errorMessage) const;
   bool bumpChangeRevision(QString* errorMessage = nullptr) const;
@@ -391,6 +394,7 @@ class Database final {
 
   QString m_connectionName;
   QSqlDatabase m_database;
+  mutable RecurrenceExpansionCache m_expansionCache;
 };
 
 }  // namespace omacalendar

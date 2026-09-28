@@ -120,6 +120,29 @@ def snapshot(h: DaemonHarness, ids: list[str], settings: dict[str, Any], interva
     }
 
 
+def schema_two_version(path: Path) -> None:
+    with sqlite3.connect(path) as connection:
+        equal(connection.execute("PRAGMA user_version").fetchone()[0], 2,
+              "prior artifact did not create schema 2")
+        columns = {row[1] for row in connection.execute("PRAGMA table_info(events)")}
+        require("series_until_utc" not in columns, "prior artifact already has series bounds")
+
+
+def assert_series_bounds(path: Path, ids: list[str]) -> None:
+    with sqlite3.connect(path) as connection:
+        equal(connection.execute("PRAGMA user_version").fetchone()[0], 3,
+              "candidate did not migrate to schema 3")
+        for event_id in ids:
+            row = connection.execute(
+                "SELECT series_until_utc,series_until_date FROM events WHERE id=?",
+                (event_id,),
+            ).fetchone()
+            require(row is not None and row[0] is not None
+                    and row[0] < "2022-01-01", f"migration omitted finite bound: {event_id}")
+
+
+
+
 def upgrade(previous: Path, candidate: Path, old_version: str, new_version: str,
             work: Path, logs: Path | None) -> None:
     with profile(work, "upgrade") as root, LoopbackProviderFixture() as fixture:
@@ -163,6 +186,27 @@ def upgrade(previous: Path, candidate: Path, old_version: str, new_version: str,
                 for key in ("organizer", "attendees"):
                     equal(event[key], payload.get(key, {} if key == "organizer" else []), f"seed discarded {key}")
                 events.append(event)
+            historical_ids = []
+            old_start = datetime(2021, 1, 1, 10, tzinfo=timezone.utc)
+            for index, rule in enumerate(("FREQ=DAILY;COUNT=2",
+                                          "FREQ=DAILY;UNTIL=20210103T100000Z")):
+                draft = {**payloads(calendar_id)[2],
+                         "summary": f"Historical series {index}",
+                         "startUtc": utc_text(old_start),
+                         "endUtc": utc_text(old_start + timedelta(hours=2)),
+                         "recurrenceRule": rule, "reminders": []}
+                created = h.call("events.create", {
+                    "clientMutationId": f"upgrade-history-{index}",
+                    "guestNotificationPolicy": "none", "recurrenceScope": "series",
+                    "event": draft,
+                })
+                historical_ids.append(created["id"])
+            historical_range = {
+                "start": "2021-01-01T00:00:00Z", "end": "2021-01-10T00:00:00Z",
+                "calendarIds": [calendar_id], "limit": 100,
+            }
+            historical_before = h.call("events.list", historical_range)["events"]
+            equal(len(historical_before), 5, "schema-2 historical fixture")
             start = datetime.fromisoformat(events[0]["startUtc"].replace("Z", "+00:00"))
             interval = {"start": utc_text(start - timedelta(days=1)), "end": utc_text(start + timedelta(days=8)),
                         "calendarIds": [calendar_id], "limit": 100}
@@ -183,7 +227,7 @@ def upgrade(previous: Path, candidate: Path, old_version: str, new_version: str,
                 "recurrenceScope": "occurrence", "guestNotificationPolicy": "none",
             })
             add_provider(h, fixture)
-            ids = [e["id"] for e in events] + [edited["id"]]
+            ids = [e["id"] for e in events] + [edited["id"]] + historical_ids
             before = snapshot(h, ids, settings, interval)
             require(len(before["reminders"]) >= 2, "seed did not create persisted alarm jobs")
             require(sum(e["summary"] == "Synthetic recurring" for e in before["occurrences"]) == 3,
@@ -191,6 +235,7 @@ def upgrade(previous: Path, candidate: Path, old_version: str, new_version: str,
             require(any(e["summary"] == "Synthetic exception" for e in before["occurrences"]),
                     "seed detached exception not visible")
             h.stop()
+            schema_two_version(h.database_path)
             backup = root / "backup"
             backup.mkdir(mode=0o700)
             for name in ("data", "config"):
@@ -203,8 +248,13 @@ def upgrade(previous: Path, candidate: Path, old_version: str, new_version: str,
                 h.start()
                 require(h.call("system.info")["version"] == new_version, "wrong candidate")
                 require(h.call("system.health")["ok"], "candidate unhealthy")
+                require(h.call("system.info")["schemaVersion"] == 3,
+                        "candidate did not report schema 3")
+                equal(h.call("events.list", historical_range)["events"], historical_before,
+                      f"candidate restart {number + 1} changed finite recurrence")
                 equal(snapshot(h, ids, settings, interval), before, f"candidate restart {number + 1} changed profile")
                 h.stop()
+                assert_series_bounds(h.database_path, historical_ids)
             for name in ("data", "config"):
                 (root / name).rename(root / ("candidate-" + name))
                 shutil.copytree(backup / name, root / name)
@@ -217,7 +267,8 @@ def upgrade(previous: Path, candidate: Path, old_version: str, new_version: str,
             equal(tree_digest(backup), original_backup, "original backup changed")
             equal(tree_digest(root / "synthetic-secrets"), original_secret_fixture,
                   "synthetic credential storage changed during upgrade/restore")
-            print(f"PASS: {old_version} -> {new_version}; four event shapes, full event DTOs, detached/cancelled "
+            print(f"PASS: {old_version} -> {new_version}; timed/all-day/floating plus COUNT/UNTIL "
+                  "historical series, schema-2-to-3 finite-bound backfill, full event DTOs, detached/cancelled "
                   "recurrence, alarm jobs, nine settings, calendar colors/visibility/order/ignored-alerts, "
                   "active ordered set/default, local/CalDAV account continuity, two candidate restarts, "
                   "complete older-backup restore and immutable backup hashes")
@@ -280,7 +331,7 @@ def schema_one(candidate: Path, version: str, work: Path, logs: Path | None) -> 
                     staging.rmdir()
                 h.start()
                 info = h.call("system.info")
-                require(info["version"] == version and info["schemaVersion"] == 2, "wrong migrated runtime")
+                require(info["version"] == version and info["schemaVersion"] == 3, "wrong migrated runtime")
                 accounts = h.call("accounts.list")["accounts"]
                 require(len(accounts) == 1 and accounts[0]["provider"] == "local", "transition did not reset to local-only state")
                 archives = list(h.database_path.parent.glob("*.pre-v2-*.backup"))
@@ -299,7 +350,7 @@ def schema_one(candidate: Path, version: str, work: Path, logs: Path | None) -> 
                 require(len(list(h.database_path.parent.glob("*.pre-v2-*.backup"))) == len(archives), "schema-2 restart repeated archival")
                 require(not staging.exists(), "schema staging path remained")
                 h.stop()
-                print(f"PASS: {label}; private recoverable archive, schema-2 local reset, explicit synthetic "
+                print(f"PASS: {label}; private recoverable archive, schema-3 local reset, explicit synthetic "
                       "CalDAV reconnect/sync, idempotent restart" + (", failed initialization preserves original and retries successfully" if blocked else ""))
             finally:
                 h.stop()

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Create an isolated 100k-event store and measure OmaCalendar release gates.
+"""Create an isolated event store, including finished historical series, and measure release gates.
 
 The daemon creates the disposable schema, then remains stopped while this script
 loads deterministic fixture rows in one transaction. Measurements use one warm
@@ -29,7 +29,7 @@ from datetime import UTC, date, datetime, timedelta
 from typing import Any, Iterable
 
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 PROTOCOL_MAJOR = 2
 AGENDA_GATE_MS = 200.0
 SEARCH_GATE_MS = 250.0
@@ -319,6 +319,70 @@ def batched(values: Iterable[tuple[Any, ...]], size: int) -> Iterable[list[tuple
         yield batch
 
 
+def historical_series_rows(count: int) -> Iterable[tuple[Any, ...]]:
+    """Finite old series whose last occurrence ended years before the view."""
+    for index in range(count):
+        start = datetime(2000, 1, 1, tzinfo=UTC) + timedelta(days=index % 4000)
+        all_day = index % 5 == 0
+        row = list(next(event_rows(1, ["local-default"])))
+        row[0] = f"perf-history-{index:06d}"
+        row[3] = f"perf-history-uid-{index:06d}@omacalendar.test"
+        row[5] = f"Finished historical series {index}"
+        row[6] = "Finite weekly recurrence, outside the seven-day release view."
+        row[16] = int(all_day)
+        row[17] = "all_day" if all_day else "zoned"
+        row[21] = "RRULE:FREQ=WEEKLY;COUNT=3"
+        row[29] = 0
+        row[30] = 0
+        if all_day:
+            row[10:16] = ["", "", start.date().isoformat(),
+                          (start.date() + timedelta(days=1)).isoformat(), "", ""]
+            bounds = [None, (start.date() + timedelta(days=15)).isoformat(), None, None]
+        else:
+            start += timedelta(hours=9)
+            row[10:16] = [iso_utc(start), iso_utc(start + timedelta(hours=1)),
+                          "", "", "UTC", "UTC"]
+            bounds = [iso_utc(start + timedelta(days=14, hours=1)),
+                      None, None, None]
+        yield (*row, *bounds)
+
+
+def seed_historical_series(database_path: Path, count: int,
+                           base_count: int) -> dict[str, Any]:
+    started = time.perf_counter()
+    connection = sqlite3.connect(database_path)
+    with connection:
+        for batch in batched(historical_series_rows(count), 2500):
+            connection.executemany(
+                """INSERT INTO events
+                   (id,calendar_id,remote_id,uid,etag,summary,description,
+                    location,url,conference_url,start_utc,end_utc,start_date,
+                    end_date,start_timezone,end_timezone,all_day,time_kind,status,
+                    transparency,visibility,recurrence_rule,recurrence_id,sequence,
+                    organizer_json,attendees_json,reminders_json,raw_payload,
+                    raw_format,dirty,deleted,local_revision,sync_state,created_at,
+                    updated_at,series_until_utc,series_until_date,
+                    original_start_utc,original_start_date)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,
+                           ?,?,?,?,?,?,?,?,?,?)""",
+                batch,
+            )
+        connection.execute(
+            "UPDATE metadata SET value=CAST(value AS INTEGER)+? WHERE key='change_revision'",
+            (count,),
+        )
+    connection.execute("ANALYZE")
+    integrity = str(connection.execute("PRAGMA integrity_check").fetchone()[0])
+    stored = int(connection.execute("SELECT count(*) FROM events").fetchone()[0])
+    indexed = int(connection.execute("SELECT count(*) FROM events_fts").fetchone()[0])
+    connection.close()
+    require(integrity == "ok", f"historical seed integrity check failed: {integrity}")
+    require(stored == base_count + count and indexed == stored,
+            f"historical seed/FTS counts disagree: events={stored}, FTS={indexed}")
+    return {"eventCount": stored, "ftsRowCount": indexed,
+            "historicalSeedSeconds": round(time.perf_counter() - started, 3)}
+
+
 def seed_database(database_path: Path, event_count: int) -> dict[str, Any]:
     started = time.perf_counter()
     connection = sqlite3.connect(database_path)
@@ -326,7 +390,7 @@ def seed_database(database_path: Path, event_count: int) -> dict[str, Any]:
     connection.execute("PRAGMA synchronous=OFF")
     connection.execute("PRAGMA temp_store=MEMORY")
     schema_version = int(connection.execute("PRAGMA user_version").fetchone()[0])
-    require(schema_version == SCHEMA_VERSION, f"expected schema 2, found {schema_version}")
+    require(schema_version == SCHEMA_VERSION, f"expected schema 3, found {schema_version}")
 
     event_columns = [
         "id", "calendar_id", "remote_id", "uid", "etag", "summary",
@@ -341,7 +405,7 @@ def seed_database(database_path: Path, event_count: int) -> dict[str, Any]:
         str(row[1]) for row in connection.execute("PRAGMA table_info(events)")
     }
     missing = sorted(set(event_columns) - actual_columns)
-    require(not missing, f"schema-2 events table is missing columns: {missing}")
+    require(not missing, f"schema-3 events table is missing columns: {missing}")
 
     calendar_ids = ["local-default"] + [f"perf-calendar-{index}" for index in range(1, 8)]
     insert_event = (
@@ -401,36 +465,58 @@ def seed_database(database_path: Path, event_count: int) -> dict[str, Any]:
 def query_plans(database_path: Path, calendar_ids: list[str]) -> dict[str, Any]:
     connection = sqlite3.connect(f"{database_path.as_uri()}?mode=ro", uri=True)
     placeholders = ",".join("?" for _ in calendar_ids)
+    calendar_params = {f"calendar{index}": value for index, value in enumerate(calendar_ids)}
+    calendar_scope = ",".join(f":calendar{index}" for index in range(len(calendar_ids)))
     agenda_sql = f"""
         SELECT * FROM (
-          SELECT e.* FROM events AS e
+          SELECT e.id FROM events e WHERE e.deleted=0 AND e.all_day=0
+            AND e.recurrence_rule='' AND e.recurrence_id=''
+            AND e.end_utc>:startUtc AND e.start_utc<:endUtc
+            AND e.calendar_id IN ({calendar_scope})
+          UNION ALL
+          SELECT e.id FROM events e WHERE e.deleted=0 AND e.all_day=1
+            AND e.recurrence_rule='' AND e.recurrence_id=''
+            AND e.end_date>:startDate AND e.start_date<:endDate
+            AND e.calendar_id IN ({calendar_scope})
+          UNION ALL
+          SELECT e.id FROM events e INDEXED BY events_series_utc_bound_index
           WHERE e.deleted=0 AND e.all_day=0
-            AND e.recurrence_rule='' AND e.recurrence_id=''
-            AND e.end_utc>? AND e.start_utc<?
-            AND e.calendar_id IN ({placeholders})
+            AND e.time_kind<>'floating'
+            AND e.recurrence_rule<>'' AND e.recurrence_id=''
+            AND (e.start_utc='' OR e.start_utc<:endUtc)
+            AND COALESCE(e.series_until_utc,'~')>:startUtc
+            AND e.calendar_id IN ({calendar_scope})
           UNION ALL
-          SELECT e.* FROM events AS e
+          SELECT e.id FROM events e INDEXED BY events_series_floating_bound_index
+          WHERE e.deleted=0 AND e.all_day=0
+            AND e.time_kind='floating'
+            AND e.recurrence_rule<>'' AND e.recurrence_id=''
+            AND (e.start_utc='' OR e.start_utc<:endUtc)
+            AND COALESCE(e.series_until_date,'~')>:startDate
+            AND e.calendar_id IN ({calendar_scope})
+          UNION ALL
+          SELECT e.id FROM events e INDEXED BY events_series_date_bound_index
           WHERE e.deleted=0 AND e.all_day=1
-            AND e.recurrence_rule='' AND e.recurrence_id=''
-            AND e.end_date>? AND e.start_date<?
-            AND e.calendar_id IN ({placeholders})
+            AND e.recurrence_rule<>'' AND e.recurrence_id=''
+            AND (e.start_date='' OR e.start_date<:endDate)
+            AND COALESCE(e.series_until_date,'~')>:startDate
+            AND e.calendar_id IN ({calendar_scope})
           UNION ALL
-          SELECT e.* FROM events AS e
-          WHERE e.deleted=0
-            AND (e.recurrence_rule<>'' OR e.recurrence_id<>'')
-            AND e.calendar_id IN ({placeholders})
-        ) AS bounded_events
-        ORDER BY all_day DESC, COALESCE(NULLIF(start_utc,''),start_date),id
+          SELECT e.id FROM events e INDEXED BY events_exception_utc_index
+          WHERE e.recurrence_id<>''
+            AND (e.original_start_utc IS NULL OR e.original_start_date IS NULL
+                 OR e.original_start_utc>=:startUtc
+                 OR e.original_start_date>=:startDate)
+            AND e.calendar_id IN ({calendar_scope})
+        )
     """
-    agenda_bindings: list[Any] = [
-        iso_utc(REFERENCE_START),
-        iso_utc(REFERENCE_END),
-        *calendar_ids,
-        REFERENCE_START.date().isoformat(),
-        REFERENCE_END.date().isoformat(),
-        *calendar_ids,
-        *calendar_ids,
-    ]
+    agenda_bindings = {
+        "startUtc": iso_utc(REFERENCE_START),
+        "endUtc": iso_utc(REFERENCE_END),
+        "startDate": REFERENCE_START.date().isoformat(),
+        "endDate": REFERENCE_END.date().isoformat(),
+        **calendar_params,
+    }
     search_sql = f"""
         SELECT e.* FROM events e
         JOIN events_fts ON events_fts.event_id=e.id
@@ -464,7 +550,19 @@ def query_plans(database_path: Path, calendar_ids: list[str]) -> dict[str, Any]:
         or "EVENTS_DATE_INDEX" in step.upper()
         for step in agenda
     ) and any(
-        "EVENTS_RECURRENCE_ACTIVE_INDEX" in step.upper()
+        "SEARCH E USING INDEX EVENTS_SERIES_UTC_BOUND_INDEX" in step.upper()
+        and ">?" in step
+        for step in agenda
+    ) and any(
+        "SEARCH E USING INDEX EVENTS_SERIES_DATE_BOUND_INDEX" in step.upper()
+        and ">?" in step
+        for step in agenda
+    ) and any(
+        "SEARCH E USING INDEX EVENTS_SERIES_FLOATING_BOUND_INDEX" in step.upper()
+        and ">?" in step
+        for step in agenda
+    ) and any(
+        "USING INDEX EVENTS_EXCEPTION_UTC_INDEX" in step.upper()
         for step in agenda
     )
     require(
@@ -555,10 +653,32 @@ def benchmark(args: argparse.Namespace, root: Path) -> dict[str, Any]:
     daemon = IsolatedDaemon(args.daemon, root)
     daemon.start()
     daemon.stop()
-    require(daemon.database_path.is_file(), "daemon did not initialize schema 2")
+    require(daemon.database_path.is_file(), "daemon did not initialize schema 3")
 
     seed = seed_database(daemon.database_path, args.events)
     calendar_ids = ["local-default"] + [f"perf-calendar-{index}" for index in range(1, 8)]
+    agenda_params = {
+        "start": iso_utc(REFERENCE_START),
+        "end": iso_utc(REFERENCE_END),
+        "calendarIds": calendar_ids,
+        "limit": 500,
+    }
+    baseline_agenda: dict[str, Any] | None = None
+    baseline_total: int | None = None
+    if args.historical_series:
+        daemon.start()
+        baseline_client = JsonSocket(daemon.socket_path)
+        try:
+            baseline_agenda, baseline_result = measure(
+                baseline_client, "events.list", agenda_params, args.warmups,
+                args.samples, AGENDA_GATE_MS,
+            )
+            baseline_total = int(baseline_result["total"])
+        finally:
+            baseline_client.close()
+            daemon.stop()
+        seed.update(seed_historical_series(daemon.database_path,
+                                           args.historical_series, args.events))
     plans = query_plans(daemon.database_path, calendar_ids)
 
     daemon.start()
@@ -568,14 +688,8 @@ def benchmark(args: argparse.Namespace, root: Path) -> dict[str, Any]:
         require(
             isinstance(system_info, dict)
             and system_info.get("schemaVersion") == SCHEMA_VERSION,
-            "benchmark daemon does not report schema 2",
+            "benchmark daemon does not report schema 3",
         )
-        agenda_params = {
-            "start": iso_utc(REFERENCE_START),
-            "end": iso_utc(REFERENCE_END),
-            "calendarIds": calendar_ids,
-            "limit": 500,
-        }
         search_params = {
             "query": SEARCH_MARKER,
             "calendarIds": calendar_ids,
@@ -598,6 +712,13 @@ def benchmark(args: argparse.Namespace, root: Path) -> dict[str, Any]:
             "bounded agenda query returned no representative events",
         )
         agenda["resultCount"] = int(agenda_result["total"])
+        if baseline_agenda is not None:
+            require(agenda["resultCount"] == baseline_total,
+                    "finished historical series changed seven-day events.list results")
+            agenda["baselineP95Ms"] = baseline_agenda["p95Ms"]
+            agenda["historyP95Ratio"] = round(
+                agenda["p95Ms"] / max(0.001, baseline_agenda["p95Ms"]), 3,
+            )
 
         search, search_result = measure(
             client, "events.search", search_params, args.warmups, args.samples,
@@ -682,6 +803,11 @@ def benchmark(args: argparse.Namespace, root: Path) -> dict[str, Any]:
         "agendaP95": bool(agenda["passesGate"]),
         "searchP95": bool(search["passesGate"]),
         "widgetP95": bool(widget["passesGate"]),
+        "historicalSeriesP95": (
+            baseline_agenda is None
+            or agenda["p95Ms"] <= max(baseline_agenda["p95Ms"] * 1.25,
+                                      baseline_agenda["p95Ms"] + 10.0)
+        ),
     }
     report = {
         "formatVersion": 1,
@@ -691,6 +817,7 @@ def benchmark(args: argparse.Namespace, root: Path) -> dict[str, Any]:
         "dataset": {
             **seed,
             "schemaVersion": SCHEMA_VERSION,
+            "historicalSeriesCount": args.historical_series,
             "databaseBytes": file_size(daemon.database_path),
             "referenceRange": {
                 "start": iso_utc(REFERENCE_START),
@@ -700,6 +827,7 @@ def benchmark(args: argparse.Namespace, root: Path) -> dict[str, Any]:
         },
         "measurements": {
             "boundedAgenda": agenda,
+            "boundedAgendaWithoutHistory": baseline_agenda,
             "indexedSearch": search,
             "widgetSnapshot": widget,
             "widgetUnchangedSnapshot": unchanged,
@@ -730,6 +858,8 @@ def parse_args() -> argparse.Namespace:
                         help="Path to the built omacalendard executable")
     parser.add_argument("--events", type=int, default=100_000,
                         help="Number of stored events to seed (default: 100000)")
+    parser.add_argument("--historical-series", type=int, default=20_000,
+                        help="Finished series added after the baseline measurement (default: 20000)")
     parser.add_argument("--warmups", type=int, default=3,
                         help="Warm calls before each measurement")
     parser.add_argument("--samples", type=int, default=11,
@@ -748,6 +878,7 @@ def parse_args() -> argparse.Namespace:
     args = parser.parse_args()
     require(args.daemon.is_file(), f"daemon executable not found: {args.daemon}")
     require(args.events >= 1000, "--events must be at least 1000")
+    require(args.historical_series >= 0, "--historical-series cannot be negative")
     require(args.warmups >= 0, "--warmups cannot be negative")
     require(args.samples >= 3, "--samples must be at least 3")
     return args

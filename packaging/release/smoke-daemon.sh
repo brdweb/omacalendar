@@ -60,7 +60,7 @@ wait_for_method() {
 start_daemon
 wait_for_method system.info "${smoke_root}/system-info.json"
 grep -Fq '"protocolMajor":2' "${smoke_root}/system-info.json"
-grep -Fq '"schemaVersion":2' "${smoke_root}/system-info.json"
+grep -Fq '"schemaVersion":3' "${smoke_root}/system-info.json"
 grep -Fq '"version":"' "${smoke_root}/system-info.json"
 if [[ -n ${expected_version} ]]; then
   grep -Fq "\"version\":\"${expected_version}\"" \
