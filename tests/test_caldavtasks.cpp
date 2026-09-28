@@ -88,6 +88,8 @@ class TaskServer final : public QObject {
                         data});
   }
   void remove(const QByteArray& path) { m_resources.remove(path); }
+  // Reports this resource as a 500 inside calendar-query answers.
+  void failInQuery(const QByteArray& path) { m_failingPath = path; }
   [[nodiscard]] QHash<QByteArray, Resource> resources() const { return m_resources; }
   [[nodiscard]] QStringList log() const { return m_log; }
 
@@ -159,7 +161,13 @@ class TaskServer final : public QObject {
         }
       } else {
         for (auto it = m_resources.cbegin(); it != m_resources.cend(); ++it) {
-          entries += entry(it.key());
+          entries += it.key() == m_failingPath
+                         ? QByteArrayLiteral("<d:response><d:href>") + it.key() +
+                               QByteArrayLiteral(
+                                   "</d:href><d:status>HTTP/1.1 500 "
+                                   "Internal Server Error</d:status>"
+                                   "</d:response>")
+                         : entry(it.key());
         }
       }
       return reply(
@@ -196,6 +204,7 @@ class TaskServer final : public QObject {
   QHash<QTcpSocket*, QByteArray> m_buffers;
   QHash<QByteArray, Resource> m_resources;
   QStringList m_log;
+  QByteArray m_failingPath;
   int m_version = 0;
 };
 
@@ -353,7 +362,8 @@ void CalDavTaskTest::syncPushesPullsAndMergesConflicts() {
   CalDavCollection events;
   events.href = QStringLiteral("/dav/calendar/");
   events.supportedComponents = {QStringLiteral("VEVENT")};
-  sync.syncDiscovered(account.id, server.url(QStringLiteral("/dav/")), {tasks, events});
+  sync.syncDiscovered(account.id, server.url(QStringLiteral("/dav/")), {tasks, events},
+                      true);
   settle();
   QCOMPARE(failed.count(), 0);
   TaskList list;
@@ -418,8 +428,48 @@ void CalDavTaskTest::syncPushesPullsAndMergesConflicts() {
   query.listIds = {list.id};
   QVERIFY(database.tasks(query).isEmpty());
 
+  // A task removed while its upload is under way does not come back: the
+  // upload lands, then the removal follows.
+  Task quick;
+  quick.listId = list.id;
+  quick.title = QStringLiteral("Changed my mind");
+  QVERIFY2(database.saveLocalTask(&quick, -1, &error), qPrintable(error));
+  sync.syncStored(account.id);
+  QVERIFY2(database.removeLocalTask(quick.id, &error), qPrintable(error));
+  sync.syncStored(account.id);
+  settle();
+  QTRY_VERIFY_WITH_TIMEOUT(!sync.isSyncing(account.id), 10000);
+  QVERIFY(database.pendingTaskWrites(list.id).isEmpty());
+  for (auto it = server.resources().cbegin(); it != server.resources().cend(); ++it) {
+    QVERIFY2(!it.value().data.contains("Changed my mind"), it.key().constData());
+  }
+  QVERIFY(onlyTask(database, list.id, QStringLiteral("Changed my mind")).id.isEmpty());
+
+  // A resource the server fails to report is not taken as removed.
+  server.put("/dav/tasks/kept.ics", vtodo("kept", "Kept"));
+  sync.syncStored(account.id);
+  settle();
+  QVERIFY(!onlyTask(database, list.id, QStringLiteral("Kept")).id.isEmpty());
+  server.failInQuery("/dav/tasks/kept.ics");
+  sync.syncStored(account.id);
+  settle();
+  QVERIFY(!onlyTask(database, list.id, QStringLiteral("Kept")).id.isEmpty());
+  server.failInQuery({});
+
+  // A collection whose component list could not be read keeps its list, and
+  // so does one missing from a discovery with failed responses.
+  CalDavCollection unknown = tasks;
+  unknown.supportedComponents.clear();
+  sync.syncDiscovered(account.id, server.url(QStringLiteral("/dav/")),
+                      {unknown, events}, true);
+  settle();
+  QVERIFY(!database.taskList(list.id).id.isEmpty());
+  sync.syncDiscovered(account.id, server.url(QStringLiteral("/dav/")), {events}, false);
+  settle();
+  QVERIFY(!database.taskList(list.id).id.isEmpty());
+
   // A collection that is no longer discovered takes its list with it.
-  sync.syncDiscovered(account.id, server.url(QStringLiteral("/dav/")), {events});
+  sync.syncDiscovered(account.id, server.url(QStringLiteral("/dav/")), {events}, true);
   settle();
   QVERIFY(database.taskList(list.id).id.isEmpty());
   QCOMPARE(failed.count(), 0);

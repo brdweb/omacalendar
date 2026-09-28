@@ -25,9 +25,12 @@ class CalDavTaskSync final : public QObject {
   ~CalDavTaskSync() override;
 
   // Matches the account's task lists to freshly discovered collections
-  // (adding, updating and removing lists), then syncs every list.
+  // (adding, updating and removing lists), then syncs every list. A list is
+  // only removed on clear evidence: its collection now lists components
+  // without VTODO, or it is missing from a discovery in which every
+  // response succeeded (complete).
   void syncDiscovered(const QString& accountId, const QUrl& homeUrl,
-                      const QList<CalDavCollection>& collections);
+                      const QList<CalDavCollection>& collections, bool complete);
   // Syncs the account's stored lists without discovery, for example right
   // after a local edit.
   void syncStored(const QString& accountId);

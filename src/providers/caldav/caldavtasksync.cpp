@@ -1,6 +1,7 @@
 #include "providers/caldav/caldavtasksync.h"
 
 #include <QTimer>
+#include <algorithm>
 
 #include "providers/caldav/vtodocodec.h"
 
@@ -68,18 +69,25 @@ void CalDavTaskSync::cancel(const QString& accountId) {
 }
 
 void CalDavTaskSync::syncDiscovered(const QString& accountId, const QUrl& homeUrl,
-                                    const QList<CalDavCollection>& collections) {
+                                    const QList<CalDavCollection>& collections,
+                                    const bool complete) {
   auto job = std::make_shared<Job>();
   job->accountId = accountId;
-  QSet<QString> discovered;
+  QSet<QString> present;
+  QSet<QString> withoutTasks;
   int position = 0;
   for (const CalDavCollection& collection : collections) {
-    if (!collection.holdsTasks()) {
-      continue;
-    }
     const QString remoteId =
         CalDavClient::canonicalResourceId(homeUrl, collection.href);
-    discovered.insert(remoteId);
+    present.insert(remoteId);
+    if (!collection.holdsTasks()) {
+      // Only an explicit component list proves the collection holds no
+      // tasks; a missing one (say, a failed propstat) proves nothing.
+      if (!collection.supportedComponents.isEmpty()) {
+        withoutTasks.insert(remoteId);
+      }
+      continue;
+    }
     const TaskList existing = m_database->taskListByRemoteId(accountId, remoteId);
     TaskList list = existing;
     if (list.id.isEmpty()) {
@@ -109,7 +117,9 @@ void CalDavTaskSync::syncDiscovered(const QString& accountId, const QUrl& homeUr
   }
   // Lists whose collection is gone, or no longer holds tasks, go with it.
   for (const TaskList& list : m_database->taskLists()) {
-    if (list.accountId == accountId && !discovered.contains(list.remoteId)) {
+    if (list.accountId == accountId &&
+        (withoutTasks.contains(list.remoteId) ||
+         (complete && !present.contains(list.remoteId)))) {
       QString error;
       if (m_database->removeTaskList(list.id, &error)) {
         job->changed.append(list.id);
@@ -184,7 +194,11 @@ void CalDavTaskSync::sendNextWrite(const std::shared_ptr<Job>& job) {
     return;
   }
   const Task task = job->writes.at(job->writeIndex++);
-  if (task.pendingOperation == QStringLiteral("remove")) {
+  if (task.pendingOperation == QStringLiteral("remove") && task.remoteId.isEmpty()) {
+    // Removed before it was ever uploaded: nothing to tell the server.
+    recordWrite(job, task, {}, {}, {});
+    sendNextWrite(job);
+  } else if (task.pendingOperation == QStringLiteral("remove")) {
     sendRemove(job, task, false);
   } else if (task.pendingOperation == QStringLiteral("create") ||
              task.remoteId.isEmpty()) {
@@ -392,7 +406,14 @@ void CalDavTaskSync::pull(const std::shared_ptr<Job>& job) {
           return;
         }
         QList<Task> remote;
-        bool complete = true;
+        // A resource the server failed to report (a 403 or 5xx inside the
+        // multistatus, or no data) is not proof that its task was removed.
+        bool complete =
+            std::all_of(parsed.responses.cbegin(), parsed.responses.cend(),
+                        [](const CalDavResponse& entry) {
+                          return entry.statusCode == 404 || entry.statusCode == 410 ||
+                                 (entry.isSuccess() && !entry.calendarData.isEmpty());
+                        });
         for (const CalDavResource& resource : CalDavXml::resources(parsed)) {
           if (resource.deleted()) {
             continue;

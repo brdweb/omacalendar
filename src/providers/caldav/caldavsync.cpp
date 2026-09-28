@@ -1120,7 +1120,12 @@ void CalDavSync::discoverCollections(SyncJob* job, const QUrl& homeUrl) {
         }
         const QList<CalDavCollection> collections = CalDavXml::collections(parsed);
         // Task lists are synced alongside, with their own requests.
-        m_tasks.syncDiscovered(job->accountId, job->homeUrl, collections);
+        // Only a discovery without failed responses can prove a collection
+        // is gone.
+        const bool complete =
+            std::all_of(parsed.responses.cbegin(), parsed.responses.cend(),
+                        [](const CalDavResponse& entry) { return entry.isSuccess(); });
+        m_tasks.syncDiscovered(job->accountId, job->homeUrl, collections, complete);
         for (const CalDavCollection& remote : collections) {
           if (!remote.holdsEvents()) {
             // A to-do-only collection is a task list, not a calendar.

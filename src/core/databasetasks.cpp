@@ -471,12 +471,15 @@ bool Database::removeLocalTask(const QString& taskId, QString* errorMessage) {
   const bool local = list.capabilities.value(QStringLiteral("provider")).toString() ==
                      QStringLiteral("local");
   QSqlQuery query(m_database);
-  if (local || existing.remoteId.isEmpty()) {
-    // Nothing on a provider to remove: device-only tasks and creates that
-    // never left the device go straight away.
+  if (local) {
+    // Device-only tasks have nothing on a provider to remove.
     query.prepare(QStringLiteral("DELETE FROM tasks WHERE id=?"));
     query.addBindValue(taskId);
   } else {
+    // Even a task without a provider identity yet keeps a tombstone: its
+    // upload may already be under way, and once that lands the removal
+    // still has to reach the provider. A sync finding the tombstone with
+    // nothing uploaded simply drops it.
     query.prepare(QStringLiteral(
         "UPDATE tasks SET deleted=1, dirty=1, pending_operation='remove', "
         "local_revision=local_revision+1, updated_at=? WHERE id=?"));
