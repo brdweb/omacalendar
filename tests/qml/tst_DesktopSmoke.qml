@@ -341,6 +341,40 @@ Item {
                     (fresh.workDayStart - 1) * fresh.pixelsPerHour)
         }
 
+        function test_editor_keeps_recurrence_rules() {
+            const rules = ["FREQ=WEEKLY;INTERVAL=2;BYDAY=MO,WE;COUNT=5",
+                           "FREQ=MONTHLY;BYDAY=3MO",
+                           "FREQ=MONTHLY;BYSETPOS=-1;BYDAY=MO,TU,WE,TH,FR"]
+            const editor = createTemporaryObject(editorFactory, scene)
+            verify(editor !== null)
+            for (let index = 0; index < rules.length; ++index) {
+                const event = Object.assign({}, representativeEvents()[0],
+                                            {"recurrenceRule": rules[index]})
+                editor.openExisting(event)
+                tryCompare(editor, "opened", true)
+                compare(editor.recurrenceRule(), rules[index],
+                        "an unedited rule is saved unchanged")
+                editor.close()
+                tryCompare(editor, "opened", false)
+            }
+
+            const weekly = Object.assign({}, representativeEvents()[0],
+                                         {"recurrenceRule": rules[0]})
+            editor.openExisting(weekly)
+            tryCompare(editor, "opened", true)
+            const friday = findChild(scene.Window.window.contentItem,
+                                     "recurrenceWeekday-FR")
+            verify(friday !== null)
+            friday.clicked()
+            compare(editor.recurrenceRule(),
+                    "FREQ=WEEKLY;INTERVAL=2;BYDAY=MO,WE,FR;COUNT=5")
+            const preview = findChild(scene.Window.window.contentItem,
+                                      "recurrencePreview")
+            compare(preview.text,
+                    "Every 2 weeks on Monday, Wednesday and Friday, 5 times")
+            editor.close()
+        }
+
         function test_provider_markup_remains_literal() {
             const marker = "<b>literal & event text</b>"
             const location = "<img src='file:///etc/passwd'>"
