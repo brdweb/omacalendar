@@ -208,6 +208,20 @@ instead of synthesizing one from the displayed start time. `events.get` accepts
 an optional `recurrenceId` (directly or in `eventRef`) and returns the detached
 or generated occurrence rather than the series master.
 
+`events.get` additively returns `attachments` (not yet released; the protocol
+minor remains 2.1): `[{title, url, mimeType}]` read on demand from the stored
+Google event or iCalendar `ATTACH` properties of that occurrence, falling back
+to the series master. Only HTTP(S) links are listed; inline binary attachments
+are omitted. `events.list` does not carry attachments.
+
+`events.create` and `events.update` additively accept `addConference: true` on
+the event (not yet released) to create a Google Meet link. It applies only to
+Google calendars whose `capabilities.conferenceProperties.allowedConferenceSolutionTypes`
+include `hangoutsMeet`; other calendars answer `conference_unsupported`. It is
+ignored when the event already has a `conferenceUrl`. The daemon generates the
+conference request id itself and keeps it with the queued write until Google
+accepts it; the new link arrives as `conferenceUrl` on the next sync.
+
 `events.list` requires a bounded start/end interval and supports bounded
 pagination. The interval and `calendarIds` scope are applied before `offset`
 and `limit`; `total` is the size of that filtered result. `events.search`

@@ -1074,6 +1074,36 @@ class DatabaseTest final : public QObject {
     QVERIFY(readyAfterCancellation.isEmpty());
   }
 
+  void conferenceRequestSurvivesFoldedEdits() {
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    Database db;
+    QVERIFY(db.open(directory.filePath("store.sqlite")));
+    QString error;
+    Account account = makeAccount("acc-conference", "Conference");
+    QVERIFY(db.upsertAccount(account, &error));
+    Calendar cal = makeCalendar("cal-conference", account.id);
+    QVERIFY(db.upsertCalendar(cal, &error));
+
+    Event local = makeLocalEvent(cal.id, QString());
+    local.conferenceRequestId = QStringLiteral("meet-request");
+    QVERIFY2(db.saveLocalEvent(&local, OutboxOperation::Create, &error),
+             qPrintable(error));
+    // A later edit that says nothing about the conference is folded into the
+    // same queued create and must not drop the request.
+    Event edited = db.event(local.id, &error);
+    QVERIFY(edited.conferenceRequestId.isEmpty());
+    edited.summary = QStringLiteral("Renamed");
+    QVERIFY2(db.saveLocalEvent(&edited, OutboxOperation::Update, &error),
+             qPrintable(error));
+    const QList<OutboxItem> ready = db.readyOutbox(10, &error);
+    QCOMPARE(ready.size(), 1);
+    QCOMPARE(ready.first().operation, OutboxOperation::Create);
+    const Event queued = eventFromJson(ready.first().payload);
+    QCOMPARE(queued.summary, QStringLiteral("Renamed"));
+    QCOMPARE(queued.conferenceRequestId, QStringLiteral("meet-request"));
+  }
+
   void eventByUidMatchesCanonicalRecurrenceForms() {
     QTemporaryDir directory;
     QVERIFY(directory.isValid());

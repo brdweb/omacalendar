@@ -5,9 +5,11 @@
 #include <QCryptographicHash>
 #include <QDateTime>
 #include <QHash>
+#include <QJsonArray>
 #include <QJsonObject>
 #include <QSet>
 #include <QTimeZone>
+#include <QUrl>
 #include <cmath>
 #include <limits>
 #include <memory>
@@ -1877,6 +1879,70 @@ ICalendarSerializeResult ICalendarCodec::stampClientMutationId(
     return result;
   }
   result.payload = encoded.toUtf8();
+  return result;
+}
+
+QJsonArray ICalendarCodec::attachments(const QByteArray& payload, const QString& uid,
+                                       const QString& recurrenceIdValue) {
+  if (payload.isEmpty() || payload.size() > kMaximumCalendarBytes ||
+      payload.contains('\0')) {
+    return {};
+  }
+  icalerror_clear_errno();
+  const ComponentPtr calendar(icalcomponent_new_from_string(payload.constData()));
+  icalerror_clear_errno();
+  if (!calendar) {
+    return {};
+  }
+  QList<icalcomponent*> events;
+  collectEvents(calendar.get(), &events);
+  icalcomponent* exact = nullptr;
+  icalcomponent* master = nullptr;
+  for (icalcomponent* component : std::as_const(events)) {
+    if (propertyText(component, ICAL_UID_PROPERTY) != uid) {
+      continue;
+    }
+    const QString componentRecurrenceId = recurrenceId(component);
+    if (componentRecurrenceId.isEmpty()) {
+      master = master == nullptr ? component : master;
+    } else if (!recurrenceIdValue.isEmpty() &&
+               componentRecurrenceId == recurrenceIdValue) {
+      exact = component;
+    }
+  }
+  icalcomponent* source = exact != nullptr ? exact : master;
+  QJsonArray result;
+  if (source == nullptr) {
+    return result;
+  }
+  for (icalproperty* property =
+           icalcomponent_get_first_property(source, ICAL_ATTACH_PROPERTY);
+       property != nullptr;
+       property = icalcomponent_get_next_property(source, ICAL_ATTACH_PROPERTY)) {
+    icalattach* attach = icalproperty_get_attach(property);
+    if (attach == nullptr || icalattach_get_is_url(attach) == 0) {
+      continue;
+    }
+    const QUrl url(fromIcal(icalattach_get_url(attach)).trimmed());
+    const QString scheme = url.scheme().toLower();
+    if (!url.isValid() || url.host().isEmpty() ||
+        (scheme != QStringLiteral("https") && scheme != QStringLiteral("http"))) {
+      continue;
+    }
+    QString title = parameterValue(property, "FILENAME").trimmed();
+    if (title.isEmpty()) {
+      title = parameterValue(property, "X-FILENAME").trimmed();
+    }
+    if (title.isEmpty()) {
+      title = url.fileName();
+    }
+    const QString encoded = url.toString(QUrl::FullyEncoded);
+    result.append(QJsonObject{
+        {QStringLiteral("title"), title.isEmpty() ? encoded : title},
+        {QStringLiteral("url"), encoded},
+        {QStringLiteral("mimeType"), parameterValue(property, "FMTTYPE")},
+    });
+  }
   return result;
 }
 

@@ -16,6 +16,7 @@
 #include <QUrlQuery>
 #include <utility>
 
+#include "calendarpdf.h"
 #include "core/domain.h"
 #include "core/freebusy.h"
 #include "core/paths.h"
@@ -90,6 +91,9 @@ AppController::AppController(QObject* parent) : QObject(parent) {
   m_interactiveRenewal.setInterval(5 * 60 * 1000);
   connect(&m_interactiveRenewal, &QTimer::timeout, this,
           &AppController::sendInteractive);
+  m_pdfHydrationWait.setSingleShot(true);
+  connect(&m_pdfHydrationWait, &QTimer::timeout, this,
+          [this]() { resumePdfExport(false); });
   m_refreshTimer.setInterval(120);
   connect(&m_refreshTimer, &QTimer::timeout, this, [this]() {
     const int parts = std::exchange(m_pendingRefreshParts, 0);
@@ -231,6 +235,7 @@ AppController::AppController(QObject* parent) : QObject(parent) {
         if (event == QStringLiteral("events.changed")) {
           // Subscriptions announce a refresh only through changed events.
           refreshAccountSyncStates(true);
+          resumePdfExport(true);
         }
         if (parts != 0) {
           scheduleRefresh(parts);
@@ -1192,6 +1197,218 @@ void AppController::exportIcs(const QVariantMap& scope, const QUrl& destination)
   });
 }
 
+struct AppController::PdfExportJob {
+  QString path;
+  QJsonArray calendarIds;
+  PrintOptions options;
+  QVariantList events;
+  // The last page's coverage; incomplete while providers still download
+  // part of the range.
+  QJsonObject coverage;
+  int hydrationRounds = 0;
+};
+
+namespace {
+// How often, and how long, a PDF export waits for a range that providers are
+// still downloading before it prints what the cache holds.
+constexpr int kPdfHydrationRounds = 3;
+constexpr int kPdfHydrationWaitMs = 30 * 1000;
+}  // namespace
+
+void AppController::exportPdf(const QVariantMap& options, const QUrl& destination) {
+  QString path = destination.toLocalFile();
+  if (path.isEmpty()) {
+    setError(tr("Choose a local destination for the PDF"));
+    return;
+  }
+  if (!path.endsWith(QStringLiteral(".pdf"), Qt::CaseInsensitive)) {
+    path.append(QStringLiteral(".pdf"));
+  }
+  auto job = std::make_shared<PdfExportJob>();
+  job->path = path;
+  PrintOptions& print = job->options;
+  print.firstDate = QDate::fromString(
+      options.value(QStringLiteral("firstDate")).toString(), Qt::ISODate);
+  print.lastDate = QDate::fromString(
+      options.value(QStringLiteral("lastDate")).toString(), Qt::ISODate);
+  if (!print.firstDate.isValid() || !print.lastDate.isValid() ||
+      print.firstDate > print.lastDate) {
+    setError(tr("Choose a valid date range to print"));
+    return;
+  }
+  print.layout =
+      options.value(QStringLiteral("layout")).toString() == QStringLiteral("month")
+          ? PrintLayout::Month
+          : PrintLayout::List;
+  if (print.layout == PrintLayout::Month) {
+    // A month grid always shows whole months.
+    print.firstDate = QDate(print.firstDate.year(), print.firstDate.month(), 1);
+    print.lastDate = QDate(print.lastDate.year(), print.lastDate.month(), 1)
+                         .addMonths(1)
+                         .addDays(-1);
+  }
+  if (print.firstDate.daysTo(print.lastDate) > 366) {
+    setError(tr("Print at most one year at a time"));
+    return;
+  }
+  print.includeDetails = options.value(QStringLiteral("includeDetails")).toBool();
+  print.title = options.value(QStringLiteral("title")).toString().trimmed();
+  if (print.title.isEmpty()) {
+    print.title = QStringLiteral("OmaCalendar");
+  }
+  const QString timePattern = options.value(QStringLiteral("timePattern")).toString();
+  if (!timePattern.isEmpty()) {
+    print.timeFormat = timePattern;
+  }
+  const int firstDay = options.value(QStringLiteral("firstDayOfWeek")).toInt();
+  print.firstDayOfWeek = firstDay >= 1 && firstDay <= 7 ? firstDay : 7;
+
+  const bool visibleOnly = options.value(QStringLiteral("visibleOnly"), true).toBool();
+  const QStringList visible = visibleCalendarIds();
+  for (const QVariant& value : std::as_const(m_calendars)) {
+    const QVariantMap calendar = value.toMap();
+    const QString id = calendar.value(QStringLiteral("id")).toString();
+    if (visibleOnly ? visible.contains(id)
+                    : calendar.value(QStringLiteral("enabled"), true).toBool()) {
+      job->calendarIds.append(id);
+    }
+  }
+  if (!connected()) {
+    setError(tr("Connect to the calendar service to print"));
+    return;
+  }
+  m_pendingPdfJob.reset();
+  m_pdfHydrationWait.stop();
+  setStatus(tr("Preparing PDF…"));
+  requestPdfPage(job, 0, kEventPageLimit);
+}
+
+void AppController::requestPdfPage(const std::shared_ptr<PdfExportJob>& job,
+                                   const int offset, const int limit) {
+  if (job->calendarIds.isEmpty()) {
+    finishPdfExport(job);
+    return;
+  }
+  const QJsonObject params = {
+      {QStringLiteral("start"),
+       isoUtc(startOfDateUtc(job->options.firstDate.addDays(-1)))},
+      {QStringLiteral("end"), isoUtc(startOfDateUtc(job->options.lastDate.addDays(2)))},
+      {QStringLiteral("calendarIds"), job->calendarIds},
+      {QStringLiteral("offset"), offset},
+      {QStringLiteral("limit"), limit},
+  };
+  send(
+      QStringLiteral("events.list"), params,
+      [this, job, offset, limit](const QJsonValue& value) {
+        const QJsonObject page = value.toObject();
+        job->events.append(variantList(value, QStringLiteral("events")));
+        job->coverage = page.value(QStringLiteral("coverage")).toObject();
+        const int nextOffset = page.value(QStringLiteral("nextOffset")).toInt(-1);
+        if (page.value(QStringLiteral("hasMore")).toBool() && nextOffset > offset) {
+          requestPdfPage(job, nextOffset, limit);
+          return;
+        }
+        // The cache may not hold the whole range yet. The daemon announces
+        // finished hydration with events.changed; read the range again then.
+        if (!job->coverage.value(QStringLiteral("complete")).toBool(true) &&
+            job->coverage.value(QStringLiteral("hydrationScheduled")).toBool() &&
+            job->hydrationRounds < kPdfHydrationRounds) {
+          m_pendingPdfJob = job;
+          m_pdfHydrationWait.start(kPdfHydrationWaitMs);
+          setStatus(tr("Downloading events to print…"));
+          return;
+        }
+        finishPdfExport(job);
+      },
+      false,
+      [this, job, offset, limit](const QJsonObject& error) {
+        if (error.value(QStringLiteral("code")).toString() ==
+                QStringLiteral("response_too_large") &&
+            limit > 1) {
+          requestPdfPage(job, offset, limit / 2);
+          return true;
+        }
+        return false;
+      });
+}
+
+void AppController::resumePdfExport(const bool refetch) {
+  if (!m_pendingPdfJob) {
+    return;
+  }
+  const std::shared_ptr<PdfExportJob> job = std::move(m_pendingPdfJob);
+  m_pendingPdfJob.reset();
+  m_pdfHydrationWait.stop();
+  if (!refetch) {
+    // Waited long enough: print what the cache holds and say so.
+    finishPdfExport(job);
+    return;
+  }
+  ++job->hydrationRounds;
+  job->events.clear();
+  requestPdfPage(job, 0, kEventPageLimit);
+}
+
+void AppController::finishPdfExport(const std::shared_ptr<PdfExportJob>& job) {
+  applyDisplayTimes(&job->events);
+  QHash<QString, QVariantMap> calendarsById;
+  for (const QVariant& value : std::as_const(m_calendars)) {
+    const QVariantMap calendar = value.toMap();
+    calendarsById.insert(calendar.value(QStringLiteral("id")).toString(), calendar);
+  }
+  const auto wallTime = [](const QVariant& value) {
+    return QDateTime::fromString(value.toString(), Qt::ISODateWithMs);
+  };
+  QList<PrintableEvent> printable;
+  printable.reserve(job->events.size());
+  for (const QVariant& value : std::as_const(job->events)) {
+    const QVariantMap event = value.toMap();
+    if (event.value(QStringLiteral("deleted")).toBool() ||
+        event.value(QStringLiteral("status")).toString() ==
+            QStringLiteral("cancelled")) {
+      continue;
+    }
+    const QVariantMap calendar =
+        calendarsById.value(event.value(QStringLiteral("calendarId")).toString());
+    PrintableEvent item;
+    item.title = event.value(QStringLiteral("summary")).toString();
+    item.location = event.value(QStringLiteral("location")).toString();
+    item.description = event.value(QStringLiteral("description")).toString();
+    item.calendarName = calendar.value(QStringLiteral("name")).toString();
+    const QString colorOverride =
+        calendar.value(QStringLiteral("colorOverride")).toString();
+    item.color = QColor(colorOverride.isEmpty()
+                            ? calendar.value(QStringLiteral("color")).toString()
+                            : colorOverride);
+    item.allDay = event.value(QStringLiteral("allDay")).toBool();
+    if (item.allDay) {
+      item.startDate = QDate::fromString(
+          event.value(QStringLiteral("startDate")).toString(), Qt::ISODate);
+      item.endDate = QDate::fromString(
+          event.value(QStringLiteral("endDate")).toString(), Qt::ISODate);
+    } else {
+      item.start = wallTime(event.value(QStringLiteral("displayStartLocal")));
+      item.end = wallTime(event.value(QStringLiteral("displayEndLocal")));
+    }
+    printable.append(item);
+  }
+
+  QString error;
+  const int pages = writeCalendarPdf(job->path, printable, job->options, &error);
+  if (pages <= 0) {
+    setError(error.isEmpty() ? tr("The PDF could not be written") : error);
+    return;
+  }
+  setError({});
+  const bool complete = job->coverage.value(QStringLiteral("complete")).toBool(true);
+  setStatus(complete ? tr("Saved %n page(s) to %1", nullptr, pages).arg(job->path)
+                     : tr("Saved %n page(s) to %1; some events may be missing because "
+                          "calendars are still downloading",
+                          nullptr, pages)
+                           .arg(job->path));
+  emit pdfExportCompleted(job->path, pages);
+}
+
 void AppController::connectGoogle(const QString& displayName) {
   const QString clientId = google::defaultOAuthClientId();
   if (clientId.isEmpty()) {
@@ -1602,6 +1819,40 @@ void AppController::sendInteractive() {
 }
 
 QVariantMap AppController::freeBusy() const { return m_freeBusy; }
+
+QVariantMap AppController::eventAttachments() const { return m_eventAttachments; }
+
+void AppController::loadEventAttachments(const QString& eventId,
+                                         const QString& recurrenceId) {
+  m_eventAttachments = {{QStringLiteral("eventId"), eventId},
+                        {QStringLiteral("recurrenceId"), recurrenceId},
+                        {QStringLiteral("attachments"), QVariantList{}}};
+  emit eventAttachmentsChanged();
+  if (!connected() || eventId.isEmpty()) {
+    return;
+  }
+  QJsonObject params{{QStringLiteral("eventId"), eventId}};
+  if (!recurrenceId.isEmpty()) {
+    params.insert(QStringLiteral("recurrenceId"), recurrenceId);
+  }
+  // A failed lookup only means no attachments are shown.
+  send(
+      QStringLiteral("events.get"), params,
+      [this, eventId, recurrenceId](const QJsonValue& value) {
+        if (m_eventAttachments.value(QStringLiteral("eventId")).toString() != eventId ||
+            m_eventAttachments.value(QStringLiteral("recurrenceId")).toString() !=
+                recurrenceId) {
+          return;
+        }
+        m_eventAttachments.insert(QStringLiteral("attachments"),
+                                  value.toObject()
+                                      .value(QStringLiteral("attachments"))
+                                      .toArray()
+                                      .toVariantList());
+        emit eventAttachmentsChanged();
+      },
+      false, [](const QJsonObject&) { return true; });
+}
 
 QTimeZone AppController::displayTimeZone() const {
   const QString requested =

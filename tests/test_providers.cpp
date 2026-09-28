@@ -94,7 +94,110 @@ class ProviderTest final : public QObject {
   void davResourceAndErrorParsing();
   void retryClassification();
   void retryBackoffAndRetryAfter();
+  void attachmentsAndConferenceRequests();
 };
+
+void ProviderTest::attachmentsAndConferenceRequests() {
+  // Google attachments keep only HTTPS links and fall back to the file name.
+  const QJsonObject resource{
+      {QStringLiteral("attachments"),
+       QJsonArray{
+           QJsonObject{{QStringLiteral("fileUrl"),
+                        QStringLiteral("https://drive.google.com/file/d/abc/view")},
+                       {QStringLiteral("title"), QStringLiteral("Agenda")},
+                       {QStringLiteral("mimeType"),
+                        QStringLiteral("application/vnd.google-apps.document")}},
+           QJsonObject{{QStringLiteral("fileUrl"),
+                        QStringLiteral("https://example.com/files/notes.pdf")}},
+           QJsonObject{{QStringLiteral("fileUrl"),
+                        QStringLiteral("http://example.com/insecure.pdf")}},
+           QJsonObject{
+               {QStringLiteral("fileUrl"), QStringLiteral("javascript:alert(1)")}},
+       }}};
+  const QJsonArray googleAttachments = google::attachmentsFromGoogleJson(resource);
+  QCOMPARE(googleAttachments.size(), 2);
+  QCOMPARE(googleAttachments.at(0).toObject().value(QStringLiteral("title")).toString(),
+           QStringLiteral("Agenda"));
+  QCOMPARE(googleAttachments.at(1).toObject().value(QStringLiteral("title")).toString(),
+           QStringLiteral("notes.pdf"));
+
+  // iCalendar ATTACH: URIs are listed with FILENAME or FMTTYPE, binary and
+  // non-HTTP values are skipped, and an exception's own list wins.
+  const QByteArray ics =
+      "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//Test//EN\r\n"
+      "BEGIN:VEVENT\r\nUID:attach-1\r\nDTSTAMP:20260901T000000Z\r\n"
+      "DTSTART:20260901T090000Z\r\nDTEND:20260901T100000Z\r\n"
+      "RRULE:FREQ=DAILY;COUNT=3\r\nSUMMARY:Standup\r\n"
+      "ATTACH;FMTTYPE=application/pdf;FILENAME=Plan.pdf:https://files.example.com/p/"
+      "1\r\n"
+      "ATTACH:https://files.example.com/docs/brief.txt\r\n"
+      "ATTACH:mailto:someone@example.com\r\n"
+      "ATTACH;ENCODING=BASE64;VALUE=BINARY:SGVsbG8=\r\n"
+      "END:VEVENT\r\n"
+      "BEGIN:VEVENT\r\nUID:attach-1\r\nDTSTAMP:20260901T000000Z\r\n"
+      "RECURRENCE-ID:20260902T090000Z\r\n"
+      "DTSTART:20260902T110000Z\r\nDTEND:20260902T120000Z\r\nSUMMARY:Moved\r\n"
+      "ATTACH:https://files.example.com/moved.pdf\r\n"
+      "END:VEVENT\r\nEND:VCALENDAR\r\n";
+  const QJsonArray master =
+      caldav::ICalendarCodec::attachments(ics, QStringLiteral("attach-1"));
+  QCOMPARE(master.size(), 2);
+  QCOMPARE(master.at(0).toObject().value(QStringLiteral("title")).toString(),
+           QStringLiteral("Plan.pdf"));
+  QCOMPARE(master.at(0).toObject().value(QStringLiteral("mimeType")).toString(),
+           QStringLiteral("application/pdf"));
+  QCOMPARE(master.at(1).toObject().value(QStringLiteral("title")).toString(),
+           QStringLiteral("brief.txt"));
+  const QJsonArray exception = caldav::ICalendarCodec::attachments(
+      ics, QStringLiteral("attach-1"), QStringLiteral("20260902T090000Z"));
+  QCOMPARE(exception.size(), 1);
+  QCOMPARE(exception.at(0).toObject().value(QStringLiteral("url")).toString(),
+           QStringLiteral("https://files.example.com/moved.pdf"));
+  QVERIFY(
+      caldav::ICalendarCodec::attachments(ics, QStringLiteral("other-uid")).isEmpty());
+
+  // A requested conference becomes a Meet createRequest only while the event
+  // has no conference, and existing conference data is never replaced.
+  Event event;
+  event.summary = QStringLiteral("Planning");
+  event.startUtc = QDateTime(QDate(2026, 9, 1), QTime(9, 0), QTimeZone::UTC);
+  event.endUtc = event.startUtc.addSecs(3600);
+  event.startTimeZone = QStringLiteral("UTC");
+  QVERIFY(!google::eventToGoogleJson(event).contains(QStringLiteral("conferenceData")));
+  event.conferenceRequestId = QStringLiteral("request-1");
+  const QJsonObject createRequest = google::eventToGoogleJson(event)
+                                        .value(QStringLiteral("conferenceData"))
+                                        .toObject()
+                                        .value(QStringLiteral("createRequest"))
+                                        .toObject();
+  QCOMPARE(createRequest.value(QStringLiteral("requestId")).toString(),
+           QStringLiteral("request-1"));
+  QCOMPARE(createRequest.value(QStringLiteral("conferenceSolutionKey"))
+               .toObject()
+               .value(QStringLiteral("type"))
+               .toString(),
+           QStringLiteral("hangoutsMeet"));
+
+  const QJsonObject existingConference{
+      {QStringLiteral("entryPoints"),
+       QJsonArray{
+           QJsonObject{{QStringLiteral("entryPointType"), QStringLiteral("video")},
+                       {QStringLiteral("uri"),
+                        QStringLiteral("https://meet.google.com/abc-defg-hij")}}}}};
+  event.remoteId = QStringLiteral("remote-1");
+  event.rawFormat = QStringLiteral("google-json");
+  event.rawPayload = QString::fromUtf8(
+      QJsonDocument(QJsonObject{{QStringLiteral("id"), QStringLiteral("remote-1")},
+                                {QStringLiteral("conferenceData"), existingConference}})
+          .toJson(QJsonDocument::Compact));
+  QCOMPARE(google::eventToGoogleJson(event).value(QStringLiteral("conferenceData")),
+           QJsonValue(existingConference));
+
+  // The request travels in outbox payloads but not in the IPC event DTO.
+  QCOMPARE(eventFromJson(toStorageJson(event)).conferenceRequestId,
+           QStringLiteral("request-1"));
+  QVERIFY(!toJson(event).contains(QStringLiteral("conferenceRequestId")));
+}
 
 void ProviderTest::googleFullSyncReplacementIsAtomic() {
   QTemporaryDir directory;

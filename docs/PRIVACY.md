@@ -63,6 +63,18 @@ around the event's time (at most eight days, at most twenty guests).
 - Only busy intervals cross the local IPC socket. Remote answers are kept in
   daemon memory for five minutes and never written to the database.
 
+## Attachments, video calls and printing
+
+- Attachment links shown in an event come from the cached provider data. They
+  are opened in the browser only when chosen, through the same HTTP(S) link
+  check as meeting links; OmaCalendar never downloads them.
+- "Add Google Meet video conferencing" asks Google to create a Meet link for
+  that event through the connected account. Nothing is sent unless it is
+  ticked.
+- Saving a period as PDF writes a file only where the user chooses. The file
+  holds the titles and times shown and, when asked for, locations, calendar
+  names and notes.
+
 ## Local disclosure controls
 
 - Diagnostics must be previewed before export and redact tokens, passwords,

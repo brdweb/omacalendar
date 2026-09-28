@@ -54,6 +54,16 @@ QtObject {
             "enabled": true,
             "readOnly": false,
             "capabilities": {"thisAndFuture": true}
+        },
+        {
+            "id": "calendar-google",
+            "accountId": "account-google",
+            "name": "Work",
+            "color": "#bb9af7",
+            "enabled": true,
+            "readOnly": false,
+            "capabilities": {"provider": "google",
+                "conferenceProperties": {"allowedConferenceSolutionTypes": ["hangoutsMeet"]}}
         }
     ]
 
@@ -104,8 +114,20 @@ QtObject {
         return typeof value === "string" && value.trim().length > 0
     }
 
+    // Attachments: the smoke tests read the last lookup and set the answer.
+    property var eventAttachments: ({})
+    property var lastAttachmentLookup: null
+
+    function loadEventAttachments(eventId, recurrenceId) {
+        lastAttachmentLookup = {"eventId": eventId, "recurrenceId": recurrenceId}
+        eventAttachments = {"eventId": eventId, "recurrenceId": recurrenceId,
+                            "attachments": []}
+    }
+
+    property string lastOpenedUrl: ""
+
     function openExternalEventUrl(value) {
-        value
+        lastOpenedUrl = value
     }
 
     function connectGoogleWithClientId(clientId, displayName) {

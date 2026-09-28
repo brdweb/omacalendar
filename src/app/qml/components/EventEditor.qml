@@ -70,6 +70,18 @@ Dialog {
     readonly property bool futureScopeSupported: !movingCalendars
                                                  && activeCapabilities.thisAndFuture
                                                     === true
+    // Google calendars list the conference types they accept.
+    readonly property bool meetSupported: activeProvider === "google"
+                                          && ((activeCapabilities.conferenceProperties || {})
+                                              .allowedConferenceSolutionTypes || [])
+                                             .indexOf("hangoutsMeet") >= 0
+    readonly property string conferenceUrl: String(eventData.conferenceUrl || "")
+    readonly property var attachments: {
+        const value = App.eventAttachments || ({})
+        return editing && value.eventId === eventData.id
+                && String(value.recurrenceId || "") === String(eventData.recurrenceId || "")
+                ? (value.attachments || []) : []
+    }
     readonly property bool futureScopeCheckAvailable: !readOnly && !movingCalendars
                                                        && activeProvider === "caldav"
                                                        && activeCalendar.enabled !== false
@@ -95,6 +107,7 @@ Dialog {
         locationField.text = ""
         urlField.text = ""
         notesField.text = ""
+        meetBox.checked = false
         attendeeEditor.organizerEmail = ""
         attendeeEditor.load([])
         allDay.checked = false
@@ -239,6 +252,9 @@ Dialog {
         locationField.text = eventData.location || ""
         urlField.text = eventData.url || eventData.meetingUrl || ""
         notesField.text = eventData.description || ""
+        meetBox.checked = false
+        if (editing && typeof App.loadEventAttachments === "function")
+            App.loadEventAttachments(String(eventData.id), String(eventData.recurrenceId || ""))
         attendeeEditor.organizerEmail = String((eventData.organizer || {}).email || "")
         attendeeEditor.load(eventData.attendees || [])
         allDay.checked = eventData.allDay === true
@@ -316,6 +332,10 @@ Dialog {
         value.attendees = parsedAttendees()
         value.reminders = reminderValues()
         value.recurrenceRule = recurrenceRule()
+        if (meetBox.visible && meetBox.checked)
+            value.addConference = true
+        else
+            delete value.addConference
 
         if (allDay.checked) {
             const inclusiveEnd = new Date(endDateField.text + "T00:00:00")
@@ -809,6 +829,31 @@ Dialog {
                         onClicked: editor.joinRequested(urlField.text.trim())
                     }
                 }
+                RowLayout {
+                    Layout.fillWidth: true
+                    visible: editor.conferenceUrl.length > 0
+                    Label {
+                        Layout.fillWidth: true
+                        text: qsTr("Video call: %1").arg(editor.conferenceUrl)
+                        textFormat: Text.PlainText
+                        color: Theme.mutedText
+                        elide: Text.ElideMiddle
+                    }
+                    AppButton {
+                        objectName: "joinConferenceButton"
+                        text: qsTr("Join")
+                        compact: true
+                        onClicked: editor.joinRequested(editor.conferenceUrl)
+                    }
+                }
+                AppCheckBox {
+                    id: meetBox
+                    objectName: "addMeetCheckBox"
+                    visible: editor.meetSupported && editor.conferenceUrl.length === 0
+                             && !editor.readOnly && !editor.movingCalendars
+                    text: qsTr("Add Google Meet video conferencing")
+                    Accessible.name: text
+                }
                 TextArea {
                     id: notesField
                     Layout.fillWidth: true
@@ -824,6 +869,35 @@ Dialog {
                         radius: Theme.radiusMD
                         color: Theme.background
                         border.color: notesField.activeFocus ? Theme.focus : Theme.border
+                    }
+                }
+                ColumnLayout {
+                    Layout.fillWidth: true
+                    visible: editor.attachments.length > 0
+                    spacing: 4
+                    SectionLabel { text: qsTr("ATTACHMENTS") }
+                    Repeater {
+                        model: editor.attachments
+                        delegate: RowLayout {
+                            id: attachmentRow
+                            required property var modelData
+                            Layout.fillWidth: true
+                            Label {
+                                Layout.fillWidth: true
+                                text: String(attachmentRow.modelData.title || "")
+                                textFormat: Text.PlainText
+                                color: Theme.text
+                                elide: Text.ElideMiddle
+                            }
+                            AppButton {
+                                text: qsTr("Open")
+                                compact: true
+                                Accessible.name: qsTr("Open %1")
+                                                 .arg(String(attachmentRow.modelData.title || ""))
+                                onClicked: editor.joinRequested(
+                                               String(attachmentRow.modelData.url || ""))
+                            }
+                        }
                     }
                 }
 

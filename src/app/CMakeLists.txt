@@ -4,6 +4,8 @@ qt_add_executable(omacalendar
   applicationinstance.h
   appcontroller.cpp
   appcontroller.h
+  calendarpdf.cpp
+  calendarpdf.h
   presentationlistmodel.cpp
   presentationlistmodel.h
   startuprequest.cpp
@@ -49,6 +51,7 @@ qt_add_qml_module(omacalendar
     qml/components/IcsImportDialog.qml
     qml/components/MonthCell.qml
     qml/components/MutationConfirmationDialog.qml
+    qml/components/PdfExportDialog.qml
     qml/components/QuickAddDialog.qml
     qml/components/RecurrenceEditor.qml
     qml/components/SectionLabel.qml

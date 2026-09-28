@@ -1613,6 +1613,32 @@ def run_freebusy_contract(harness: DaemonHarness) -> None:
                          context)
 
 
+def run_attachments_and_conference_contract(harness: DaemonHarness) -> None:
+    event = {
+        "calendarId": "local-default",
+        "summary": "conference contract",
+        "startUtc": "2026-11-05T09:00:00Z",
+        "endUtc": "2026-11-05T10:00:00Z",
+        "startTimeZone": "UTC",
+        "endTimeZone": "UTC",
+        "allDay": False,
+        "timeKind": "zoned",
+    }
+    params = {"clientMutationId": "contract-conference", "recurrenceScope": "series",
+              "guestNotificationPolicy": "none"}
+    assert_ipc_error(
+        harness.call_error("events.create",
+                           {**params, "event": {**event, "addConference": True}}),
+        "conference_unsupported", "events.create with a Meet on a local calendar")
+    created = harness.call("events.create",
+                           {**params, "event": {**event, "conferenceRequestId": "forged"}})
+    require("conferenceRequestId" not in created,
+            "events.create echoed a client-supplied conference request")
+    detail = harness.call("events.get", {"eventId": created["id"]})
+    require(detail.get("attachments") == [],
+            f"events.get did not list an empty attachment set: {detail.get('attachments')}")
+
+
 def run_settings_get_many_contract(harness: DaemonHarness) -> None:
     harness.call("settings.set", {"key": "workDayStart", "value": 7})
     keys = ["workDayStart", "timeFormat", "defaultCalendarId"]
@@ -1812,6 +1838,7 @@ def run_contract(harness: DaemonHarness) -> None:
     run_search_attendee_contract(harness)
     run_sync_set_interactive_contract(harness)
     run_freebusy_contract(harness)
+    run_attachments_and_conference_contract(harness)
     for owned_directory in (
         harness.root / "data" / "omacalendar",
         harness.root / "config" / "omacalendar",

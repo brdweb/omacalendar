@@ -182,6 +182,8 @@ add_executable(omacalendar-appcontroller-test
   ${CMAKE_SOURCE_DIR}/src/app/applicationinstance.h
   ${CMAKE_SOURCE_DIR}/src/app/appcontroller.cpp
   ${CMAKE_SOURCE_DIR}/src/app/appcontroller.h
+  ${CMAKE_SOURCE_DIR}/src/app/calendarpdf.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/calendarpdf.h
   ${CMAKE_SOURCE_DIR}/src/app/presentationlistmodel.cpp
   ${CMAKE_SOURCE_DIR}/src/app/presentationlistmodel.h
   ${CMAKE_SOURCE_DIR}/src/app/startuprequest.cpp
@@ -255,6 +257,24 @@ target_include_directories(omacalendar-themebridge-test
   PRIVATE ${CMAKE_SOURCE_DIR}/src
 )
 add_test(NAME themebridge_test COMMAND omacalendar-themebridge-test)
+
+add_executable(omacalendar-calendarpdf-test
+  test_calendarpdf.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/calendarpdf.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/calendarpdf.h
+)
+target_link_libraries(omacalendar-calendarpdf-test
+  PRIVATE
+    Qt6::Test
+    Qt6::Core
+    Qt6::Gui
+)
+target_include_directories(omacalendar-calendarpdf-test
+  PRIVATE ${CMAKE_SOURCE_DIR}/src
+)
+add_test(NAME calendarpdf_test COMMAND omacalendar-calendarpdf-test)
+set_tests_properties(calendarpdf_test PROPERTIES
+  ENVIRONMENT "LC_ALL=C.UTF-8;TZ=UTC;QT_QPA_PLATFORM=offscreen")
 
 add_test(NAME daemon_contract_test
   COMMAND ${Python3_EXECUTABLE}
