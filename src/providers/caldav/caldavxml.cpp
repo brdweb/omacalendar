@@ -77,6 +77,7 @@ struct PropertyValues {
   QString syncToken;
   QString etag;
   QString calendarData;
+  QStringList supportedComponents;
   bool isCollection = false;
   bool isCalendar = false;
   bool privilegesReported = false;
@@ -84,6 +85,22 @@ struct PropertyValues {
   bool canBind = false;
   bool canUnbind = false;
 };
+
+void parseSupportedComponents(QXmlStreamReader& reader, PropertyValues* properties) {
+  while (reader.readNextStartElement()) {
+    if (isElement(reader, kCalDavNamespace, QLatin1StringView("comp"))) {
+      const QString name = reader.attributes()
+                               .value(QStringLiteral("name"))
+                               .toString()
+                               .trimmed()
+                               .toUpper();
+      if (!name.isEmpty() && !properties->supportedComponents.contains(name)) {
+        properties->supportedComponents.append(name);
+      }
+    }
+    reader.skipCurrentElement();
+  }
+}
 
 void parseResourceType(QXmlStreamReader& reader, PropertyValues* properties) {
   while (reader.readNextStartElement()) {
@@ -176,6 +193,9 @@ void parseProperties(QXmlStreamReader& reader, PropertyValues* properties) {
     } else if (isElement(reader, kDavNamespace,
                          QLatin1StringView("current-user-privilege-set"))) {
       parsePrivilegeSet(reader, properties);
+    } else if (isElement(reader, kCalDavNamespace,
+                         QLatin1StringView("supported-calendar-component-set"))) {
+      parseSupportedComponents(reader, properties);
     } else {
       reader.skipCurrentElement();
     }
@@ -239,6 +259,9 @@ void mergeProperties(CalDavResponse* response, const PropertyValues& properties)
   }
   if (!properties.calendarData.isNull()) {
     response->calendarData = properties.calendarData;
+  }
+  if (!properties.supportedComponents.isEmpty()) {
+    response->supportedComponents = properties.supportedComponents;
   }
   response->isCollection = response->isCollection || properties.isCollection;
   response->isCalendar = response->isCalendar || properties.isCalendar;
@@ -409,7 +432,8 @@ QList<CalDavCollection> CalDavXml::collections(const CalDavMultiStatusResult& re
     }
     output.append({response.href, response.displayName, response.description,
                    response.color, response.ctag, response.syncToken,
-                   response.readOnly(), response.canBind, response.canUnbind});
+                   response.readOnly(), response.canBind, response.canUnbind,
+                   response.supportedComponents});
   }
   return output;
 }

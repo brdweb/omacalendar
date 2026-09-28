@@ -139,6 +139,8 @@ class Daemon final : public QObject {
   // Tasks (daemontasks.cpp).
   void registerTaskHandlers();
   void emitTasksChanged(const QStringList& listIds);
+  // Sends a provider list's owed writes soon after a local edit.
+  void syncTaskList(const QString& listId);
   [[nodiscard]] QJsonValue onTaskListsList(const QJsonObject& params,
                                            ipc::Error* error) const;
   [[nodiscard]] QJsonValue onTaskListsSetEnabled(const QJsonObject& params,

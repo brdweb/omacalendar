@@ -10,6 +10,7 @@
 #include "core/database.h"
 #include "core/secretstore.h"
 #include "providers/caldav/caldavclient.h"
+#include "providers/caldav/caldavtasksync.h"
 #include "sync/provider.h"
 #include "sync/retrypolicy.h"
 
@@ -43,6 +44,12 @@ class CalDavSync final : public Provider {
   bool syncRange(const RangeSyncRequest& request,
                  QString* errorMessage = nullptr) override;
   [[nodiscard]] QJsonObject status(const QString& accountId = {}) const override;
+  // Sends the account's owed task writes and reads its task lists back,
+  // without a full calendar sync when the credentials are already loaded.
+  void syncTasks(const QString& accountId);
+
+ signals:
+  void tasksChanged(const QStringList& listIds);
 
  private:
   friend class ::CalDavHardeningTest;
@@ -148,6 +155,7 @@ class CalDavSync final : public Provider {
   Database* m_database = nullptr;
   AsyncSecretStore m_secrets;
   CalDavClient m_client;
+  CalDavTaskSync m_tasks;
   ResourceBudget m_resourceBudgetLimits;
   QThreadPool m_parsePool;
   RetryPolicy m_retryPolicy;

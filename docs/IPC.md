@@ -244,8 +244,10 @@ silently discard the source event.
 - `tasks.list`, `tasks.create`, `tasks.update`, `tasks.remove`
 
 These methods are additive and not yet released (the protocol minor remains
-2.1). Every installation has the device-only list `local-tasks`; CalDAV and
-Google task lists join it when their sync lands.
+2.1). Every installation has the device-only list `local-tasks`. CalDAV
+collections whose `supported-calendar-component-set` includes `VTODO` appear as
+task lists of their account (collections that accept only `VTODO` are no longer
+listed as event calendars). Google task lists join them when their sync lands.
 
 - `taskLists.list` returns `lists`: `{id, accountId, name, color, readOnly,
   enabled, position, capabilities, lastSyncAt}`, where `capabilities.provider`
@@ -270,7 +272,11 @@ Google task lists join it when their sync lands.
   revision answers `task_rejected`.
 - Completing a task stamps `completedAt`; reopening it clears it. Writes to a
   provider list are saved locally first and marked `dirty` until the provider
-  accepts them.
+  accepts them; the daemon sends them right away and on every sync. CalDAV
+  uploads use `If-None-Match: *` for new tasks and `If-Match` for changes and
+  removals. When the server copy changed meanwhile, the fields edited locally
+  are applied on top of it; other fields, and properties OmaCalendar does not
+  edit, keep the server's values.
 - Every change broadcasts `tasks.changed` with `listIds` and `revision`
   (topic family `tasks`).
 

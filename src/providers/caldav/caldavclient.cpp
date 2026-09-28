@@ -95,8 +95,19 @@ QByteArray calendarsBody() {
       "xmlns:cs=\"http://calendarserver.org/ns/\"><d:prop>"
       "<d:resourcetype/><d:displayname/><c:calendar-description/>"
       "<a:calendar-color/><cs:getctag/><d:sync-token/>"
-      "<d:current-user-privilege-set/>"
+      "<d:current-user-privilege-set/><c:supported-calendar-component-set/>"
       "</d:prop></d:propfind>");
+}
+
+// Every VTODO in a collection. Task lists are small, so there is no time range.
+QByteArray taskQueryBody() {
+  return QByteArrayLiteral(
+      "<?xml version=\"1.0\" encoding=\"utf-8\"?>"
+      "<c:calendar-query xmlns:d=\"DAV:\" "
+      "xmlns:c=\"urn:ietf:params:xml:ns:caldav\"><d:prop>"
+      "<d:getetag/><c:calendar-data/></d:prop><c:filter>"
+      "<c:comp-filter name=\"VCALENDAR\"><c:comp-filter name=\"VTODO\"/>"
+      "</c:comp-filter></c:filter></c:calendar-query>");
 }
 
 QByteArray queryBody(const QDateTime& startUtc, const QDateTime& endUtc) {
@@ -269,6 +280,13 @@ void CalDavClient::queryCalendar(const QString& accountId, const QUrl& calendarU
                                  Callback callback) {
   request(accountId, QByteArrayLiteral("REPORT"), calendarUrl,
           queryBody(startUtc, endUtc),
+          QByteArrayLiteral("application/xml; charset=utf-8"), QByteArrayLiteral("1"),
+          {}, false, std::move(callback));
+}
+
+void CalDavClient::queryTasks(const QString& accountId, const QUrl& collectionUrl,
+                              Callback callback) {
+  request(accountId, QByteArrayLiteral("REPORT"), collectionUrl, taskQueryBody(),
           QByteArrayLiteral("application/xml; charset=utf-8"), QByteArrayLiteral("1"),
           {}, false, std::move(callback));
 }

@@ -56,6 +56,9 @@ class CalDavClient final : public QObject {
   void queryCalendar(const QString& accountId, const QUrl& calendarUrl,
                      const QDateTime& startUtc, const QDateTime& endUtc,
                      Callback callback);
+  // Every VTODO in a collection, with etags and calendar data.
+  void queryTasks(const QString& accountId, const QUrl& collectionUrl,
+                  Callback callback);
   void syncCollection(const QString& accountId, const QUrl& calendarUrl,
                       const QString& syncToken, Callback callback);
   void calendarMultiGet(const QString& accountId, const QUrl& calendarUrl,

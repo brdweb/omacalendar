@@ -73,6 +73,14 @@ bool applyTaskDraft(const QJsonObject& draft, Task* task, ipc::Error* error) {
 
 }  // namespace
 
+void Daemon::syncTaskList(const QString& listId) {
+  const TaskList list = m_database.taskList(listId);
+  if (list.capabilities.value(QStringLiteral("provider")).toString() ==
+      QStringLiteral("caldav")) {
+    m_caldav.syncTasks(list.accountId);
+  }
+}
+
 void Daemon::emitTasksChanged(const QStringList& listIds) {
   m_server.broadcast(QStringLiteral("tasks.changed"),
                      {{QStringLiteral("listIds"), QJsonArray::fromStringList(listIds)},
@@ -194,6 +202,7 @@ QJsonValue Daemon::onTasksCreate(const QJsonObject& params, ipc::Error* error) {
     return {};
   }
   emitTasksChanged({task.listId});
+  syncTaskList(task.listId);
   return toJson(task);
 }
 
@@ -230,6 +239,7 @@ QJsonValue Daemon::onTasksUpdate(const QJsonObject& params, ipc::Error* error) {
     return {};
   }
   emitTasksChanged({task.listId});
+  syncTaskList(task.listId);
   return toJson(task);
 }
 
@@ -253,6 +263,7 @@ QJsonValue Daemon::onTasksRemove(const QJsonObject& params, ipc::Error* error) {
     return {};
   }
   emitTasksChanged({task.listId});
+  syncTaskList(task.listId);
   return QJsonObject{{QStringLiteral("taskId"), taskId}};
 }
 

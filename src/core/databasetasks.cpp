@@ -3,6 +3,7 @@
 // provider are tracked on the task row itself (pending_operation).
 
 #include <QJsonDocument>
+#include <QSet>
 #include <QSqlError>
 #include <QSqlQuery>
 #include <QVariant>
@@ -470,12 +471,15 @@ bool Database::removeLocalTask(const QString& taskId, QString* errorMessage) {
   const bool local = list.capabilities.value(QStringLiteral("provider")).toString() ==
                      QStringLiteral("local");
   QSqlQuery query(m_database);
-  if (local || existing.remoteId.isEmpty()) {
-    // Nothing on a provider to remove: device-only tasks and creates that
-    // never left the device go straight away.
+  if (local) {
+    // Device-only tasks have nothing on a provider to remove.
     query.prepare(QStringLiteral("DELETE FROM tasks WHERE id=?"));
     query.addBindValue(taskId);
   } else {
+    // Even a task without a provider identity yet keeps a tombstone: its
+    // upload may already be under way, and once that lands the removal
+    // still has to reach the provider. A sync finding the tombstone with
+    // nothing uploaded simply drops it.
     query.prepare(QStringLiteral(
         "UPDATE tasks SET deleted=1, dirty=1, pending_operation='remove', "
         "local_revision=local_revision+1, updated_at=? WHERE id=?"));
@@ -485,6 +489,245 @@ bool Database::removeLocalTask(const QString& taskId, QString* errorMessage) {
   if (!query.exec()) {
     setError(errorMessage, sqlError(query, QStringLiteral("remove task")));
     return false;
+  }
+  return bumpChangeRevision(errorMessage);
+}
+
+TaskList Database::taskListByRemoteId(const QString& accountId, const QString& remoteId,
+                                      QString* errorMessage) const {
+  QSqlQuery query(m_database);
+  query.prepare(
+      QStringLiteral("SELECT %1 FROM task_lists l JOIN accounts a ON "
+                     "a.id=l.account_id WHERE l.account_id=? AND l.remote_id=?")
+          .arg(kTaskListColumns));
+  query.addBindValue(accountId);
+  query.addBindValue(remoteId);
+  if (!query.exec()) {
+    setError(errorMessage, sqlError(query, QStringLiteral("find task list")));
+    return {};
+  }
+  return query.next() ? taskListFromQuery(query) : TaskList{};
+}
+
+bool Database::removeTaskList(const QString& listId, QString* errorMessage) {
+  QSqlQuery query(m_database);
+  query.prepare(QStringLiteral("DELETE FROM task_lists WHERE id=?"));
+  query.addBindValue(listId);
+  if (!query.exec()) {
+    setError(errorMessage, sqlError(query, QStringLiteral("remove task list")));
+    return false;
+  }
+  return bumpChangeRevision(errorMessage);
+}
+
+QList<Task> Database::pendingTaskWrites(const QString& listId,
+                                        QString* errorMessage) const {
+  QList<Task> result;
+  QSqlQuery query(m_database);
+  query.prepare(QStringLiteral("SELECT %1 FROM tasks WHERE list_id=? AND "
+                               "pending_operation<>'' ORDER BY updated_at, id")
+                    .arg(kTaskColumns));
+  query.addBindValue(listId);
+  if (!query.exec()) {
+    setError(errorMessage, sqlError(query, QStringLiteral("list pending tasks")));
+    return result;
+  }
+  while (query.next()) {
+    result.append(taskFromQuery(query));
+  }
+  return result;
+}
+
+bool Database::applyRemoteTasks(const QString& listId, const QList<Task>& remote,
+                                const bool complete, bool* changed,
+                                QString* errorMessage) {
+  if (changed != nullptr) {
+    *changed = false;
+  }
+  if (!m_database.transaction()) {
+    setError(errorMessage, m_database.lastError().text());
+    return false;
+  }
+  const auto fail = [this, errorMessage](const QSqlQuery& query,
+                                         const QString& context) {
+    setError(errorMessage, sqlError(query, context));
+    m_database.rollback();
+    return false;
+  };
+  bool anyChange = false;
+  QSet<QString> seen;
+  const QString now = isoUtc(QDateTime::currentDateTimeUtc());
+  for (const Task& incoming : remote) {
+    if (incoming.remoteId.isEmpty()) {
+      continue;
+    }
+    seen.insert(incoming.remoteId);
+    QSqlQuery existing(m_database);
+    existing.prepare(
+        QStringLiteral("SELECT id, etag, pending_operation FROM tasks "
+                       "WHERE list_id=? AND remote_id=?"));
+    existing.addBindValue(listId);
+    existing.addBindValue(incoming.remoteId);
+    if (!existing.exec()) {
+      return fail(existing, QStringLiteral("find remote task"));
+    }
+    const bool known = existing.next();
+    if (known &&
+        (!existing.value(2).toString().isEmpty() ||
+         (!incoming.etag.isEmpty() && existing.value(1).toString() == incoming.etag))) {
+      // A local write is still owed, or nothing changed.
+      continue;
+    }
+    QSqlQuery write(m_database);
+    if (known) {
+      write.prepare(QStringLiteral(R"SQL(
+        UPDATE tasks SET uid=?, etag=?, title=?, notes=?, due_date=?, due_utc=?,
+          completed=?, completed_at=?, priority=?, parent_id=?, position=?,
+          raw_payload=?, raw_format=?, dirty=0, deleted=0,
+          local_revision=local_revision+1, updated_at=?
+        WHERE id=?
+      )SQL"));
+    } else {
+      write.prepare(QStringLiteral(R"SQL(
+        INSERT INTO tasks(uid, etag, title, notes, due_date, due_utc, completed,
+                          completed_at, priority, parent_id, position, raw_payload,
+                          raw_format, updated_at, id, list_id, remote_id,
+                          local_revision, created_at)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1,?)
+      )SQL"));
+    }
+    write.addBindValue(nonNull(incoming.uid));
+    write.addBindValue(nonNull(incoming.etag));
+    write.addBindValue(nonNull(incoming.title));
+    write.addBindValue(nonNull(incoming.notes));
+    write.addBindValue(incoming.dueDate.isValid()
+                           ? incoming.dueDate.toString(Qt::ISODate)
+                           : QStringLiteral(""));
+    write.addBindValue(isoUtc(incoming.dueUtc));
+    write.addBindValue(incoming.completed);
+    write.addBindValue(isoUtc(incoming.completedAt));
+    write.addBindValue(incoming.priority);
+    write.addBindValue(nonNull(incoming.parentId));
+    write.addBindValue(nonNull(incoming.position));
+    write.addBindValue(nonNull(incoming.rawPayload));
+    write.addBindValue(nonNull(incoming.rawFormat));
+    write.addBindValue(incoming.updatedAt.isValid() ? isoUtc(incoming.updatedAt) : now);
+    if (known) {
+      write.addBindValue(existing.value(0).toString());
+    } else {
+      write.addBindValue(newUuid());
+      write.addBindValue(listId);
+      write.addBindValue(incoming.remoteId);
+      write.addBindValue(incoming.createdAt.isValid() ? isoUtc(incoming.createdAt)
+                                                      : now);
+    }
+    if (!write.exec()) {
+      return fail(write, QStringLiteral("store remote task"));
+    }
+    anyChange = true;
+  }
+  if (complete) {
+    QSqlQuery stale(m_database);
+    stale.prepare(
+        QStringLiteral("SELECT id, remote_id FROM tasks WHERE list_id=? AND "
+                       "remote_id<>'' AND pending_operation=''"));
+    stale.addBindValue(listId);
+    if (!stale.exec()) {
+      return fail(stale, QStringLiteral("find removed tasks"));
+    }
+    QStringList removed;
+    while (stale.next()) {
+      if (!seen.contains(stale.value(1).toString())) {
+        removed.append(stale.value(0).toString());
+      }
+    }
+    for (const QString& id : std::as_const(removed)) {
+      QSqlQuery remove(m_database);
+      remove.prepare(QStringLiteral("DELETE FROM tasks WHERE id=?"));
+      remove.addBindValue(id);
+      if (!remove.exec()) {
+        return fail(remove, QStringLiteral("remove task"));
+      }
+      anyChange = true;
+    }
+  }
+  if (anyChange && !bumpChangeRevision(errorMessage)) {
+    m_database.rollback();
+    return false;
+  }
+  if (!m_database.commit()) {
+    setError(errorMessage, m_database.lastError().text());
+    return false;
+  }
+  if (changed != nullptr) {
+    *changed = anyChange;
+  }
+  return true;
+}
+
+bool Database::completeTaskWrite(const QString& taskId, const qint64 sentRevision,
+                                 const QString& remoteId, const QString& etag,
+                                 const QString& rawPayload, const QString& rawFormat,
+                                 const Task* uploaded, QString* errorMessage) {
+  QSqlQuery current(m_database);
+  current.prepare(
+      QStringLiteral("SELECT pending_operation, local_revision FROM tasks WHERE id=?"));
+  current.addBindValue(taskId);
+  if (!current.exec()) {
+    setError(errorMessage, sqlError(current, QStringLiteral("find sent task")));
+    return false;
+  }
+  if (!current.next()) {
+    return true;
+  }
+  const QString operation = current.value(0).toString();
+  const bool editedSince = current.value(1).toLongLong() != sentRevision;
+  QSqlQuery write(m_database);
+  if (operation == QStringLiteral("remove") && !editedSince) {
+    write.prepare(QStringLiteral("DELETE FROM tasks WHERE id=?"));
+    write.addBindValue(taskId);
+  } else {
+    // A later edit still has to be sent, now as an update of this resource.
+    write.prepare(QStringLiteral(R"SQL(
+      UPDATE tasks SET remote_id=?, etag=?, raw_payload=?, raw_format=?,
+        dirty=?, pending_operation=?
+      WHERE id=?
+    )SQL"));
+    write.addBindValue(remoteId);
+    write.addBindValue(nonNull(etag));
+    write.addBindValue(nonNull(rawPayload));
+    write.addBindValue(nonNull(rawFormat));
+    write.addBindValue(editedSince);
+    write.addBindValue(editedSince ? (operation == QStringLiteral("remove")
+                                          ? QStringLiteral("remove")
+                                          : QStringLiteral("update"))
+                                   : QStringLiteral(""));
+    write.addBindValue(taskId);
+  }
+  if (!write.exec()) {
+    setError(errorMessage, sqlError(write, QStringLiteral("record task write")));
+    return false;
+  }
+  if (uploaded != nullptr && !editedSince && operation != QStringLiteral("remove")) {
+    QSqlQuery fields(m_database);
+    fields.prepare(QStringLiteral(R"SQL(
+      UPDATE tasks SET title=?, notes=?, due_date=?, due_utc=?, completed=?,
+        completed_at=?, priority=? WHERE id=?
+    )SQL"));
+    fields.addBindValue(nonNull(uploaded->title));
+    fields.addBindValue(nonNull(uploaded->notes));
+    fields.addBindValue(uploaded->dueDate.isValid()
+                            ? uploaded->dueDate.toString(Qt::ISODate)
+                            : QStringLiteral(""));
+    fields.addBindValue(isoUtc(uploaded->dueUtc));
+    fields.addBindValue(uploaded->completed);
+    fields.addBindValue(isoUtc(uploaded->completedAt));
+    fields.addBindValue(uploaded->priority);
+    fields.addBindValue(taskId);
+    if (!fields.exec()) {
+      setError(errorMessage, sqlError(fields, QStringLiteral("record uploaded task")));
+      return false;
+    }
   }
   return bumpChangeRevision(errorMessage);
 }

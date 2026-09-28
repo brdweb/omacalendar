@@ -149,6 +149,20 @@ target_link_libraries(omacalendar-caldav-test
 )
 add_test(NAME caldav_test COMMAND omacalendar-caldav-test)
 
+add_executable(omacalendar-caldav-tasks-test
+  test_caldavtasks.cpp
+)
+target_link_libraries(omacalendar-caldav-tasks-test
+  PRIVATE
+    Qt6::Test
+    Qt6::Core
+    Qt6::Network
+    omacalendar_sync
+)
+add_test(NAME caldav_tasks_test COMMAND omacalendar-caldav-tasks-test)
+set_tests_properties(caldav_tasks_test PROPERTIES
+  ENVIRONMENT "LC_ALL=C.UTF-8;TZ=UTC;XDG_DATA_HOME=${CMAKE_CURRENT_BINARY_DIR}/caldav-tasks-data")
+
 add_executable(omacalendar-reminder-test
   test_reminders.cpp
   ${CMAKE_SOURCE_DIR}/src/reminders/reminderscheduler.cpp
