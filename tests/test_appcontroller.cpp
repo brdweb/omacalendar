@@ -83,6 +83,9 @@ class FakeDaemon final : public QObject {
     m_settings.insert(key, value);
   }
 
+  // Reported as events.list coverage, like a range still being hydrated.
+  void setCoverage(const QJsonObject& coverage) { m_coverage = coverage; }
+
   void broadcast(const QString& event, const QJsonObject& data = {}) {
     for (QLocalSocket* socket : std::as_const(m_sockets)) {
       socket->write(ipc::frame(
@@ -275,12 +278,16 @@ class FakeDaemon final : public QObject {
       });
     }
     const int next = offset + count;
-    return {{QStringLiteral("events"), events},
-            {QStringLiteral("offset"), offset},
-            {QStringLiteral("limit"), limit},
-            {QStringLiteral("total"), m_eventsPerRange},
-            {QStringLiteral("hasMore"), next < m_eventsPerRange},
-            {QStringLiteral("nextOffset"), next}};
+    QJsonObject page{{QStringLiteral("events"), events},
+                     {QStringLiteral("offset"), offset},
+                     {QStringLiteral("limit"), limit},
+                     {QStringLiteral("total"), m_eventsPerRange},
+                     {QStringLiteral("hasMore"), next < m_eventsPerRange},
+                     {QStringLiteral("nextOffset"), next}};
+    if (!m_coverage.isEmpty()) {
+      page.insert(QStringLiteral("coverage"), m_coverage);
+    }
+    return page;
   }
 
   QLocalServer m_server;
@@ -299,6 +306,7 @@ class FakeDaemon final : public QObject {
   QString m_failingMethod;
   int m_revision = 10;
   QHash<QString, QJsonObject> m_syncStatuses;
+  QJsonObject m_coverage;
   QJsonArray m_calendars{
       QJsonObject{{QStringLiteral("id"), QStringLiteral("local-default")},
                   {QStringLiteral("enabled"), true}},
@@ -353,6 +361,7 @@ class AppControllerTest final : public QObject {
   void guestOnlySearchReachesTheDaemon();
   void freeBusyAnswersMergeAndFindASlot();
   void pdfExportValidatesItsRequest();
+  void pdfExportWaitsForHydration();
 
  private:
   QTemporaryDir m_xdgRoot;
@@ -584,6 +593,39 @@ void AppControllerTest::pdfExportValidatesItsRequest() {
   QCOMPARE(controller.lastError(),
            QStringLiteral("Connect to the calendar service to print"));
   QVERIFY(!QFile::exists(destination.toLocalFile()));
+}
+
+void AppControllerTest::pdfExportWaitsForHydration() {
+  FakeDaemon daemon(3);
+  QVERIFY(daemon.listen());
+  daemon.setCoverage({{QStringLiteral("complete"), false},
+                      {QStringLiteral("hydrationScheduled"), true}});
+  AppController controller;
+  QTRY_VERIFY(controller.connected());
+  QTRY_VERIFY(!controller.calendars().isEmpty());
+  const auto pdfRequests = [&daemon]() {
+    int count = 0;
+    for (const QJsonObject& request : daemon.eventListRequests()) {
+      // The export reads from the day before its first day.
+      count += request.value(QStringLiteral("start"))
+                   .toString()
+                   .startsWith(QStringLiteral("2026-09-27"));
+    }
+    return count;
+  };
+  const QString path = m_xdgRoot.filePath(QStringLiteral("hydrating.pdf"));
+  controller.exportPdf({{QStringLiteral("firstDate"), QStringLiteral("2026-09-28")},
+                        {QStringLiteral("lastDate"), QStringLiteral("2026-09-30")},
+                        {QStringLiteral("visibleOnly"), false}},
+                       QUrl::fromLocalFile(path));
+  QTRY_COMPARE(pdfRequests(), 1);
+  QTRY_COMPARE(controller.statusText(), QStringLiteral("Downloading events to print…"));
+  QVERIFY(!QFile::exists(path));
+  // Finished hydration is announced with events.changed; the export reads the
+  // range again rather than printing the partial cache.
+  daemon.broadcast(QStringLiteral("events.changed"));
+  QTRY_COMPARE(pdfRequests(), 2);
+  QVERIFY(!QFile::exists(path));
 }
 
 void AppControllerTest::browserGoogleFlowRejectsEmptyClientId() {

@@ -91,6 +91,9 @@ AppController::AppController(QObject* parent) : QObject(parent) {
   m_interactiveRenewal.setInterval(5 * 60 * 1000);
   connect(&m_interactiveRenewal, &QTimer::timeout, this,
           &AppController::sendInteractive);
+  m_pdfHydrationWait.setSingleShot(true);
+  connect(&m_pdfHydrationWait, &QTimer::timeout, this,
+          [this]() { resumePdfExport(false); });
   m_refreshTimer.setInterval(120);
   connect(&m_refreshTimer, &QTimer::timeout, this, [this]() {
     const int parts = std::exchange(m_pendingRefreshParts, 0);
@@ -232,6 +235,7 @@ AppController::AppController(QObject* parent) : QObject(parent) {
         if (event == QStringLiteral("events.changed")) {
           // Subscriptions announce a refresh only through changed events.
           refreshAccountSyncStates(true);
+          resumePdfExport(true);
         }
         if (parts != 0) {
           scheduleRefresh(parts);
@@ -1198,7 +1202,18 @@ struct AppController::PdfExportJob {
   QJsonArray calendarIds;
   PrintOptions options;
   QVariantList events;
+  // The last page's coverage; incomplete while providers still download
+  // part of the range.
+  QJsonObject coverage;
+  int hydrationRounds = 0;
 };
+
+namespace {
+// How often, and how long, a PDF export waits for a range that providers are
+// still downloading before it prints what the cache holds.
+constexpr int kPdfHydrationRounds = 3;
+constexpr int kPdfHydrationWaitMs = 30 * 1000;
+}  // namespace
 
 void AppController::exportPdf(const QVariantMap& options, const QUrl& destination) {
   QString path = destination.toLocalFile();
@@ -1262,6 +1277,8 @@ void AppController::exportPdf(const QVariantMap& options, const QUrl& destinatio
     setError(tr("Connect to the calendar service to print"));
     return;
   }
+  m_pendingPdfJob.reset();
+  m_pdfHydrationWait.stop();
   setStatus(tr("Preparing PDF…"));
   requestPdfPage(job, 0, kEventPageLimit);
 }
@@ -1285,9 +1302,20 @@ void AppController::requestPdfPage(const std::shared_ptr<PdfExportJob>& job,
       [this, job, offset, limit](const QJsonValue& value) {
         const QJsonObject page = value.toObject();
         job->events.append(variantList(value, QStringLiteral("events")));
+        job->coverage = page.value(QStringLiteral("coverage")).toObject();
         const int nextOffset = page.value(QStringLiteral("nextOffset")).toInt(-1);
         if (page.value(QStringLiteral("hasMore")).toBool() && nextOffset > offset) {
           requestPdfPage(job, nextOffset, limit);
+          return;
+        }
+        // The cache may not hold the whole range yet. The daemon announces
+        // finished hydration with events.changed; read the range again then.
+        if (!job->coverage.value(QStringLiteral("complete")).toBool(true) &&
+            job->coverage.value(QStringLiteral("hydrationScheduled")).toBool() &&
+            job->hydrationRounds < kPdfHydrationRounds) {
+          m_pendingPdfJob = job;
+          m_pdfHydrationWait.start(kPdfHydrationWaitMs);
+          setStatus(tr("Downloading events to print…"));
           return;
         }
         finishPdfExport(job);
@@ -1302,6 +1330,23 @@ void AppController::requestPdfPage(const std::shared_ptr<PdfExportJob>& job,
         }
         return false;
       });
+}
+
+void AppController::resumePdfExport(const bool refetch) {
+  if (!m_pendingPdfJob) {
+    return;
+  }
+  const std::shared_ptr<PdfExportJob> job = std::move(m_pendingPdfJob);
+  m_pendingPdfJob.reset();
+  m_pdfHydrationWait.stop();
+  if (!refetch) {
+    // Waited long enough: print what the cache holds and say so.
+    finishPdfExport(job);
+    return;
+  }
+  ++job->hydrationRounds;
+  job->events.clear();
+  requestPdfPage(job, 0, kEventPageLimit);
 }
 
 void AppController::finishPdfExport(const std::shared_ptr<PdfExportJob>& job) {
@@ -1348,24 +1393,19 @@ void AppController::finishPdfExport(const std::shared_ptr<PdfExportJob>& job) {
     printable.append(item);
   }
 
-  // Write beside the destination first so a failed export never leaves a
-  // truncated file in its place.
-  const QString partial = job->path + QStringLiteral(".part");
   QString error;
-  const int pages = writeCalendarPdf(partial, printable, job->options, &error);
+  const int pages = writeCalendarPdf(job->path, printable, job->options, &error);
   if (pages <= 0) {
-    QFile::remove(partial);
     setError(error.isEmpty() ? tr("The PDF could not be written") : error);
     return;
   }
-  QFile::remove(job->path);
-  if (!QFile::rename(partial, job->path)) {
-    QFile::remove(partial);
-    setError(tr("The PDF could not be saved to %1").arg(job->path));
-    return;
-  }
   setError({});
-  setStatus(tr("Saved %n page(s) to %1", nullptr, pages).arg(job->path));
+  const bool complete = job->coverage.value(QStringLiteral("complete")).toBool(true);
+  setStatus(complete ? tr("Saved %n page(s) to %1", nullptr, pages).arg(job->path)
+                     : tr("Saved %n page(s) to %1; some events may be missing because "
+                          "calendars are still downloading",
+                          nullptr, pages)
+                           .arg(job->path));
   emit pdfExportCompleted(job->path, pages);
 }
 

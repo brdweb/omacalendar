@@ -8,6 +8,7 @@
 #include <QPageSize>
 #include <QPainter>
 #include <QPdfWriter>
+#include <QSaveFile>
 #include <algorithm>
 
 namespace omacalendar {
@@ -397,7 +398,13 @@ int writeCalendarPdf(const QString& path, const QList<PrintableEvent>& events,
     return fail(QObject::tr("Print at most one year at a time"));
   }
 
-  QPdfWriter writer(path);
+  // QSaveFile only replaces an existing file once the new one is complete.
+  QSaveFile file(path);
+  const QString name = QFileInfo(path).fileName();
+  if (!file.open(QIODevice::WriteOnly)) {
+    return fail(QObject::tr("Could not write %1").arg(name));
+  }
+  QPdfWriter writer(&file);
   writer.setTitle(options.title);
   writer.setCreator(QStringLiteral("OmaCalendar"));
   writer.setResolution(300);
@@ -409,7 +416,8 @@ int writeCalendarPdf(const QString& path, const QList<PrintableEvent>& events,
 
   PdfDocument document(&writer, options);
   if (!document.begin()) {
-    return fail(QObject::tr("Could not write %1").arg(QFileInfo(path).fileName()));
+    file.cancelWriting();
+    return fail(QObject::tr("Could not write %1").arg(name));
   }
   if (options.layout == PrintLayout::Month) {
     QDate month(options.firstDate.year(), options.firstDate.month(), 1);
@@ -427,8 +435,9 @@ int writeCalendarPdf(const QString& path, const QList<PrintableEvent>& events,
   }
   const int pages = document.pages();
   document.end();
-  if (!QFileInfo(path).isFile() || QFileInfo(path).size() == 0) {
-    return fail(QObject::tr("Could not write %1").arg(QFileInfo(path).fileName()));
+  if (file.pos() == 0 || !file.commit()) {
+    file.cancelWriting();
+    return fail(QObject::tr("Could not write %1").arg(name));
   }
   return pages;
 }

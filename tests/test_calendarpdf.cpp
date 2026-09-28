@@ -129,6 +129,37 @@ class CalendarPdfTest : public QObject {
     QCOMPARE(pageObjects(path), 2);
   }
 
+  void replacesAnExistingFileOnlyOnSuccess() {
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const QString path = directory.filePath(QStringLiteral("existing.pdf"));
+    QFile existing(path);
+    QVERIFY(existing.open(QIODevice::WriteOnly));
+    existing.write("previous export");
+    existing.close();
+
+    PrintOptions options;
+    options.firstDate = QDate(2026, 10, 2);
+    options.lastDate = QDate(2026, 10, 1);
+    QString error;
+    QCOMPARE(writeCalendarPdf(path, {}, options, &error), 0);
+    QFile unchanged(path);
+    QVERIFY(unchanged.open(QIODevice::ReadOnly));
+    QCOMPARE(unchanged.readAll(), QByteArray("previous export"));
+    unchanged.close();
+
+    options.lastDate = QDate(2026, 10, 3);
+    QCOMPARE(writeCalendarPdf(path, {}, options, &error), 1);
+    QCOMPARE(pageObjects(path), 1);
+    QVERIFY(!QFile::exists(path + QStringLiteral(".part")));
+
+    // A destination that cannot be created fails without writing anything.
+    QCOMPARE(writeCalendarPdf(directory.filePath(QStringLiteral("missing/out.pdf")), {},
+                              options, &error),
+             0);
+    QVERIFY(!error.isEmpty());
+  }
+
   void rejectsInvalidRanges() {
     QTemporaryDir directory;
     QVERIFY(directory.isValid());

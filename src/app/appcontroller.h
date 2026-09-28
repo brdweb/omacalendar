@@ -393,6 +393,11 @@ class AppController final : public QObject {
   struct PdfExportJob;
   void requestPdfPage(const std::shared_ptr<PdfExportJob>& job, int offset, int limit);
   void finishPdfExport(const std::shared_ptr<PdfExportJob>& job);
+  // Continues an export that waited for provider hydration: reads the range
+  // again after events.changed, or prints what is cached after the wait.
+  void resumePdfExport(bool refetch);
+  std::shared_ptr<PdfExportJob> m_pendingPdfJob;
+  QTimer m_pdfHydrationWait;
   [[nodiscard]] QTimeZone displayTimeZone() const;
   QTimer m_interactiveRenewal;
   void sendInteractive();
