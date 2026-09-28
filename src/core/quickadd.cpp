@@ -131,9 +131,9 @@ QuickAddDraft parseQuickAdd(const QString& input, const QDate& today) {
       draft.recurrenceRule = QStringLiteral("FREQ=YEARLY") + interval;
     } else {
       repeatWeekday = weekdayNumber(unit);
-      draft.recurrenceRule = QStringLiteral("FREQ=WEEKLY") + interval +
-                             QStringLiteral(";BYDAY=") +
-                             QLatin1String(kRuleDays.at(repeatWeekday - 1));
+      draft.recurrenceRule =
+          QStringLiteral("FREQ=WEEKLY") + interval + QStringLiteral(";BYDAY=") +
+          QLatin1String(kRuleDays.at(static_cast<std::size_t>(repeatWeekday - 1)));
     }
   } else if (const auto keyword = take(
                  &text, pattern(QStringLiteral("\\b(daily|weekly|monthly|yearly)\\b")));
