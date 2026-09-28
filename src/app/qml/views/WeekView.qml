@@ -454,13 +454,11 @@ Item {
     }
 
     function eventStart(value) {
-        return value.allDay ? new Date(value.startDate + "T00:00:00")
-                            : new Date(value.displayStartLocal || value.startUtc)
+        return EventIndex.eventStart(value)
     }
 
     function eventEnd(value) {
-        return value.allDay ? new Date(value.endDate + "T00:00:00")
-                            : new Date(value.displayEndLocal || value.endUtc)
+        return EventIndex.eventEnd(value)
     }
 
     function overlapLayout(dayEvents, value) {

@@ -37,13 +37,19 @@ qt_add_qml_module(omacalendar
     qml/components/AccountSettingsDrawer.qml
     qml/components/ActivityPanel.qml
     qml/components/CalendarSidebar.qml
+    qml/components/ConflictMergeDialog.qml
     qml/components/EmptyState.qml
     qml/components/EventChip.qml
     qml/components/EventEditor.qml
     qml/components/EventRow.qml
+    qml/components/IcsExportDialog.qml
+    qml/components/IcsImportDialog.qml
     qml/components/MonthCell.qml
     qml/components/MutationConfirmationDialog.qml
     qml/components/SectionLabel.qml
+    qml/components/SettingsAccountsTab.qml
+    qml/components/SettingsCalendarsTab.qml
+    qml/components/SettingsPreferencesTab.qml
     qml/components/StatusBadge.qml
     qml/components/TimelineCanvas.qml
     qml/components/TimelineEvent.qml
