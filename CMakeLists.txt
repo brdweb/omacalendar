@@ -113,6 +113,8 @@ add_library(omacalendar_core STATIC
   src/core/domain.h
   src/core/paths.cpp
   src/core/paths.h
+  src/core/quickadd.cpp
+  src/core/quickadd.h
   src/core/recurrenceexpander.cpp
   src/core/recurrenceexpander.h
   src/core/secretstore.cpp

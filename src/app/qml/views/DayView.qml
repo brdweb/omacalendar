@@ -20,6 +20,10 @@ Item {
     property int lastHour: 24
     property real pixelsPerHour: 68
     property int workDayStart: 8
+    // A remembered vertical position from an earlier visit; negative opens at
+    // the current time when today is shown, otherwise before the work day.
+    property real savedScrollY: -1
+    signal scrollPositionChanged(real contentY)
     property int workDayEnd: 18
     property int defaultDurationMinutes: 60
     property string timeFormat: "system"
@@ -152,6 +156,7 @@ Item {
 
         Flickable {
             id: timelineFlick
+            objectName: "dayTimelineFlick"
             Layout.fillWidth: true
             Layout.fillHeight: true
             clip: true
@@ -160,8 +165,8 @@ Item {
             boundsBehavior: Flickable.StopAtBounds
             ScrollBar.vertical: ScrollBar {}
 
-            Component.onCompleted: contentY = Math.max(0, (root.workDayStart - 1)
-                                                       * root.pixelsPerHour)
+            Component.onCompleted: contentY = root.initialScrollY()
+            onContentYChanged: root.scrollPositionChanged(contentY)
 
             Item {
                 id: timeline
@@ -287,6 +292,15 @@ Item {
         }
     }
 
+    function initialScrollY() {
+        if (savedScrollY >= 0)
+            return savedScrollY
+        const now = new Date()
+        const hour = sameDate(currentDate, now) ? Math.max(workDayStart, now.getHours())
+                                                : workDayStart
+        return Math.max(0, (hour - 1 - firstHour) * pixelsPerHour)
+    }
+
     Timer {
         interval: 60000
         running: root.visible
@@ -295,13 +309,11 @@ Item {
     }
 
     function eventStart(value) {
-        return value.allDay ? new Date(value.startDate + "T00:00:00")
-                            : new Date(value.displayStartLocal || value.startUtc)
+        return EventIndex.eventStart(value)
     }
 
     function eventEnd(value) {
-        return value.allDay ? new Date(value.endDate + "T00:00:00")
-                            : new Date(value.displayEndLocal || value.endUtc)
+        return EventIndex.eventEnd(value)
     }
 
     function filterEvents(allDayValue) {

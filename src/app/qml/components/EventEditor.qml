@@ -28,7 +28,7 @@ Dialog {
                                      || sourceCalendar.readOnly === true
     readonly property bool recurring: Boolean(eventData && (eventData.recurrenceRule
                                                               || eventData.recurrenceId))
-    readonly property bool hasGuests: attendeeField.text.trim().length > 0
+    readonly property bool hasGuests: attendeeEditor.hasGuests
     readonly property var writableCalendars: App.calendars.filter(
                                                  function(calendar) {
                                                      return calendar.enabled !== false
@@ -82,7 +82,8 @@ Dialog {
         locationField.text = ""
         urlField.text = ""
         notesField.text = ""
-        attendeeField.text = ""
+        attendeeEditor.organizerEmail = ""
+        attendeeEditor.load([])
         allDay.checked = false
         timeKindBox.currentIndex = 0
         const startValue = new Date(dateValue.getFullYear(), dateValue.getMonth(),
@@ -101,8 +102,7 @@ Dialog {
         calendarBox.currentIndex = calendarIndex(defaultCalendarId)
         availabilityBox.currentIndex = 0
         visibilityBox.currentIndex = 0
-        recurrenceBox.currentIndex = 0
-        recurrenceRuleField.text = ""
+        recurrenceEditor.load("")
         scopeBox.currentIndex = 0
         notificationBox.currentIndex = 0
         reminderModel.clear()
@@ -114,6 +114,25 @@ Dialog {
         titleField.forceActiveFocus()
     }
 
+    // Opens a new event pre-filled from a quick-add draft; fallbackDate is used
+    // when the text named no day.
+    function openDraft(draft, fallbackDate) {
+        const date = draft.date ? new Date(draft.date + "T00:00:00") : fallbackDate
+        openNew(date, draft.startMinute >= 0 ? draft.startMinute : defaultStartMinute,
+                draft.durationMinutes > 0 ? draft.durationMinutes : undefined)
+        titleField.text = draft.title || ""
+        locationField.text = draft.location || ""
+        if (draft.allDay) {
+            allDay.checked = true
+            if (draft.endDate) {
+                const inclusiveEnd = new Date(draft.endDate + "T00:00:00")
+                inclusiveEnd.setDate(inclusiveEnd.getDate() - 1)
+                endDateField.text = Qt.formatDate(inclusiveEnd, "yyyy-MM-dd")
+            }
+        }
+        recurrenceEditor.load(draft.recurrenceRule || "")
+    }
+
     function openExisting(value) {
         eventData = value || ({})
         editing = Boolean(eventData.id)
@@ -123,7 +142,8 @@ Dialog {
         locationField.text = eventData.location || ""
         urlField.text = eventData.url || eventData.meetingUrl || ""
         notesField.text = eventData.description || ""
-        attendeeField.text = attendeeText(eventData.attendees || [])
+        attendeeEditor.organizerEmail = String((eventData.organizer || {}).email || "")
+        attendeeEditor.load(eventData.attendees || [])
         allDay.checked = eventData.allDay === true
         timeKindBox.currentIndex = eventData.timeKind === "floating" ? 1 : 0
         const start = eventData.allDay
@@ -148,7 +168,7 @@ Dialog {
         calendarBox.currentIndex = calendarIndex(eventData.calendarId)
         availabilityBox.currentIndex = eventData.transparency === "transparent" ? 1 : 0
         visibilityBox.currentIndex = visibilityIndex(eventData.visibility || "default")
-        configureRecurrence(eventData.recurrenceRule || "")
+        recurrenceEditor.load(eventData.recurrenceRule || "")
         scopeBox.currentIndex = 0
         notificationBox.currentIndex = 0
         reminderModel.clear()
@@ -170,29 +190,6 @@ Dialog {
         }
         open()
         titleField.forceActiveFocus()
-    }
-
-    function configureRecurrence(rule) {
-        const normalized = String(rule).toUpperCase()
-        if (!normalized) {
-            recurrenceBox.currentIndex = 0
-            recurrenceRuleField.text = ""
-        } else if (normalized.indexOf("FREQ=DAILY") >= 0) {
-            recurrenceBox.currentIndex = 1
-            recurrenceRuleField.text = rule
-        } else if (normalized.indexOf("FREQ=WEEKLY") >= 0) {
-            recurrenceBox.currentIndex = 2
-            recurrenceRuleField.text = rule
-        } else if (normalized.indexOf("FREQ=MONTHLY") >= 0) {
-            recurrenceBox.currentIndex = 3
-            recurrenceRuleField.text = rule
-        } else if (normalized.indexOf("FREQ=YEARLY") >= 0) {
-            recurrenceBox.currentIndex = 4
-            recurrenceRuleField.text = rule
-        } else {
-            recurrenceBox.currentIndex = 5
-            recurrenceRuleField.text = rule
-        }
     }
 
     function dateTime(dateText, timeText) {
@@ -286,10 +283,16 @@ Dialog {
                     && !App.isValidTimeZone(selectedTimeZone()))
                 return qsTr("Enter a valid IANA time zone.")
         }
-        if (recurrenceBox.currentIndex === 5
-                && recurrenceRuleField.text.trim().length === 0)
-            return qsTr("Enter a recurrence rule for the custom repeat option.")
-        if (recurrenceBox.currentIndex > 0 && !recurrenceEditingSupported)
+        // Commit a typed address first: an entry left pending while
+        // suggestions showed would otherwise be dropped on save unchecked.
+        attendeeEditor.commitInput()
+        const attendeeError = attendeeEditor.validationError()
+        if (attendeeError)
+            return attendeeError
+        const recurrenceError = recurrenceEditor.validationError()
+        if (recurrenceError)
+            return recurrenceError
+        if (recurrenceEditor.mode > 0 && !recurrenceEditingSupported)
             return qsTr("This calendar cannot write recurring events.")
         if (hasGuests && !attendeeEditingSupported)
             return qsTr("This calendar cannot write guests or invitations.")
@@ -311,45 +314,11 @@ Dialog {
     }
 
     function recurrenceRule() {
-        if (recurrenceBox.currentIndex === 0)
-            return ""
-        if (recurrenceBox.currentIndex === 1)
-            return "FREQ=DAILY"
-        if (recurrenceBox.currentIndex === 2)
-            return "FREQ=WEEKLY"
-        if (recurrenceBox.currentIndex === 3)
-            return "FREQ=MONTHLY"
-        if (recurrenceBox.currentIndex === 4)
-            return "FREQ=YEARLY"
-        return recurrenceRuleField.text.trim().replace(/^RRULE:/i, "")
+        return recurrenceEditor.rule()
     }
 
     function parsedAttendees() {
-        const values = attendeeField.text.split(/[\n,;]/)
-        const result = []
-        const existing = eventData.attendees || []
-        for (let index = 0; index < values.length; ++index) {
-            const email = values[index].trim()
-            if (email.length === 0)
-                continue
-            let preserved = null
-            for (let candidateIndex = 0; candidateIndex < existing.length;
-                 ++candidateIndex) {
-                const candidate = existing[candidateIndex]
-                if (String(candidate.email || "").toLowerCase()
-                        === email.toLowerCase()) {
-                    preserved = Object.assign({}, candidate)
-                    break
-                }
-            }
-            if (preserved) {
-                preserved.email = email
-                result.push(preserved)
-            } else {
-                result.push({"email": email})
-            }
-        }
-        return result
+        return attendeeEditor.result()
     }
 
     function reminderValues() {
@@ -440,15 +409,6 @@ Dialog {
         const timestamp = isNaN(parsed.getTime())
                 ? String(value) : Qt.formatDateTime(parsed, Locale.ShortFormat)
         return reminderMethodLabel(method) + qsTr(" at ") + timestamp
-    }
-
-    function attendeeText(values) {
-        const result = []
-        for (let index = 0; index < values.length; ++index) {
-            if (values[index].email)
-                result.push(values[index].email)
-        }
-        return result.join(", ")
     }
 
     function calendarIndex(calendarId) {
@@ -797,20 +757,17 @@ Dialog {
                 }
 
                 SectionLabel { text: qsTr("REPEAT") }
-                AppComboBox {
-                    id: recurrenceBox
+                RecurrenceEditor {
+                    id: recurrenceEditor
                     Layout.fillWidth: true
-                    model: [qsTr("Does not repeat"), qsTr("Daily"), qsTr("Weekly"), qsTr("Monthly"), qsTr("Yearly"), qsTr("Custom rule")]
-                    enabled: !editor.readOnly && editor.recurrenceEditingSupported
-                    Accessible.name: qsTr("Event recurrence")
-                }
-                AppTextField {
-                    id: recurrenceRuleField
-                    visible: recurrenceBox.currentIndex === 5
-                    Layout.fillWidth: true
-                    placeholderText: qsTr("FREQ=WEEKLY;INTERVAL=2;BYDAY=MO")
-                    accessibleName: qsTr("Custom recurrence rule")
-                    enabled: !editor.readOnly
+                    startDate: {
+                        const parsed = new Date(startDateField.text + "T00:00:00")
+                        return isNaN(parsed.getTime()) ? new Date() : parsed
+                    }
+                    allDayEvent: allDay.checked
+                    floating: timeKindBox.currentValue === "floating"
+                    timeZone: editor.selectedTimeZone()
+                    editable: !editor.readOnly && editor.recurrenceEditingSupported
                 }
                 AppComboBox {
                     id: scopeBox
@@ -870,22 +827,10 @@ Dialog {
                 }
 
                 SectionLabel { text: qsTr("GUESTS") }
-                TextArea {
-                    id: attendeeField
+                AttendeeEditor {
+                    id: attendeeEditor
                     Layout.fillWidth: true
-                    Layout.preferredHeight: 64
-                    placeholderText: qsTr("Guest email addresses, separated by commas")
-                    color: Theme.text
-                    placeholderTextColor: Theme.mutedText
-                    enabled: !editor.readOnly && editor.attendeeEditingSupported
-                    wrapMode: TextEdit.Wrap
-                    selectByMouse: true
-                    Accessible.name: qsTr("Event guests")
-                    background: Rectangle {
-                        radius: Theme.radiusMD
-                        color: Theme.background
-                        border.color: attendeeField.activeFocus ? Theme.focus : Theme.border
-                    }
+                    editable: !editor.readOnly && editor.attendeeEditingSupported
                 }
                 AppComboBox {
                     id: notificationBox

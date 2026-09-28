@@ -22,6 +22,13 @@ ItemDelegate {
 
     readonly property color eventColor: eventData.calendarColor
                                         || eventData.color || Theme.accent
+    readonly property real fillOpacity: selected ? 0.28
+                                                 : hovered || activeFocus ? 0.22 : 0.13
+    // Text colours are picked against the tinted fill so a very light or
+    // very dark calendar colour stays readable.
+    readonly property color fillColor: Theme.blend(eventColor, fillOpacity, Theme.background)
+    readonly property color summaryColor: Theme.readableText(fillColor, Theme.text)
+    readonly property color detailColor: Theme.readableText(fillColor, Theme.mutedText)
     readonly property string stateText: {
         if (eventData.conflict === true || eventData.operationState === "blocked")
             return "Conflict"
@@ -91,10 +98,7 @@ ItemDelegate {
 
     background: Rectangle {
         radius: root.compact ? Theme.radiusSM : Theme.radiusMD
-        color: root.selected ? Theme.alpha(root.eventColor, 0.28)
-                             : root.hovered || root.activeFocus
-                               ? Theme.alpha(root.eventColor, 0.22)
-                               : Theme.alpha(root.eventColor, 0.13)
+        color: Theme.alpha(root.eventColor, root.fillOpacity)
         border.width: root.activeFocus || root.selected ? 1 : 0
         border.color: root.activeFocus ? Theme.focus
                                        : Theme.alpha(root.eventColor, 0.48)
@@ -115,7 +119,7 @@ ItemDelegate {
             textFormat: Text.PlainText
             visible: root.showTime && root.timeText.length > 0
             text: root.timeText
-            color: Theme.mutedText
+            color: root.detailColor
             font.pixelSize: root.compact ? Theme.microFontSize : Theme.smallFontSize
         }
         Text {
@@ -123,7 +127,7 @@ ItemDelegate {
             objectName: "eventChipSummary"
             Layout.fillWidth: true
             text: root.eventData.summary || qsTr("Untitled event")
-            color: Theme.text
+            color: root.summaryColor
             font.pixelSize: root.compact ? Theme.microFontSize : Theme.smallFontSize
             font.weight: Font.DemiBold
             elide: Text.ElideRight
@@ -143,7 +147,7 @@ ItemDelegate {
             textFormat: Text.PlainText
             visible: root.stateText.length > 0 && !root.compact
             text: root.stateLabel
-            color: root.stateText === "Conflict" ? Theme.danger : Theme.mutedText
+            color: root.stateText === "Conflict" ? Theme.danger : root.detailColor
             font.pixelSize: Theme.microFontSize
         }
     }

@@ -1,5 +1,6 @@
 import QtQuick
 import QtQuick.Window
+import QtQuick.Controls
 import QtTest
 import OmaCalendar
 import "../../src/app/qml/views" as Views
@@ -21,9 +22,32 @@ Item {
     Component { id: timelineCanvasFactory; Components.TimelineCanvas {} }
     Component { id: timelineEventFactory; Components.TimelineEvent {} }
     Component { id: editorFactory; Components.EventEditor {} }
+    Component { id: attendeeEditorFactory; Components.AttendeeEditor {} }
     Component { id: mutationConfirmationFactory; Components.MutationConfirmationDialog {} }
     Component { id: activityFactory; Components.ActivityPanel {} }
+    Component { id: sidebarFactory; Components.CalendarSidebar {} }
+    Component { id: quickAddFactory; Components.QuickAddDialog {} }
+    Component { id: conflictMergeFactory; Components.ConflictMergeDialog {} }
+    Component { id: icsImportFactory; Components.IcsImportDialog {} }
+    Component { id: icsExportFactory; Components.IcsExportDialog {} }
+    // Dialogs hand focus back through the window's content item, so the
+    // focus test runs in an ApplicationWindow like the app's.
+    Component {
+        id: focusWindowFactory
+        ApplicationWindow {
+            property alias anchor: anchorInput
+            width: 900
+            height: 700
+            visible: true
+            TextInput { id: anchorInput; width: 100; height: 20 }
+        }
+    }
     Component { id: settingsFactory; Components.AccountSettingsDrawer {} }
+
+    Component {
+        id: signalSpyFactory
+        SignalSpy {}
+    }
 
     SignalSpy {
         id: activationSpy
@@ -303,6 +327,359 @@ Item {
                     wait(0)
                 }
             }
+        }
+
+        function test_agenda_grows_and_timelines_restore_scroll() {
+            const profile = viewportProfiles()[0]
+            const agenda = createView(agendaFactory, profile, representativeEvents())
+            const list = findChild(agenda, "agendaList")
+            verify(list !== null, "agenda list exists")
+            compare(list.count, 31)
+            const moreSpy = createTemporaryObject(signalSpyFactory, testCase, {
+                "target": agenda, "signalName": "moreDaysRequested"})
+            list.positionViewAtEnd()
+            tryVerify(function() { return moreSpy.count > 0 },
+                      2000, "scrolling to the end asks for more days")
+
+            const day = createTemporaryObject(dayFactory, scene, {
+                "width": profile.width, "height": profile.height,
+                "currentDate": scene.referenceDate, "events": [],
+                "savedScrollY": 420, "visible": true})
+            wait(0)
+            compare(findChild(day, "dayTimelineFlick").contentY, 420)
+            const week = createTemporaryObject(weekFactory, scene, {
+                "width": profile.width, "height": profile.height,
+                "currentDate": scene.referenceDate, "events": [],
+                "savedScrollY": 300, "visible": true})
+            wait(0)
+            compare(findChild(week, "weekTimelineScroll").contentY, 300)
+            // Without a saved position, a day that is not today opens an hour
+            // before the work day.
+            const fresh = createView(dayFactory, profile, [])
+            compare(findChild(fresh, "dayTimelineFlick").contentY,
+                    (fresh.workDayStart - 1) * fresh.pixelsPerHour)
+        }
+
+        function test_week_numbers_and_year_heat_map() {
+            const month = createTemporaryObject(monthFactory, scene, {
+                "width": 900, "height": 700, "currentDate": new Date(2026, 8, 15),
+                "firstDayOfWeek": 1, "events": [], "visible": true})
+            wait(0)
+            const firstWeek = findChild(month, "monthWeekNumber-0")
+            verify(firstWeek !== null)
+            verify(!firstWeek.visible, "week numbers are off by default")
+            month.showWeekNumbers = true
+            tryCompare(firstWeek, "visible", true)
+            compare(firstWeek.text, "36", "the grid opens on Monday August 31")
+            compare(findChild(month, "monthWeekNumber-5").text, "41")
+
+            const week = createTemporaryObject(weekFactory, scene, {
+                "width": 900, "height": 700, "currentDate": new Date(2026, 8, 30),
+                "firstDayOfWeek": 1, "showWeekNumbers": true, "events": [],
+                "visible": true})
+            wait(0)
+            compare(findChild(week, "weekNumberLabel").text, "W40")
+
+            const year = createTemporaryObject(yearFactory, scene, {
+                "width": 1100, "height": 800, "currentDate": scene.referenceDate,
+                "events": representativeEvents(), "visible": true})
+            wait(0)
+            verify(findChild(year, "yearHeatLegend") !== null)
+            compare([0, 1, 2, 3, 4, 5, 6, 40].map(year.heatLevel),
+                    [0, 1, 2, 2, 3, 3, 4, 4])
+        }
+
+        function test_drag_between_all_day_lane_and_timeline() {
+            const allDay = representativeEvents().filter(function(value) {
+                return value.allDay })[0]
+            const timed = representativeEvents()[0]
+            const week = createTemporaryObject(weekFactory, scene, {
+                "width": 1000, "height": 700, "currentDate": scene.referenceDate,
+                "events": [timed, allDay], "visible": true})
+            wait(0)
+            const timeSpy = createTemporaryObject(signalSpyFactory, testCase, {
+                "target": week, "signalName": "eventTimeChanged"})
+            let accepted = false
+            week.dropOnTimeline({"source": {"eventData": allDay},
+                                 "acceptProposedAction": function() { accepted = true }},
+                                week.weekStart, 600)
+            compare(timeSpy.count, 1)
+            verify(accepted)
+            compare(timeSpy.signalArguments[0][2], 600)
+            compare(timeSpy.signalArguments[0][3], week.defaultDurationMinutes,
+                    "an all-day event takes the default length")
+
+            const timelineEvent = createTemporaryObject(timelineEventFactory, scene, {
+                "eventData": timed, "width": 120, "height": 60, "y": 500,
+                "startMinute": 540, "durationMinutes": 60, "allDayDropY": 300})
+            const allDaySpy = createTemporaryObject(signalSpyFactory, testCase, {
+                "target": timelineEvent, "signalName": "allDayRequested"})
+            const rescheduleSpy = createTemporaryObject(signalSpyFactory, testCase, {
+                "target": timelineEvent, "signalName": "rescheduleRequested"})
+            timelineEvent.pressY = 10
+            timelineEvent.commitMove(0, -150)
+            compare(allDaySpy.count, 0, "a move that stays in the timeline")
+            compare(rescheduleSpy.count, 1)
+            timelineEvent.commitMove(0, -260)
+            compare(allDaySpy.count, 1, "released above the timeline top")
+            compare(rescheduleSpy.count, 1)
+        }
+
+        function test_sidebar_shows_account_sync_state() {
+            const today = new Date()
+            const sidebar = createTemporaryObject(sidebarFactory, scene, {
+                "width": 280, "height": 900,
+                "accounts": [{"id": "g", "provider": "google", "displayName": "Work"},
+                             {"id": "l", "provider": "local", "displayName": "This device"},
+                             {"id": "i", "provider": "ics", "displayName": "Holidays"}],
+                "accountSyncStates": {
+                    "g": {"state": "reauthorization_required", "message": "Token revoked"},
+                    "i": {"state": "idle", "lastSyncAt": today.toISOString()}}})
+            verify(sidebar !== null)
+            wait(0)
+            compare(findChild(sidebar, "accountSyncText-0").text, "Sign-in expired")
+            const signIn = findChild(sidebar, "accountSyncAction-0")
+            verify(signIn.visible)
+            const reauthorize = createTemporaryObject(signalSpyFactory, testCase, {
+                "target": sidebar, "signalName": "accountReauthorizeRequested"})
+            signIn.clicked()
+            compare(reauthorize.count, 1)
+            compare(reauthorize.signalArguments[0][0], "g")
+            verify(findChild(sidebar, "accountSyncText-1").text.indexOf("Synced ") === 0,
+                   "the local account is not listed, so the subscription is second")
+            verify(!findChild(sidebar, "accountSyncAction-1").visible)
+            verify(findChild(sidebar, "accountSync-2") === null)
+
+            sidebar.accountSyncStates = {"g": {"state": "error", "message": "Timeout"}}
+            compare(findChild(sidebar, "accountSyncText-0").text, "Sync failed")
+            const syncSpy = createTemporaryObject(signalSpyFactory, testCase, {
+                "target": sidebar, "signalName": "accountSyncRequested"})
+            findChild(sidebar, "accountSyncAction-0").clicked()
+            compare(syncSpy.count, 1)
+
+            const attention = findChild(sidebar, "sidebarActivity")
+            verify(!attention.visible, "nothing needs attention")
+            sidebar.failedOperationCount = 2
+            verify(attention.visible)
+            const panelSpy = createTemporaryObject(signalSpyFactory, testCase, {
+                "target": sidebar, "signalName": "panelRequested"})
+            attention.clicked()
+            compare(panelSpy.signalArguments[0][0], "sync")
+        }
+
+        function test_activity_panel_reaches_conflicts_and_sync() {
+            const panel = createTemporaryObject(activityFactory, scene)
+            verify(panel !== null)
+            verify(findChild(panel, "conflictsTab") !== null)
+            verify(findChild(panel, "syncTab") !== null)
+            panel.mode = "conflicts"
+            compare(panel.mode, "conflicts", "a conflicts request is kept, not reset to search")
+            panel.mode = "sync"
+            compare(panel.mode, "sync")
+        }
+
+        function test_theme_text_meets_contrast() {
+            const pairs = [[Theme.text, Theme.background], [Theme.text, Theme.surface],
+                           [Theme.text, Theme.surfaceAlt], [Theme.text, Theme.darkBackground],
+                           [Theme.mutedText, Theme.background],
+                           [Theme.mutedText, Theme.surface],
+                           [Theme.accentText, Theme.accent]]
+            for (let index = 0; index < pairs.length; ++index) {
+                const ratio = Theme.contrastRatio(pairs[index][0], pairs[index][1])
+                verify(ratio >= 4.5, "token pair " + index + " reads at " + ratio.toFixed(2))
+            }
+
+            // Whatever the calendar colour, tint and theme, event text reads.
+            const calendarColors = ["#ffffff", "#ffff00", "#00ff00", "#000000", "#1a1b26",
+                                    "#7aa2f7", "#f7768e", "#808080"]
+            const backgrounds = [Theme.background, "#fafafa", "#000000", "#ffffff"]
+            const opacities = [0.13, 0.22, 0.28, 0.34, 0.9]
+            for (let c = 0; c < calendarColors.length; ++c) {
+                for (let b = 0; b < backgrounds.length; ++b) {
+                    for (let o = 0; o < opacities.length; ++o) {
+                        const fill = Theme.blend(Qt.color(calendarColors[c]), opacities[o],
+                                                 Qt.color(backgrounds[b]))
+                        for (const preferred of [Theme.text, Theme.mutedText]) {
+                            const ratio = Theme.contrastRatio(
+                                        Theme.readableText(fill, preferred), fill)
+                            verify(ratio >= 4.5, calendarColors[c] + " at " + opacities[o]
+                                   + " over " + backgrounds[b] + ": " + ratio.toFixed(2))
+                        }
+                    }
+                }
+            }
+            compare(Theme.readableText(Theme.background, Theme.text), Theme.text,
+                    "a readable preferred colour is kept")
+
+            const chip = createTemporaryObject(eventChipFactory, scene, {
+                "width": 200, "selected": true, "showTime": true, "timeText": "09:00",
+                "eventData": Object.assign({}, representativeEvents()[0],
+                                           {"calendarColor": "#ffffff"})})
+            const summary = findChild(chip, "eventChipSummary")
+            verify(Theme.contrastRatio(summary.color, chip.fillColor) >= 4.5)
+            const block = createTemporaryObject(timelineEventFactory, scene, {
+                "width": 160, "height": 60, "selected": true,
+                "eventData": Object.assign({}, representativeEvents()[0],
+                                           {"calendarColor": "#ffffff"})})
+            verify(Theme.contrastRatio(findChild(block, "timelineEventSummary").color,
+                                       block.fillColor) >= 4.5)
+        }
+
+        function test_dialogs_trap_and_restore_focus() {
+            const openers = [
+                [editorFactory, function(dialog) { dialog.openNew(new Date(2026, 8, 28), 540) }],
+                [quickAddFactory, function(dialog) { dialog.openEmpty() }],
+                [mutationConfirmationFactory, function(dialog) {
+                    dialog.openFor(representativeEvents()[0], "Apply change",
+                                   {"kind": "save"}, {}, true) }],
+                [conflictMergeFactory, function(dialog) {
+                    dialog.openFor({"id": "conflict", "localEvent": representativeEvents()[0],
+                                    "remoteEvent": representativeEvents()[0]}) }],
+                [icsImportFactory, function(dialog) { dialog.open() }],
+                [icsExportFactory, function(dialog) { dialog.open() }]
+            ]
+            const focusWindow = createTemporaryObject(focusWindowFactory, testCase)
+            tryCompare(focusWindow, "visible", true)
+            focusWindow.requestActivate()
+            const anchor = focusWindow.anchor
+            for (let index = 0; index < openers.length; ++index) {
+                anchor.forceActiveFocus()
+                tryVerify(function() { return anchor.activeFocus }, 1000)
+                const dialog = createTemporaryObject(openers[index][0],
+                                                     focusWindow.contentItem)
+                openers[index][1](dialog)
+                tryCompare(dialog, "opened", true)
+                verify(!anchor.activeFocus, "dialog " + index + " takes focus")
+                verify(dialog.modal, "dialog " + index + " blocks the window behind it")
+                dialog.close()
+                tryCompare(dialog, "opened", false)
+                tryVerify(function() { return anchor.activeFocus }, 1000,
+                          "dialog " + index + " returns focus")
+            }
+        }
+
+        function test_editor_keeps_recurrence_rules() {
+            const rules = ["FREQ=WEEKLY;INTERVAL=2;BYDAY=MO,WE;COUNT=5",
+                           "FREQ=MONTHLY;BYDAY=3MO",
+                           "FREQ=MONTHLY;BYSETPOS=-1;BYDAY=MO,TU,WE,TH,FR"]
+            const editor = createTemporaryObject(editorFactory, scene)
+            verify(editor !== null)
+            for (let index = 0; index < rules.length; ++index) {
+                const event = Object.assign({}, representativeEvents()[0],
+                                            {"recurrenceRule": rules[index]})
+                editor.openExisting(event)
+                tryCompare(editor, "opened", true)
+                compare(editor.recurrenceRule(), rules[index],
+                        "an unedited rule is saved unchanged")
+                editor.close()
+                tryCompare(editor, "opened", false)
+            }
+
+            const weekly = Object.assign({}, representativeEvents()[0],
+                                         {"recurrenceRule": rules[0]})
+            editor.openExisting(weekly)
+            tryCompare(editor, "opened", true)
+            const friday = findChild(scene.Window.window.contentItem,
+                                     "recurrenceWeekday-FR")
+            verify(friday !== null)
+            friday.clicked()
+            compare(editor.recurrenceRule(),
+                    "FREQ=WEEKLY;INTERVAL=2;BYDAY=MO,WE,FR;COUNT=5")
+            const preview = findChild(scene.Window.window.contentItem,
+                                      "recurrencePreview")
+            compare(preview.text,
+                    "Every 2 weeks on Monday, Wednesday and Friday, 5 times")
+            editor.close()
+        }
+
+        function test_quick_add_draft_prefills_the_editor() {
+            const editor = createTemporaryObject(editorFactory, scene)
+            verify(editor !== null)
+            editorSaveSpy.target = editor
+            editorSaveSpy.clear()
+
+            editor.openDraft({"title": "Trip to Denver", "location": "", "recurrenceRule": "",
+                              "date": "2026-10-03", "endDate": "2026-10-07",
+                              "allDay": true, "startMinute": -1, "durationMinutes": 0},
+                             new Date(2026, 8, 28))
+            tryCompare(editor, "opened", true)
+            editor.submit()
+            compare(editorSaveSpy.count, 1)
+            const trip = editorSaveSpy.signalArguments[0][0]
+            compare(trip.summary, "Trip to Denver")
+            compare(trip.allDay, true)
+            compare(trip.startDate, "2026-10-03")
+            compare(trip.endDate, "2026-10-07", "the exclusive end survives the editor")
+            tryCompare(editor, "opened", false)
+
+            editorSaveSpy.clear()
+            editor.openDraft({"title": "Standup", "location": "Room 4",
+                              "recurrenceRule": "FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR",
+                              "date": "", "endDate": "", "allDay": false,
+                              "startMinute": 555, "durationMinutes": 15},
+                             new Date(2026, 8, 28))
+            tryCompare(editor, "opened", true)
+            editor.submit()
+            compare(editorSaveSpy.count, 1)
+            const standup = editorSaveSpy.signalArguments[0][0]
+            compare(standup.summary, "Standup")
+            compare(standup.location, "Room 4")
+            compare(standup.allDay, false)
+            compare(standup.recurrenceRule, "FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR")
+            compare((Date.parse(standup.endUtc) - Date.parse(standup.startUtc)) / 60000, 15)
+            tryCompare(editor, "opened", false)
+        }
+
+        function test_attendee_chips_keep_guests_and_flag_bad_addresses() {
+            const guests = createTemporaryObject(attendeeEditorFactory, scene, {
+                "width": 500, "organizerEmail": "avery@example.com"})
+            verify(guests !== null)
+            guests.load([{"email": "avery@example.com", "displayName": "Avery"},
+                         {"email": "me@example.com", "partstat": "ACCEPTED",
+                          "xProvider": "keep"}])
+            wait(0)
+            const organizerChip = findChild(guests, "attendeeChip-0")
+            verify(organizerChip !== null)
+            verify(organizerChip.Accessible.name.indexOf("organizer") >= 0)
+            verify(findChild(guests, "attendeeChip-1").Accessible.name.indexOf("Accepted") >= 0)
+
+            const input = findChild(guests, "attendeeInput")
+            input.text = "bob@example.com, ME@example.com"
+            verify(guests.commitInput())
+            compare(guests.attendees.length, 3, "duplicates are ignored case-insensitively")
+            compare(input.text, "")
+
+            input.text = "not-an-address"
+            verify(!guests.commitInput())
+            compare(input.text, "not-an-address", "a bad address stays for correction")
+            verify(guests.validationError().indexOf("not-an-address") >= 0)
+            input.text = ""
+            guests.invalidEntry = ""
+
+            guests.removeAt(2)
+            const saved = guests.result()
+            compare(saved.length, 2)
+            compare(saved[1].xProvider, "keep", "provider attendee fields survive")
+            compare(saved[1].partstat, "ACCEPTED")
+        }
+
+        function test_editor_blocks_a_pending_invalid_guest() {
+            const editor = createTemporaryObject(editorFactory, scene)
+            editorSaveSpy.target = editor
+            editorSaveSpy.clear()
+            editor.openDraft({"title": "Planning", "startMinute": 540,
+                              "durationMinutes": 30}, new Date(2026, 8, 28))
+            tryCompare(editor, "opened", true)
+            const input = findChild(scene.Window.window.contentItem, "attendeeInput")
+            verify(input !== null)
+            // Suggestions on screen keep editingFinished from committing.
+            input.parent.suggestions = [{"email": "bogus@example.com"}]
+            input.text = "bogus"
+            editor.submit()
+            compare(editorSaveSpy.count, 0, "a rejected guest address blocks saving")
+            verify(editor.validationError.indexOf("bogus") >= 0)
+            verify(editor.opened)
+            editor.close()
         }
 
         function test_provider_markup_remains_literal() {

@@ -52,7 +52,7 @@ Drawer {
     dim: false
 
     onModeChanged: {
-        const modes = ["search", "invitations"]
+        const modes = ["search", "invitations", "conflicts", "sync"]
         const nextIndex = modes.indexOf(mode)
         if (nextIndex >= 0)
             tabs.currentIndex = nextIndex
@@ -108,7 +108,7 @@ Drawer {
             currentIndex: 0
             background: Rectangle { color: Theme.darkBackground }
             onCurrentIndexChanged: {
-                const modes = ["search", "invitations"]
+                const modes = ["search", "invitations", "conflicts", "sync"]
                 root.mode = modes[currentIndex]
                 if (currentIndex === 0 && root.opened)
                     searchField.forceActiveFocus()
@@ -119,6 +119,13 @@ Drawer {
                                                 root.effectiveInvitationsModel) > 0
                                             ? "  " + root.modelCount(
                                                 root.effectiveInvitationsModel) : "") }
+            AppTabButton {
+                objectName: "conflictsTab"
+                text: qsTr("Conflicts") + (root.modelCount(root.effectiveConflictsModel) > 0
+                                           ? "  " + root.modelCount(
+                                                 root.effectiveConflictsModel) : "")
+            }
+            AppTabButton { objectName: "syncTab"; text: qsTr("Sync") }
         }
 
         StackLayout {

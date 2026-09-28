@@ -23,6 +23,7 @@ qt_add_qml_module(omacalendar
     qml/CalendarVisibility.js
     qml/DateRange.js
     qml/EventIndex.js
+    qml/RecurrenceRule.js
     qml/Main.qml
     qml/Theme.qml
     qml/components/AppButton.qml
@@ -36,14 +37,23 @@ qt_add_qml_module(omacalendar
     qml/components/AppTextField.qml
     qml/components/AccountSettingsDrawer.qml
     qml/components/ActivityPanel.qml
+    qml/components/AttendeeEditor.qml
     qml/components/CalendarSidebar.qml
+    qml/components/ConflictMergeDialog.qml
     qml/components/EmptyState.qml
     qml/components/EventChip.qml
     qml/components/EventEditor.qml
     qml/components/EventRow.qml
+    qml/components/IcsExportDialog.qml
+    qml/components/IcsImportDialog.qml
     qml/components/MonthCell.qml
     qml/components/MutationConfirmationDialog.qml
+    qml/components/QuickAddDialog.qml
+    qml/components/RecurrenceEditor.qml
     qml/components/SectionLabel.qml
+    qml/components/SettingsAccountsTab.qml
+    qml/components/SettingsCalendarsTab.qml
+    qml/components/SettingsPreferencesTab.qml
     qml/components/StatusBadge.qml
     qml/components/TimelineCanvas.qml
     qml/components/TimelineEvent.qml

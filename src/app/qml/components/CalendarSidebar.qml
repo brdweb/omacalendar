@@ -22,7 +22,13 @@ Rectangle {
     property int invitationCount: 0
     property int conflictCount: 0
     property int failedOperationCount: 0
+    property var accounts: []
+    property var accountSyncStates: ({})
+    readonly property var syncedAccounts: (accounts || []).filter(function(account) {
+        return account && account.provider !== "local"
+    })
     property bool connected: false
+    property bool showWeekNumbers: false
 
     signal dateSelected(date dateValue)
     signal monthChanged(date dateValue)
@@ -30,6 +36,8 @@ Rectangle {
     signal calendarVisibilityRequested(string calendarId, bool visible)
     signal panelRequested(string panelName)
     signal settingsRequested()
+    signal accountReauthorizeRequested(string accountId)
+    signal accountSyncRequested(string accountId)
 
     color: Theme.darkBackground
     border.color: Theme.divider
@@ -81,6 +89,7 @@ Rectangle {
 
         DayOfWeekRow {
             Layout.fillWidth: true
+            Layout.leftMargin: root.showWeekNumbers ? 22 : 0
             locale: Qt.locale()
             delegate: Text {
                 textFormat: Text.PlainText
@@ -93,21 +102,45 @@ Rectangle {
             }
         }
 
-        MonthGrid {
-            id: miniMonth
+        RowLayout {
             Layout.fillWidth: true
-            Layout.preferredHeight: 214
-            month: root.monthDate.getMonth()
-            year: root.monthDate.getFullYear()
-            locale: Qt.locale()
-            delegate: MonthCell {
-                required property var model
-                date: model.date
+            spacing: 0
+
+            WeekNumberColumn {
+                objectName: "miniWeekNumbers"
+                visible: root.showWeekNumbers
+                Layout.preferredWidth: 22
+                Layout.preferredHeight: 214
                 month: miniMonth.month
-                selected: root.sameDate(model.date, root.currentDate)
-                isToday: root.sameDate(model.date, new Date())
-                eventCount: root.eventCountForDate(model.date)
-                onClicked: root.dateSelected(model.date)
+                year: miniMonth.year
+                locale: miniMonth.locale
+                delegate: Text {
+                    required property int weekNumber
+                    textFormat: Text.PlainText
+                    text: weekNumber
+                    color: Theme.mutedText
+                    horizontalAlignment: Text.AlignHCenter
+                    verticalAlignment: Text.AlignVCenter
+                    font.pixelSize: Theme.microFontSize
+                }
+            }
+
+            MonthGrid {
+                id: miniMonth
+                Layout.fillWidth: true
+                Layout.preferredHeight: 214
+                month: root.monthDate.getMonth()
+                year: root.monthDate.getFullYear()
+                locale: Qt.locale()
+                delegate: MonthCell {
+                    required property var model
+                    date: model.date
+                    month: miniMonth.month
+                    selected: root.sameDate(model.date, root.currentDate)
+                    isToday: root.sameDate(model.date, new Date())
+                    eventCount: root.eventCountForDate(model.date)
+                    onClicked: root.dateSelected(model.date)
+                }
             }
         }
 
@@ -246,6 +279,79 @@ Rectangle {
             }
         }
 
+        SectionLabel {
+            visible: root.syncedAccounts.length > 0
+            Layout.fillWidth: true
+            text: qsTr("ACCOUNTS")
+        }
+
+        Repeater {
+            model: root.syncedAccounts
+            delegate: RowLayout {
+                id: accountRow
+                required property var modelData
+                required property int index
+                readonly property var status: root.accountStatus(modelData)
+                objectName: "accountSync-" + index
+                Layout.fillWidth: true
+                spacing: Theme.spacingSM
+                Accessible.role: Accessible.StaticText
+                Accessible.name: (modelData.displayName || modelData.principal || "")
+                                 + ", " + status.text
+
+                StatusBadge {
+                    dotOnly: true
+                    tone: accountRow.status.tone
+                    text: accountRow.status.text
+                }
+                ColumnLayout {
+                    Layout.fillWidth: true
+                    spacing: 0
+                    Text {
+                        textFormat: Text.PlainText
+                        Layout.fillWidth: true
+                        text: accountRow.modelData.displayName
+                              || accountRow.modelData.principal || qsTr("Account")
+                        color: Theme.text
+                        elide: Text.ElideRight
+                        font.pixelSize: Theme.smallFontSize
+                    }
+                    Text {
+                        objectName: "accountSyncText-" + accountRow.index
+                        textFormat: Text.PlainText
+                        Layout.fillWidth: true
+                        text: accountRow.status.text
+                        color: accountRow.status.tone === "danger" ? Theme.danger
+                                                                   : Theme.mutedText
+                        elide: Text.ElideRight
+                        font.pixelSize: Theme.microFontSize
+                        HoverHandler { id: statusHover }
+                        ToolTip.visible: statusHover.hovered
+                                         && accountRow.status.detail.length > 0
+                        ToolTip.delay: 450
+                        ToolTip.text: accountRow.status.detail
+                    }
+                }
+                AppButton {
+                    objectName: "accountSyncAction-" + accountRow.index
+                    visible: accountRow.status.action.length > 0
+                    compact: true
+                    quiet: accountRow.status.action !== "reauthorize"
+                    text: accountRow.status.action === "reauthorize" ? qsTr("Sign in")
+                                                                    : qsTr("Retry")
+                    toolTipText: accountRow.status.action === "reauthorize"
+                                 ? qsTr("Authorize this account again")
+                                 : qsTr("Sync this account now")
+                    onClicked: {
+                        if (accountRow.status.action === "reauthorize")
+                            root.accountReauthorizeRequested(accountRow.modelData.id)
+                        else
+                            root.accountSyncRequested(accountRow.modelData.id)
+                    }
+                }
+            }
+        }
+
         Rectangle {
             Layout.fillWidth: true
             Layout.preferredHeight: 1
@@ -255,6 +361,30 @@ Rectangle {
         ColumnLayout {
             Layout.fillWidth: true
             spacing: 2
+
+            ItemDelegate {
+                objectName: "sidebarActivity"
+                visible: root.conflictCount + root.failedOperationCount > 0
+                Layout.fillWidth: true
+                implicitHeight: 38
+                onClicked: root.panelRequested(root.conflictCount > 0 ? "conflicts" : "sync")
+                Accessible.name: qsTr("Needs attention: %1 conflict(s), %2 stuck change(s)")
+                                 .arg(root.conflictCount).arg(root.failedOperationCount)
+                contentItem: RowLayout {
+                    Text { textFormat: Text.PlainText; text: "!"; color: Theme.warning }
+                    Text {
+                        textFormat: Text.PlainText
+                        Layout.fillWidth: true
+                        text: qsTr("Needs attention")
+                        color: Theme.text
+                        font.pixelSize: Theme.smallFontSize
+                    }
+                    StatusBadge {
+                        text: String(root.conflictCount + root.failedOperationCount)
+                        tone: root.conflictCount > 0 ? "danger" : "warning"
+                    }
+                }
+            }
 
             ItemDelegate {
                 Layout.fillWidth: true
@@ -294,6 +424,37 @@ Rectangle {
                 }
             }
         }
+    }
+
+    // {tone, text, detail, action} for an account row; action is
+    // "reauthorize", "sync" or empty.
+    function accountStatus(account) {
+        const sync = (accountSyncStates || {})[account.id] || {}
+        const state = String(sync.state || "")
+        const detail = String(sync.message || "")
+        if (state === "reauthorization_required"
+                || account.authStatus === "reauthorization_required")
+            return {"tone": "danger", "text": qsTr("Sign-in expired"),
+                    "detail": detail, "action": "reauthorize"}
+        if (state === "error")
+            return {"tone": "danger", "text": qsTr("Sync failed"), "detail": detail,
+                    "action": "sync"}
+        if (state === "syncing" || state === "refreshing")
+            return {"tone": "info", "text": qsTr("Syncing…"), "detail": "", "action": ""}
+        if (state === "stale")
+            return {"tone": "warning", "text": qsTr("Out of date"), "detail": detail,
+                    "action": "sync"}
+        if (account.enabled === false)
+            return {"tone": "neutral", "text": qsTr("Paused"), "detail": "", "action": ""}
+        const last = sync.lastSyncAt ? new Date(sync.lastSyncAt) : null
+        if (!last || isNaN(last.getTime()))
+            return {"tone": "neutral", "text": state.length > 0 ? qsTr("Not synced yet")
+                                                                : qsTr("Checking…"),
+                    "detail": "", "action": ""}
+        const when = sameDate(last, new Date())
+                ? Qt.formatTime(last, "HH:mm") : Qt.formatDate(last, "MMM d")
+        return {"tone": "success", "text": qsTr("Synced %1").arg(when),
+                "detail": Qt.formatDateTime(last, "yyyy-MM-dd HH:mm"), "action": ""}
     }
 
     function sameDate(first, second) {

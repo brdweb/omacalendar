@@ -69,6 +69,46 @@ QtObject {
         return Qt.rgba(colorValue.r, colorValue.g, colorValue.b, opacity)
     }
 
+    // ---- Contrast -----------------------------------------------------
+    // WCAG 2 relative luminance and contrast ratio.
+
+    function luminance(colorValue) {
+        function channel(value) {
+            return value <= 0.03928 ? value / 12.92 : Math.pow((value + 0.055) / 1.055, 2.4)
+        }
+        return 0.2126 * channel(colorValue.r) + 0.7152 * channel(colorValue.g)
+                + 0.0722 * channel(colorValue.b)
+    }
+
+    function contrastRatio(first, second) {
+        const a = luminance(first)
+        const b = luminance(second)
+        return (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05)
+    }
+
+    // The opaque colour of topColor drawn at opacity over bottomColor.
+    function blend(topColor, opacity, bottomColor) {
+        return Qt.rgba(topColor.r * opacity + bottomColor.r * (1 - opacity),
+                       topColor.g * opacity + bottomColor.g * (1 - opacity),
+                       topColor.b * opacity + bottomColor.b * (1 - opacity), 1)
+    }
+
+    // preferredColor when it reads at 4.5:1 on backgroundColor, otherwise the
+    // theme's text or background colour, whichever contrasts more, and black
+    // or white when neither does.
+    function readableText(backgroundColor, preferredColor) {
+        if (contrastRatio(preferredColor, backgroundColor) >= 4.5)
+            return preferredColor
+        const candidates = [text, background, Qt.rgba(0, 0, 0, 1), Qt.rgba(1, 1, 1, 1)]
+        let best = candidates[0]
+        for (let index = 1; index < candidates.length; ++index) {
+            if (contrastRatio(candidates[index], backgroundColor)
+                    > contrastRatio(best, backgroundColor))
+                best = candidates[index]
+        }
+        return best
+    }
+
     function timePattern(timeFormat) {
         if (timeFormat === "24h")
             return "HH:mm"

@@ -40,9 +40,22 @@ Control {
     signal activated(var eventData)
     signal rescheduleRequested(var eventData, int startMinute,
                                int durationMinutes, int dayOffset)
+    // Dropping above allDayDropY (in the parent's coordinates, typically the
+    // top of the visible timeline) asks to make the event all-day instead.
+    property real allDayDropY: NaN
+    signal allDayRequested(var eventData, int dayOffset)
+    readonly property bool overAllDayArea: moveArea.pressed && editable
+                                           && !isNaN(allDayDropY)
+                                           && y + pressY + moveDelta < allDayDropY
 
     readonly property color eventColor: eventData.calendarColor
                                         || eventData.color || Theme.accent
+    readonly property real fillOpacity: selected ? 0.34 : hovered ? 0.28 : 0.21
+    // Text colours are picked against the tinted fill so a very light or
+    // very dark calendar colour stays readable.
+    readonly property color fillColor: Theme.blend(eventColor, fillOpacity, Theme.background)
+    readonly property color summaryColor: Theme.readableText(fillColor, Theme.text)
+    readonly property color detailColor: Theme.readableText(fillColor, Theme.mutedText)
     readonly property string operationState: String(eventData.operationState
                                                     || eventData.syncState || "")
     readonly property string stateText: {
@@ -107,8 +120,7 @@ Control {
             width: parent.width
             height: root.visualHeight
             radius: Theme.radiusSM
-            color: Theme.alpha(root.eventColor,
-                               root.selected ? 0.34 : root.hovered ? 0.28 : 0.21)
+            color: Theme.alpha(root.eventColor, root.fillOpacity)
             border.width: root.activeFocus || root.selected ? 2 : 1
             border.color: root.activeFocus || root.selected ? Theme.focus
                                            : Theme.alpha(root.eventColor, 0.62)
@@ -156,7 +168,7 @@ Control {
                     objectName: "timelineEventSummary"
                     Layout.fillWidth: true
                     text: root.eventData.summary || qsTr("Untitled event")
-                    color: Theme.text
+                    color: root.summaryColor
                     font.pixelSize: Theme.smallFontSize
                     font.weight: Font.DemiBold
                     elide: Text.ElideRight
@@ -167,7 +179,7 @@ Control {
                     visible: root.visualHeight >= 43
                     Layout.fillWidth: true
                     text: root.eventData.location || ""
-                    color: Theme.mutedText
+                    color: root.detailColor
                     font.pixelSize: Theme.microFontSize
                     elide: Text.ElideRight
                 }
@@ -178,7 +190,7 @@ Control {
                     text: root.stateLabel
                     color: root.stateText === "Conflict" || root.stateText === "Failed"
                           ? Theme.danger
-                          : Theme.mutedText
+                          : root.detailColor
                     font.pixelSize: Theme.microFontSize
                     font.weight: Font.DemiBold
                     elide: Text.ElideRight
@@ -283,6 +295,14 @@ Control {
         moveDeltaX = horizontalDelta
         moveDelta = verticalDelta
         const click = Math.abs(horizontalDelta) < 4 && Math.abs(verticalDelta) < 4
+        if (!click && editable && !isNaN(allDayDropY)
+                && y + pressY + verticalDelta < allDayDropY) {
+            const allDayOffset = snappedDayOffset
+            moveDeltaX = 0
+            moveDelta = 0
+            allDayRequested(eventData, allDayOffset)
+            return
+        }
         const absoluteStart = startMinute + snappedMoveMinutes
         const dayOffset = snappedDayOffset + Math.floor(absoluteStart / 1440)
         const nextStart = normalizedMinute(absoluteStart)

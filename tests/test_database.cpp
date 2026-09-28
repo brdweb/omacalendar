@@ -158,6 +158,61 @@ class DatabaseTest final : public QObject {
     QCOMPARE(db.setting("missing", 123, &error).toInt(), 123);
   }
 
+  void contactSuggestionsComeFromCachedGuests() {
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    Database db;
+    QString error;
+    QVERIFY2(db.open(directory.filePath(QStringLiteral("store.sqlite")), &error),
+             qPrintable(error));
+    const Account account =
+        makeAccount(QStringLiteral("acc-contacts"), QStringLiteral("Contacts"));
+    QVERIFY2(db.upsertAccount(account, &error), qPrintable(error));
+    const Calendar calendar = makeCalendar(QStringLiteral("cal-contacts"), account.id);
+    QVERIFY2(db.upsertCalendar(calendar, &error), qPrintable(error));
+
+    const auto guest = [](const QString& email, const QString& name) {
+      return QJsonObject{{QStringLiteral("email"), email},
+                         {QStringLiteral("displayName"), name}};
+    };
+    for (int index = 0; index < 3; ++index) {
+      Event event =
+          makeRemoteEvent(calendar.id, QStringLiteral("meeting-%1").arg(index), index);
+      event.organizer = guest(QStringLiteral("Sam@Example.com"), QStringLiteral("Sam"));
+      event.attendees = QJsonArray{
+          guest(QStringLiteral("sam@example.com"), {}),
+          guest(QStringLiteral("alex@example.com"), QStringLiteral("Alex Rivera"))};
+      if (index == 0) {
+        event.attendees.append(
+            guest(QStringLiteral("sally_50%@example.com"), QStringLiteral("Sally")));
+      }
+      QVERIFY2(db.applyRemoteEvent(event, &error), qPrintable(error));
+    }
+    Event removed = makeRemoteEvent(calendar.id, QStringLiteral("removed"), 5);
+    removed.attendees = QJsonArray{guest(QStringLiteral("ghost@example.com"), {})};
+    removed.deleted = true;
+    QVERIFY2(db.applyRemoteEvent(removed, &error), qPrintable(error));
+
+    const QJsonArray byPrefix = db.contactSuggestions(QStringLiteral("SA"), 8, &error);
+    QVERIFY2(error.isEmpty(), qPrintable(error));
+    QCOMPARE(byPrefix.size(), 2);
+    // Case-folded, de-duplicated and ordered by use.
+    QCOMPARE(byPrefix.at(0).toObject().value(QStringLiteral("email")).toString(),
+             QStringLiteral("sam@example.com"));
+    QCOMPARE(byPrefix.at(1).toObject().value(QStringLiteral("email")).toString(),
+             QStringLiteral("sally_50%@example.com"));
+
+    const QJsonArray byName = db.contactSuggestions(QStringLiteral("river"), 8, &error);
+    QCOMPARE(byName.size(), 1);
+    QCOMPARE(byName.at(0).toObject().value(QStringLiteral("displayName")).toString(),
+             QStringLiteral("Alex Rivera"));
+    // LIKE wildcards in the typed text match literally.
+    QCOMPARE(db.contactSuggestions(QStringLiteral("sally_50%"), 8, &error).size(), 1);
+    QCOMPARE(db.contactSuggestions(QStringLiteral("s%"), 8, &error).size(), 0);
+    QCOMPARE(db.contactSuggestions(QStringLiteral("ghost"), 8, &error).size(), 0);
+    QCOMPARE(db.contactSuggestions(QStringLiteral("a"), 1, &error).size(), 1);
+  }
+
   void connectionUsesTunedPragmas() {
     QTemporaryDir directory;
     QVERIFY(directory.isValid());

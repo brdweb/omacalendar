@@ -205,6 +205,18 @@ target_include_directories(omacalendar-presentation-list-model-test
 add_test(NAME presentation_list_model_test
          COMMAND omacalendar-presentation-list-model-test)
 
+add_executable(omacalendar-quickadd-test test_quickadd.cpp)
+target_link_libraries(omacalendar-quickadd-test
+  PRIVATE
+    Qt6::Test
+    Qt6::Core
+    omacalendar_core
+)
+target_include_directories(omacalendar-quickadd-test
+  PRIVATE ${CMAKE_SOURCE_DIR}/src
+)
+add_test(NAME quickadd_test COMMAND omacalendar-quickadd-test)
+
 add_executable(omacalendar-themebridge-test
   test_themebridge.cpp
   ${CMAKE_SOURCE_DIR}/src/app/themebridge.cpp

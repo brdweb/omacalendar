@@ -23,6 +23,10 @@ class AppController final : public QObject {
   Q_PROPERTY(QString statusText READ statusText NOTIFY statusTextChanged)
   Q_PROPERTY(QString lastError READ lastError NOTIFY lastErrorChanged)
   Q_PROPERTY(QVariantList accounts READ accounts NOTIFY accountsChanged)
+  // Account id -> {state, message, errorCode, lastSyncAt} for provider-backed
+  // accounts, from sync.statusChanged and sync.status.
+  Q_PROPERTY(QVariantMap accountSyncStates READ accountSyncStates NOTIFY
+                 accountSyncStatesChanged)
   Q_PROPERTY(QVariantList calendars READ calendars NOTIFY calendarsChanged)
   Q_PROPERTY(QVariantList events READ events NOTIFY eventsChanged)
   Q_PROPERTY(QVariantList calendarSets READ calendarSets NOTIFY calendarSetsChanged)
@@ -67,6 +71,7 @@ class AppController final : public QObject {
   [[nodiscard]] QString statusText() const;
   [[nodiscard]] QString lastError() const;
   [[nodiscard]] QVariantList accounts() const;
+  [[nodiscard]] QVariantMap accountSyncStates() const;
   [[nodiscard]] QVariantList calendars() const;
   [[nodiscard]] QVariantList events() const;
   [[nodiscard]] QVariantList calendarSets() const;
@@ -101,6 +106,13 @@ class AppController final : public QObject {
                              const QVariantMap& mutationOptions = {});
   Q_INVOKABLE void requestDeleteEvent(const QString& eventId,
                                       const QVariantMap& mutationOptions = {});
+  // Asks for guest addresses seen in cached events; answers with
+  // contactSuggestionsReady. Quietly does nothing while disconnected.
+  Q_INVOKABLE void suggestContacts(const QString& prefix);
+  // Reads one line of quick-add text into an editor draft: title, location,
+  // recurrenceRule, date and endDate (yyyy-MM-dd, empty when not given),
+  // allDay, startMinute (-1 when not given) and durationMinutes (0 likewise).
+  Q_INVOKABLE [[nodiscard]] QVariantMap parseQuickAdd(const QString& text) const;
   Q_INVOKABLE void searchEvents(const QString& query, const QVariantMap& filters = {});
   Q_INVOKABLE void respondToInvitation(const QString& eventId, const QString& response,
                                        const QString& recurrenceScope,
@@ -172,6 +184,7 @@ class AppController final : public QObject {
   void statusTextChanged();
   void lastErrorChanged();
   void accountsChanged();
+  void accountSyncStatesChanged();
   void calendarsChanged();
   void eventsChanged();
   void calendarSetsChanged();
@@ -186,6 +199,7 @@ class AppController final : public QObject {
   void selectedDateChanged();
   void googleOAuthConfiguredChanged();
   void eventSaved();
+  void contactSuggestionsReady(const QString& prefix, const QVariantList& contacts);
   void accountSetupStarted();
   void icsImportPreviewReady(const QVariantMap& preview);
   void icsImportCompleted(const QVariantMap& result);
@@ -220,6 +234,8 @@ class AppController final : public QObject {
   void scheduleRefresh(int parts);
   [[nodiscard]] static int refreshPartsForNotification(const QString& event);
   void loadPreferences();
+  void setAccountSyncState(const QString& accountId, const QJsonObject& status);
+  void refreshAccountSyncStates(bool icsOnly);
   void loadPreferencesIndividually();
   void markPreferencesLoaded();
   [[nodiscard]] static QStringList preferenceKeys();
@@ -249,6 +265,7 @@ class AppController final : public QObject {
   int m_pendingRefreshParts = 0;
   bool m_settingsGetManySupported = true;
   QVariantList m_accounts;
+  QVariantMap m_accountSyncStates;
   QVariantList m_calendars;
   QVariantList m_events;
   QVariantList m_calendarSets;

@@ -92,6 +92,8 @@ class Daemon final : public QObject {
   [[nodiscard]] QJsonValue onConflictsResolve(const QJsonObject& params,
                                               ipc::Error* error);
   [[nodiscard]] QJsonValue onSettingsGet(const QJsonObject& params, ipc::Error* error);
+  [[nodiscard]] QJsonValue onContactsSuggest(const QJsonObject& params,
+                                             ipc::Error* error) const;
   [[nodiscard]] QJsonValue onSettingsGetMany(const QJsonObject& params,
                                              ipc::Error* error);
   [[nodiscard]] QJsonValue settingValue(const QString& key, const QJsonValue& fallback,

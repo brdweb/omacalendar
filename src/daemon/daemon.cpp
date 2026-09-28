@@ -584,6 +584,10 @@ void Daemon::registerHandlers() {
                            [this](const QJsonObject& params, ipc::Error* error) {
                              return onSettingsGet(params, error);
                            });
+  m_router.registerHandler(QStringLiteral("contacts.suggest"),
+                           [this](const QJsonObject& params, ipc::Error* error) {
+                             return onContactsSuggest(params, error);
+                           });
   m_router.registerHandler(QStringLiteral("settings.getMany"),
                            [this](const QJsonObject& params, ipc::Error* error) {
                              return onSettingsGetMany(params, error);
@@ -3022,6 +3026,30 @@ QJsonValue Daemon::onSettingsGet(const QJsonObject& params, ipc::Error* error) {
       {QStringLiteral("key"), key},
       {QStringLiteral("value"), value},
   };
+}
+
+QJsonValue Daemon::onContactsSuggest(const QJsonObject& params,
+                                     ipc::Error* error) const {
+  const QString prefix = params.value(QStringLiteral("prefix")).toString().trimmed();
+  if (!params.value(QStringLiteral("prefix")).isString() || prefix.isEmpty() ||
+      prefix.size() > 200) {
+    if (error != nullptr) {
+      *error = {QStringLiteral("invalid_params"),
+                QStringLiteral("prefix must be a non-empty string"), false};
+    }
+    return {};
+  }
+  const int limit = qBound(1, params.value(QStringLiteral("limit")).toInt(8), 25);
+  QString dbError;
+  const QJsonArray contacts = m_database.contactSuggestions(prefix, limit, &dbError);
+  if (!dbError.isEmpty()) {
+    if (error != nullptr) {
+      *error = {QStringLiteral("database_error"), dbError, false};
+    }
+    return {};
+  }
+  return QJsonObject{{QStringLiteral("prefix"), prefix},
+                     {QStringLiteral("contacts"), contacts}};
 }
 
 QJsonValue Daemon::onSettingsGetMany(const QJsonObject& params, ipc::Error* error) {

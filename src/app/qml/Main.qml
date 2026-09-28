@@ -10,6 +10,7 @@ import "components"
 import "views"
 import "CalendarVisibility.js" as CalendarVisibility
 import "DateRange.js" as DateRange
+import "EventIndex.js" as EventIndex
 
 ApplicationWindow {
     id: window
@@ -62,6 +63,12 @@ ApplicationWindow {
     property var pendingMoveOptions: ({})
     property var pendingExportScope: ({})
     property string pendingGoogleDisplayName: ""
+    // Timeline scroll positions survive switching away from a view; negative
+    // lets the view choose (the current time today, else the work day).
+    property real dayScrollY: -1
+    property real weekScrollY: -1
+    // Days the agenda lists; it grows as the user scrolls past the end.
+    property int agendaDayCount: 31
 
     readonly property var decoratedEvents: decorateEvents(App.events)
     readonly property var visibleEvents: filterVisibleEvents(decoratedEvents)
@@ -94,6 +101,9 @@ ApplicationWindow {
     readonly property int firstDayOfWeek:
         configuredFirstDayOfWeek === 0
         ? Number(Qt.locale().firstDayOfWeek) : configuredFirstDayOfWeek
+    // Stored settings round-trip as JSON, so accept a boolean or its text.
+    readonly property bool showWeekNumbers: preferences.showWeekNumbers === true
+                                            || preferences.showWeekNumbers === "true"
     readonly property int currentViewIndex: viewIndex(currentView)
     readonly property var latestSyncDate: latestCalendarSync()
 
@@ -269,6 +279,13 @@ ApplicationWindow {
             }
 
             AppButton {
+                text: qsTr("Quick add")
+                quiet: true
+                toolTipText: qsTr("Describe an event in one line  Q")
+                onClicked: quickAdd.openEmpty()
+            }
+
+            AppButton {
                 text: qsTr("New event")
                 iconText: "+"
                 primary: true
@@ -296,6 +313,7 @@ ApplicationWindow {
             monthDate: window.visibleMonth
             calendars: window.sidebarCalendars
             calendarSets: window.calendarSets
+            showWeekNumbers: window.showWeekNumbers
             calendarsModel: null
             calendarSetsModel: window.appValue("calendarSetsModel", null)
             activeSetId: window.activeCalendarSetId
@@ -323,6 +341,11 @@ ApplicationWindow {
                                                window.setCalendarVisible(calendarId, visible)
             onPanelRequested: panelName => window.openActivity(panelName)
             onSettingsRequested: settingsDrawer.open()
+            accounts: window.appList("accounts")
+            accountSyncStates: window.appValue("accountSyncStates", ({}))
+            onAccountReauthorizeRequested: accountId => window.callApp("reauthorizeAccount",
+                                                                       [accountId])
+            onAccountSyncRequested: accountId => window.callApp("syncAccount", [accountId])
         }
 
         Rectangle {
@@ -410,6 +433,8 @@ ApplicationWindow {
                             sourceComponent: Component {
                                 AgendaView {
                                     currentDate: App.selectedDate
+                                    dayCount: window.agendaDayCount
+                                    onMoreDaysRequested: window.extendAgenda()
                                     events: window.visibleEvents
                                     selectedEventReference: window.selectedEventReference
                                     timeFormat: String(window.preferences.timeFormat || "system")
@@ -425,6 +450,8 @@ ApplicationWindow {
                             sourceComponent: Component {
                                 DayView {
                                     currentDate: App.selectedDate
+                                    savedScrollY: window.dayScrollY
+                                    onScrollPositionChanged: contentY => window.dayScrollY = contentY
                                     events: window.visibleEvents
                                     selectedEventReference: window.selectedEventReference
                                     workDayStart: Number(window.preferences.workDayStart || 8)
@@ -453,9 +480,12 @@ ApplicationWindow {
                             sourceComponent: Component {
                                 WeekView {
                                     currentDate: App.selectedDate
+                                    savedScrollY: window.weekScrollY
+                                    onScrollPositionChanged: contentY => window.weekScrollY = contentY
                                     events: window.visibleEvents
                                     selectedEventReference: window.selectedEventReference
                                     firstDayOfWeek: window.firstDayOfWeek
+                                    showWeekNumbers: window.showWeekNumbers
                                     workDayStart: Number(window.preferences.workDayStart || 8)
                                     workDayEnd: Number(window.preferences.workDayEnd || 18)
                                     defaultDurationMinutes:
@@ -477,6 +507,9 @@ ApplicationWindow {
                                     onEventDateChanged: (value, dateValue) =>
                                                             window.moveEventToDate(value,
                                                                                    dateValue)
+                                    onEventAllDayRequested: (value, dateValue) =>
+                                                                window.moveEventToAllDay(value,
+                                                                                         dateValue)
                                 }
                             }
                         }
@@ -489,6 +522,7 @@ ApplicationWindow {
                                     events: window.visibleEvents
                                     selectedEventReference: window.selectedEventReference
                                     firstDayOfWeek: window.firstDayOfWeek
+                                    showWeekNumbers: window.showWeekNumbers
                                     timeFormat: String(window.preferences.timeFormat || "system")
                                     onEventActivated: value => window.openEvent(value)
                                     onDateSelected: dateValue => window.selectDate(dateValue)
@@ -592,6 +626,11 @@ ApplicationWindow {
         onJoinRequested: url => App.openExternalEventUrl(url)
     }
 
+    QuickAddDialog {
+        id: quickAdd
+        onDraftAccepted: draft => editor.openDraft(draft, App.selectedDate)
+    }
+
     MutationConfirmationDialog {
         id: mutationConfirmation
         onConfirmed: (context, options) => {
@@ -637,361 +676,8 @@ ApplicationWindow {
         }
     }
 
-    Dialog {
+    ConflictMergeDialog {
         id: conflictMergeDialog
-        property var conflictData: ({})
-        property var sourceSnapshot: ({})
-        property string validationError: ""
-
-        anchors.centerIn: Overlay.overlay
-        width: Math.min(680, Overlay.overlay ? Overlay.overlay.width - 48 : 680)
-        height: Math.min(760, Overlay.overlay ? Overlay.overlay.height - 48 : 760)
-        modal: true
-        title: qsTr("Merge conflicting event")
-        standardButtons: Dialog.Cancel
-        closePolicy: Popup.CloseOnEscape
-
-        function openFor(value) {
-            conflictData = value || ({})
-            const local = conflictData.localSnapshot || ({})
-            sourceVersionBox.currentIndex = Object.keys(local).length > 0 ? 0 : 1
-            loadSnapshot()
-            open()
-            mergeTitleField.forceActiveFocus()
-        }
-
-        function selectedSnapshot() {
-            if (sourceVersionBox.currentIndex === 0)
-                return conflictData.localSnapshot || ({})
-            return conflictData.remoteSnapshot || ({})
-        }
-
-        function wallText(value, endValue) {
-            if (value.allDay)
-                return String(endValue ? value.endDate : value.startDate)
-            const utcText = String(endValue ? value.endUtc : value.startUtc)
-            if (value.timeKind === "floating")
-                return utcText.slice(0, 23)
-            return App.utcToWallTime(utcText, value.startTimeZone || "")
-        }
-
-        function systemTimeZone() {
-            try {
-                return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC"
-            } catch (error) {
-                return "UTC"
-            }
-        }
-
-        function loadSnapshot() {
-            sourceSnapshot = Object.assign({}, selectedSnapshot())
-            validationError = ""
-            mergeTitleField.text = sourceSnapshot.summary || ""
-            mergeLocationField.text = sourceSnapshot.location || ""
-            mergeUrlField.text = sourceSnapshot.url || ""
-            mergeNotesField.text = sourceSnapshot.description || ""
-            mergeAttendeesField.text = attendeeText(sourceSnapshot.attendees || [])
-            mergeAllDay.checked = sourceSnapshot.allDay === true
-            mergeTimeKind.currentIndex = sourceSnapshot.timeKind === "floating" ? 1 : 0
-            mergeTimeZoneField.text = sourceSnapshot.startTimeZone
-                    || systemTimeZone()
-            const startWall = wallText(sourceSnapshot, false)
-            const endWall = wallText(sourceSnapshot, true)
-            mergeStartDate.text = String(startWall).slice(0, 10)
-            mergeStartTime.text = String(startWall).slice(11, 16)
-            if (sourceSnapshot.allDay) {
-                const exclusiveEnd = new Date(String(endWall) + "T00:00:00")
-                exclusiveEnd.setDate(exclusiveEnd.getDate() - 1)
-                mergeEndDate.text = Qt.formatDate(exclusiveEnd, "yyyy-MM-dd")
-            } else {
-                mergeEndDate.text = String(endWall).slice(0, 10)
-            }
-            mergeEndTime.text = String(endWall).slice(11, 16)
-            mergeAvailability.currentIndex = sourceSnapshot.transparency
-                    === "transparent" ? 1 : 0
-            mergeVisibility.currentIndex = visibilityIndex(
-                        sourceSnapshot.visibility || "default")
-            mergeRecurrenceField.text = sourceSnapshot.recurrenceRule || ""
-        }
-
-        function attendeeText(values) {
-            const result = []
-            for (let index = 0; index < values.length; ++index) {
-                const attendee = values[index]
-                result.push(typeof attendee === "string"
-                            ? attendee : String(attendee.email || ""))
-            }
-            return result.filter(function(value) { return value.length > 0 }).join(", ")
-        }
-
-        function parsedAttendees() {
-            const values = mergeAttendeesField.text.split(/[\n,;]/)
-            const result = []
-            const existing = sourceSnapshot.attendees || []
-            for (let index = 0; index < values.length; ++index) {
-                const email = values[index].trim()
-                if (email.length === 0)
-                    continue
-                let preserved = null
-                for (let candidateIndex = 0; candidateIndex < existing.length;
-                     ++candidateIndex) {
-                    const candidate = existing[candidateIndex]
-                    if (String(candidate.email || "").toLowerCase()
-                            === email.toLowerCase()) {
-                        preserved = Object.assign({}, candidate)
-                        break
-                    }
-                }
-                if (preserved) {
-                    preserved.email = email
-                    result.push(preserved)
-                } else {
-                    result.push({"email": email})
-                }
-            }
-            return result
-        }
-
-        function visibilityIndex(value) {
-            const values = ["default", "public", "private", "confidential"]
-            const index = values.indexOf(String(value))
-            return index < 0 ? 0 : index
-        }
-
-        function floatingIso(dateText, timeText) {
-            return dateText + "T" + timeText + ":00.000Z"
-        }
-
-        function submitMerge() {
-            validationError = ""
-            if (!mergeTitleField.text.trim()) {
-                validationError = qsTr("Add an event title.")
-                return
-            }
-            const start = new Date(mergeStartDate.text + "T"
-                                   + (mergeAllDay.checked ? "00:00" : mergeStartTime.text))
-            const end = new Date(mergeEndDate.text + "T"
-                                 + (mergeAllDay.checked ? "00:00" : mergeEndTime.text))
-            if (isNaN(start.getTime()) || isNaN(end.getTime()) || end < start
-                    || (!mergeAllDay.checked && end <= start)) {
-                validationError = qsTr("Enter a valid end after the start.")
-                return
-            }
-            if (!mergeAllDay.checked && mergeTimeKind.currentValue !== "floating"
-                    && !App.isValidTimeZone(mergeTimeZoneField.text.trim())) {
-                validationError = qsTr("Enter a valid IANA time zone.")
-                return
-            }
-
-            const merged = Object.assign({}, sourceSnapshot)
-            merged.summary = mergeTitleField.text.trim()
-            merged.location = mergeLocationField.text.trim()
-            merged.url = mergeUrlField.text.trim()
-            merged.description = mergeNotesField.text
-            merged.attendees = parsedAttendees()
-            merged.allDay = mergeAllDay.checked
-            merged.timeKind = mergeAllDay.checked ? "all_day"
-                                                  : mergeTimeKind.currentValue
-            merged.transparency = mergeAvailability.currentValue
-            merged.visibility = mergeVisibility.currentValue
-            merged.recurrenceRule = mergeRecurrenceField.text.trim()
-            if (mergeAllDay.checked) {
-                const exclusiveEnd = new Date(mergeEndDate.text + "T00:00:00")
-                exclusiveEnd.setDate(exclusiveEnd.getDate() + 1)
-                merged.startDate = mergeStartDate.text
-                merged.endDate = Qt.formatDate(exclusiveEnd, "yyyy-MM-dd")
-                merged.startUtc = ""
-                merged.endUtc = ""
-                merged.startTimeZone = ""
-                merged.endTimeZone = ""
-            } else {
-                merged.startTimeZone = mergeTimeKind.currentValue === "floating"
-                        ? "" : mergeTimeZoneField.text.trim()
-                merged.endTimeZone = merged.startTimeZone
-                merged.startUtc = mergeTimeKind.currentValue === "floating"
-                        ? floatingIso(mergeStartDate.text, mergeStartTime.text)
-                        : App.wallTimeToUtc(mergeStartDate.text,
-                                            mergeStartTime.text,
-                                            merged.startTimeZone)
-                merged.endUtc = mergeTimeKind.currentValue === "floating"
-                        ? floatingIso(mergeEndDate.text, mergeEndTime.text)
-                        : App.wallTimeToUtc(mergeEndDate.text,
-                                            mergeEndTime.text,
-                                            merged.endTimeZone)
-                if (!merged.startUtc || !merged.endUtc) {
-                    validationError = qsTr("That wall time does not exist in the selected time zone.")
-                    return
-                }
-                merged.startDate = ""
-                merged.endDate = ""
-            }
-            App.resolveConflict(String(conflictData.id), "merge", merged)
-            close()
-        }
-
-        contentItem: ScrollView {
-            clip: true
-            contentWidth: availableWidth
-
-            ColumnLayout {
-                width: conflictMergeDialog.availableWidth
-                spacing: Theme.spacingMD
-
-                Text {
-                    textFormat: Text.PlainText
-                    Layout.fillWidth: true
-                    text: qsTr("Start from either saved version, then edit the final event. Provider identity and unsupported fields are preserved.")
-                    color: Theme.mutedText
-                    wrapMode: Text.Wrap
-                    font.pixelSize: Theme.smallFontSize
-                }
-                AppComboBox {
-                    id: sourceVersionBox
-                    Layout.fillWidth: true
-                    model: [qsTr("Start with my version"), qsTr("Start with remote version")]
-                    Accessible.name: qsTr("Conflict merge starting version")
-                    onActivated: conflictMergeDialog.loadSnapshot()
-                }
-                AppTextField {
-                    id: mergeTitleField
-                    Layout.fillWidth: true
-                    placeholderText: qsTr("Title")
-                    accessibleName: qsTr("Merged event title")
-                }
-                RowLayout {
-                    Layout.fillWidth: true
-                    AppCheckBox {
-                        id: mergeAllDay
-                        text: qsTr("All day")
-                        Accessible.name: text
-                    }
-                    AppComboBox {
-                        id: mergeTimeKind
-                        Layout.fillWidth: true
-                        visible: !mergeAllDay.checked
-                        model: [{"text": qsTr("Zoned time"), "value": "zoned"},
-                                {"text": qsTr("Floating time"), "value": "floating"}]
-                        textRole: "text"
-                        valueRole: "value"
-                        Accessible.name: qsTr("Merged event time type")
-                    }
-                }
-                GridLayout {
-                    Layout.fillWidth: true
-                    columns: 2
-                    columnSpacing: Theme.spacingSM
-                    rowSpacing: Theme.spacingSM
-                    AppTextField {
-                        id: mergeStartDate
-                        Layout.fillWidth: true
-                        placeholderText: qsTr("Start date · YYYY-MM-DD")
-                        accessibleName: qsTr("Merged event start date")
-                    }
-                    AppTextField {
-                        id: mergeStartTime
-                        Layout.fillWidth: true
-                        visible: !mergeAllDay.checked
-                        placeholderText: qsTr("Start time · HH:MM")
-                        accessibleName: qsTr("Merged event start time")
-                    }
-                    AppTextField {
-                        id: mergeEndDate
-                        Layout.fillWidth: true
-                        placeholderText: qsTr("End date · YYYY-MM-DD")
-                        accessibleName: qsTr("Merged event end date")
-                    }
-                    AppTextField {
-                        id: mergeEndTime
-                        Layout.fillWidth: true
-                        visible: !mergeAllDay.checked
-                        placeholderText: qsTr("End time · HH:MM")
-                        accessibleName: qsTr("Merged event end time")
-                    }
-                }
-                AppTextField {
-                    id: mergeTimeZoneField
-                    Layout.fillWidth: true
-                    visible: !mergeAllDay.checked
-                             && mergeTimeKind.currentValue !== "floating"
-                    placeholderText: qsTr("IANA time zone · Europe/London")
-                    accessibleName: qsTr("Merged event time zone")
-                }
-                AppTextField {
-                    id: mergeLocationField
-                    Layout.fillWidth: true
-                    placeholderText: qsTr("Location")
-                    accessibleName: qsTr("Merged event location")
-                }
-                AppTextField {
-                    id: mergeUrlField
-                    Layout.fillWidth: true
-                    placeholderText: qsTr("URL or meeting link")
-                    accessibleName: qsTr("Merged event URL")
-                }
-                AppTextField {
-                    id: mergeAttendeesField
-                    Layout.fillWidth: true
-                    placeholderText: qsTr("Guest emails, separated by commas")
-                    accessibleName: qsTr("Merged event guests")
-                }
-                RowLayout {
-                    Layout.fillWidth: true
-                    AppComboBox {
-                        id: mergeAvailability
-                        Layout.fillWidth: true
-                        model: [{"text": qsTr("Busy"), "value": "opaque"},
-                                {"text": qsTr("Free"), "value": "transparent"}]
-                        textRole: "text"
-                        valueRole: "value"
-                        Accessible.name: qsTr("Merged event availability")
-                    }
-                    AppComboBox {
-                        id: mergeVisibility
-                        Layout.fillWidth: true
-                        model: [{"text": qsTr("Default visibility"), "value": "default"},
-                                {"text": qsTr("Public"), "value": "public"},
-                                {"text": qsTr("Private"), "value": "private"},
-                                {"text": qsTr("Confidential"), "value": "confidential"}]
-                        textRole: "text"
-                        valueRole: "value"
-                        Accessible.name: qsTr("Merged event visibility")
-                    }
-                }
-                AppTextField {
-                    id: mergeRecurrenceField
-                    Layout.fillWidth: true
-                    placeholderText: qsTr("Recurrence rule, for example FREQ=WEEKLY")
-                    accessibleName: qsTr("Merged event recurrence rule")
-                }
-                TextArea {
-                    id: mergeNotesField
-                    Layout.fillWidth: true
-                    Layout.preferredHeight: 100
-                    placeholderText: qsTr("Notes")
-                    color: Theme.text
-                    wrapMode: TextEdit.Wrap
-                    Accessible.name: qsTr("Merged event notes")
-                }
-                Text {
-                    textFormat: Text.PlainText
-                    visible: conflictMergeDialog.validationError.length > 0
-                    Layout.fillWidth: true
-                    text: conflictMergeDialog.validationError
-                    color: Theme.danger
-                    wrapMode: Text.Wrap
-                    font.pixelSize: Theme.smallFontSize
-                }
-                RowLayout {
-                    Layout.fillWidth: true
-                    Item { Layout.fillWidth: true }
-                    AppButton {
-                        text: qsTr("Apply merged event")
-                        primary: true
-                        onClicked: conflictMergeDialog.submitMerge()
-                    }
-                }
-            }
-        }
     }
 
     ActivityPanel {
@@ -1130,189 +816,23 @@ ApplicationWindow {
         onAccepted: window.openIcsImport(selectedFile)
     }
 
-    Dialog {
+    IcsImportDialog {
         id: icsImportDialog
-        property url fileUrl
-        property var preview: ({})
-        anchors.centerIn: Overlay.overlay
-        width: Math.min(580, Overlay.overlay ? Overlay.overlay.width - 48 : 580)
-        modal: true
-        title: qsTr("Import iCalendar events")
-        standardButtons: Dialog.Cancel
-
-        contentItem: ColumnLayout {
-            spacing: Theme.spacingMD
-            Text {
-                textFormat: Text.PlainText
-                Layout.fillWidth: true
-                text: window.localFileName(icsImportDialog.fileUrl)
-                color: Theme.text
-                font.weight: Font.DemiBold
-                elide: Text.ElideMiddle
-            }
-            AppComboBox {
-                id: importCalendarBox
-                Layout.fillWidth: true
-                model: window.writableCalendars
-                textRole: "name"
-                valueRole: "id"
-                Accessible.name: qsTr("Import destination calendar")
-            }
-            AppComboBox {
-                id: duplicatePolicyBox
-                Layout.fillWidth: true
-                model: [
-                    {"text": qsTr("Skip matching UIDs"), "value": "skip"},
-                    {"text": qsTr("Import duplicates as copies"), "value": "copy"},
-                    {"text": qsTr("Replace matching UIDs"), "value": "replace"}
-                ]
-                textRole: "text"
-                valueRole: "value"
-                Accessible.name: qsTr("Duplicate import handling")
-            }
-            Text {
-                textFormat: Text.PlainText
-                Layout.fillWidth: true
-                text: icsImportDialog.preview.count === undefined
-                      ? qsTr("Preview the file before importing.")
-                      : Number(icsImportDialog.preview.count) + qsTr(" event(s), ")
-                        + Number(icsImportDialog.preview.duplicateCount || 0)
-                        + qsTr(" matching UID(s)")
-                color: Theme.mutedText
-                font.pixelSize: Theme.smallFontSize
-            }
-            ColumnLayout {
-                Layout.fillWidth: true
-                Repeater {
-                    model: (icsImportDialog.preview.events || []).slice(0, 6)
-                    delegate: Text {
-                        textFormat: Text.PlainText
-                        required property var modelData
-                        Layout.fillWidth: true
-                        text: "• " + (modelData.event.summary || qsTr("Untitled event"))
-                              + (modelData.duplicate ? qsTr("  ·  duplicate") : "")
-                        color: modelData.duplicate ? Theme.warning : Theme.text
-                        font.pixelSize: Theme.smallFontSize
-                        elide: Text.ElideRight
-                    }
-                }
-            }
-            RowLayout {
-                Layout.fillWidth: true
-                Item { Layout.fillWidth: true }
-                AppButton {
-                    text: qsTr("Preview")
-                    enabled: importCalendarBox.currentIndex >= 0
-                    onClicked: App.previewIcsImport(icsImportDialog.fileUrl,
-                                                    importCalendarBox.currentValue)
-                }
-                AppButton {
-                    text: qsTr("Import")
-                    primary: true
-                    enabled: Number(icsImportDialog.preview.count || 0) > 0
-                    onClicked: App.commitIcsImport(icsImportDialog.fileUrl,
-                                                   importCalendarBox.currentValue,
-                                                   duplicatePolicyBox.currentValue)
-                }
-            }
-        }
+        writableCalendars: window.writableCalendars
     }
 
-    Dialog {
+    IcsExportDialog {
         id: icsExportDialog
-        anchors.centerIn: Overlay.overlay
-        width: Math.min(520, Overlay.overlay ? Overlay.overlay.width - 48 : 520)
-        modal: true
-        title: qsTr("Export iCalendar events")
-        standardButtons: Dialog.Cancel
-
-        function openForSelection() {
-            exportScopeBox.currentIndex = 0
-            rangeStartField.text = Qt.formatDate(App.selectedDate, "yyyy-MM-dd")
-            const end = new Date(App.selectedDate.getFullYear(),
-                                 App.selectedDate.getMonth(),
-                                 App.selectedDate.getDate() + 1)
-            rangeEndField.text = Qt.formatDate(end, "yyyy-MM-dd")
-            open()
-        }
-
-        contentItem: ColumnLayout {
-            spacing: Theme.spacingMD
-            AppComboBox {
-                id: exportScopeBox
-                Layout.fillWidth: true
-                model: [qsTr("Date range"), qsTr("Active calendar set"), qsTr("Entire local calendar")]
-                Accessible.name: qsTr("Export scope")
-            }
-            AppComboBox {
-                id: exportCalendarSetBox
-                visible: exportScopeBox.currentIndex === 1
-                Layout.fillWidth: true
-                model: window.calendarSets
-                textRole: "name"
-                valueRole: "id"
-                currentIndex: Math.max(0, window.calendarSetIndex(
-                                             window.activeCalendarSetId))
-                Accessible.name: qsTr("Calendar set to export")
-            }
-            AppComboBox {
-                id: exportLocalCalendarBox
-                visible: exportScopeBox.currentIndex === 2
-                Layout.fillWidth: true
-                model: window.localWritableCalendars
-                textRole: "name"
-                valueRole: "id"
-                Accessible.name: qsTr("Local calendar to export")
-            }
-            RowLayout {
-                visible: exportScopeBox.currentIndex === 0
-                Layout.fillWidth: true
-                AppTextField {
-                    id: rangeStartField
-                    Layout.fillWidth: true
-                    placeholderText: qsTr("YYYY-MM-DD")
-                    accessibleName: qsTr("Export range start")
-                }
-                Text { textFormat: Text.PlainText; text: qsTr("to"); color: Theme.mutedText }
-                AppTextField {
-                    id: rangeEndField
-                    Layout.fillWidth: true
-                    placeholderText: qsTr("YYYY-MM-DD")
-                    accessibleName: qsTr("Export range end")
-                }
-            }
-            Text {
-                textFormat: Text.PlainText
-                visible: exportScopeBox.currentIndex === 2
-                         && window.localWritableCalendars.length === 0
-                Layout.fillWidth: true
-                text: qsTr("Create a local calendar before exporting a whole calendar.")
-                color: Theme.warning
-                wrapMode: Text.Wrap
-                font.pixelSize: Theme.smallFontSize
-            }
-            RowLayout {
-                Layout.fillWidth: true
-                Item { Layout.fillWidth: true }
-                AppButton {
-                    text: qsTr("Choose destination…")
-                    primary: true
-                    enabled: exportScopeBox.currentIndex !== 2
-                             || exportLocalCalendarBox.currentIndex >= 0
-                    onClicked: {
-                        const scope = window.exportScope(
-                                        exportScopeBox.currentIndex,
-                                        exportCalendarSetBox.currentValue,
-                                        exportLocalCalendarBox.currentValue,
-                                        rangeStartField.text,
-                                        rangeEndField.text)
-                        if (Object.keys(scope).length > 0) {
-                            window.pendingExportScope = scope
-                            icsExportDialog.close()
-                            exportIcsFileDialog.open()
-                        }
-                    }
-                }
+        calendarSets: window.calendarSets
+        localWritableCalendars: window.localWritableCalendars
+        activeCalendarSetIndex: window.calendarSetIndex(window.activeCalendarSetId)
+        onScopeChosen: (scopeIndex, calendarSetId, calendarId, rangeStart, rangeEnd) => {
+            const scope = window.exportScope(scopeIndex, calendarSetId, calendarId,
+                                             rangeStart, rangeEnd)
+            if (Object.keys(scope).length > 0) {
+                window.pendingExportScope = scope
+                icsExportDialog.close()
+                exportIcsFileDialog.open()
             }
         }
     }
@@ -1343,6 +863,12 @@ ApplicationWindow {
         sequence: "Ctrl+N"
         context: Qt.ApplicationShortcut
         onActivated: editor.openNew(App.selectedDate, 540)
+    }
+    Shortcut {
+        sequences: ["Ctrl+Shift+N", "Q"]
+        enabled: window.navigationShortcutsEnabled()
+        context: Qt.ApplicationShortcut
+        onActivated: quickAdd.openEmpty()
     }
     Shortcut {
         sequence: "Ctrl+F"
@@ -1414,6 +940,75 @@ ApplicationWindow {
         context: Qt.ApplicationShortcut
         onActivated: window.openKeyboardSelection()
     }
+    // Keyboard move and resize for the selected timed event, matching drag:
+    // 15-minute steps, a day at a time sideways, and the same recurrence
+    // scope prompt.
+    Shortcut {
+        sequence: "Alt+Up"
+        enabled: window.navigationShortcutsEnabled() && window.canNudgeSelection()
+        context: Qt.ApplicationShortcut
+        onActivated: window.nudgeSelectedEvent(-15, 0, 0)
+    }
+    Shortcut {
+        sequence: "Alt+Down"
+        enabled: window.navigationShortcutsEnabled() && window.canNudgeSelection()
+        context: Qt.ApplicationShortcut
+        onActivated: window.nudgeSelectedEvent(15, 0, 0)
+    }
+    Shortcut {
+        sequence: "Alt+Shift+Up"
+        enabled: window.navigationShortcutsEnabled() && window.canNudgeSelection()
+        context: Qt.ApplicationShortcut
+        onActivated: window.nudgeSelectedEvent(0, -15, 0)
+    }
+    Shortcut {
+        sequence: "Alt+Shift+Down"
+        enabled: window.navigationShortcutsEnabled() && window.canNudgeSelection()
+        context: Qt.ApplicationShortcut
+        onActivated: window.nudgeSelectedEvent(0, 15, 0)
+    }
+    Shortcut {
+        sequence: "Alt+Left"
+        enabled: window.navigationShortcutsEnabled() && window.canNudgeSelection()
+        context: Qt.ApplicationShortcut
+        onActivated: window.nudgeSelectedEvent(0, 0, -1)
+    }
+    Shortcut {
+        sequence: "Alt+Right"
+        enabled: window.navigationShortcutsEnabled() && window.canNudgeSelection()
+        context: Qt.ApplicationShortcut
+        onActivated: window.nudgeSelectedEvent(0, 0, 1)
+    }
+
+    // Screen readers hear the view and period after navigation settles, once
+    // the period's events have loaded.
+    Item {
+        id: announcer
+        objectName: "announcer"
+        property string lastAnnouncement: ""
+        property bool pending: false
+        Accessible.role: Accessible.StaticText
+        Accessible.name: lastAnnouncement
+    }
+    Timer {
+        id: announceTimer
+        interval: 350
+        onTriggered: {
+            announcer.pending = false
+            window.announce(window.viewAnnouncement())
+        }
+    }
+    onCurrentViewChanged: window.queueViewAnnouncement()
+    onVisibleEventsChanged: {
+        if (announcer.pending)
+            announceTimer.restart()
+    }
+    Connections {
+        target: App
+        ignoreUnknownSignals: true
+        function onSelectedDateChanged() { window.queueViewAnnouncement() }
+    }
+
     Shortcut {
         sequence: "Delete"
         enabled: window.navigationShortcutsEnabled()
@@ -1618,13 +1213,11 @@ ApplicationWindow {
     }
 
     function eventStart(value) {
-        return value.allDay ? new Date(value.startDate + "T00:00:00")
-                            : new Date(value.displayStartLocal || value.startUtc)
+        return EventIndex.eventStart(value)
     }
 
     function eventEnd(value) {
-        return value.allDay ? new Date(value.endDate + "T00:00:00")
-                            : new Date(value.displayEndLocal || value.endUtc)
+        return EventIndex.eventEnd(value)
     }
 
     function eventsForDate(dateValue, values) {
@@ -1719,11 +1312,20 @@ ApplicationWindow {
         loadRangeFor(dateValue, currentView)
     }
 
+    function extendAgenda() {
+        // Bounded so a runaway scroll cannot request an unbounded range.
+        if (agendaDayCount >= 366)
+            return
+        agendaDayCount += 31
+        loadRangeFor(App.selectedDate, "agenda")
+    }
+
     function setView(viewName) {
         currentView = viewName
         let anchorDate = App.selectedDate
         if (viewName === "agenda") {
             anchorDate = new Date()
+            agendaDayCount = 31
             App.setSelectedDate(anchorDate)
             visibleMonth = new Date(anchorDate.getFullYear(),
                                     anchorDate.getMonth(), 1)
@@ -1748,7 +1350,7 @@ ApplicationWindow {
             start = new Date(anchorDate.getFullYear(), anchorDate.getMonth(),
                              anchorDate.getDate() - 7)
             end = new Date(anchorDate.getFullYear(), anchorDate.getMonth(),
-                           anchorDate.getDate() + 45)
+                           anchorDate.getDate() + agendaDayCount + 14)
         } else if (viewName === "year") {
             start = new Date(anchorDate.getFullYear(), 0, 1)
             end = new Date(anchorDate.getFullYear(), 11, 31)
@@ -1864,12 +1466,6 @@ ApplicationWindow {
         return 0
     }
 
-    function localFileName(fileUrl) {
-        const value = String(fileUrl || "")
-        const slash = value.lastIndexOf("/")
-        return slash >= 0 ? value.slice(slash + 1) : value
-    }
-
     function openIcsImport(fileUrl) {
         icsImportDialog.fileUrl = fileUrl
         icsImportDialog.preview = ({})
@@ -1930,13 +1526,42 @@ ApplicationWindow {
                                dateValue.getDate(), Math.floor(startMinute / 60),
                                startMinute % 60)
         updated.allDay = false
-        updated.startUtc = utcForDisplayedWall(start, value.timeKind)
+        if (value.allDay) {
+            // Leaving the all-day lane: the event takes the display zone.
+            updated.timeKind = "zoned"
+            updated.startTimeZone = String(preferences.displayTimeZone
+                                           || App.systemTimeZoneId || "UTC")
+            updated.endTimeZone = updated.startTimeZone
+        }
+        updated.startUtc = utcForDisplayedWall(start, updated.timeKind)
         if (!updated.startUtc)
             return
         updated.endUtc = new Date(new Date(updated.startUtc).getTime()
                                   + durationMinutes * 60000).toISOString()
         updated.startDate = ""
         updated.endDate = ""
+        updated.localRevision = revision
+        submitInteractionMutation(updated, value)
+    }
+
+    // A timed event dropped on the all-day lane becomes a one-day all-day
+    // event on that date.
+    function moveEventToAllDay(value, dateValue) {
+        if (!eventEditable(value) || value.allDay)
+            return
+        const revision = Number(value.localRevision)
+        if (!isFinite(revision) || revision < 0) {
+            console.warn("Cannot move event without a local revision")
+            return
+        }
+        const updated = Object.assign({}, value)
+        updated.allDay = true
+        updated.timeKind = "all_day"
+        updated.startDate = Qt.formatDate(dateValue, "yyyy-MM-dd")
+        updated.endDate = Qt.formatDate(new Date(dateValue.getFullYear(), dateValue.getMonth(),
+                                                 dateValue.getDate() + 1), "yyyy-MM-dd")
+        updated.startUtc = ""
+        updated.endUtc = ""
         updated.localRevision = revision
         submitInteractionMutation(updated, value)
     }
@@ -1951,7 +1576,7 @@ ApplicationWindow {
         }
         const start = eventStart(value)
         const end = eventEnd(value)
-        if (sameDate(start, dateValue))
+        if (Theme.sameDate(start, dateValue))
             return
         const duration = end - start
         const updated = Object.assign({}, value)
@@ -2122,7 +1747,110 @@ ApplicationWindow {
         return count
     }
 
+    function queueViewAnnouncement() {
+        announcer.pending = true
+        announceTimer.restart()
+    }
+
+    function announce(message) {
+        if (!message)
+            return
+        announcer.lastAnnouncement = message
+        // Accessible.announce is available from Qt 6.8.
+        if (typeof announcer.Accessible.announce === "function")
+            announcer.Accessible.announce(message)
+    }
+
+    // [start, end) of the period the current view shows.
+    function periodBounds() {
+        const day = new Date(App.selectedDate.getFullYear(), App.selectedDate.getMonth(),
+                             App.selectedDate.getDate())
+        if (currentView === "day")
+            return {"start": day, "end": new Date(day.getFullYear(), day.getMonth(),
+                                                  day.getDate() + 1)}
+        if (currentView === "week") {
+            const start = startOfWeek(day)
+            return {"start": start, "end": new Date(start.getFullYear(), start.getMonth(),
+                                                    start.getDate() + 7)}
+        }
+        if (currentView === "agenda")
+            return {"start": day, "end": new Date(day.getFullYear(), day.getMonth(),
+                                                  day.getDate() + agendaDayCount)}
+        if (currentView === "year")
+            return {"start": new Date(day.getFullYear(), 0, 1),
+                    "end": new Date(day.getFullYear() + 1, 0, 1)}
+        return {"start": new Date(day.getFullYear(), day.getMonth(), 1),
+                "end": new Date(day.getFullYear(), day.getMonth() + 1, 1)}
+    }
+
+    // For example "Week view, September 28–October 4, 12 events".
+    function viewAnnouncement() {
+        const bounds = periodBounds()
+        let count = 0
+        for (let index = 0; index < visibleEvents.length; ++index) {
+            const value = visibleEvents[index]
+            if (eventStart(value) < bounds.end && eventEnd(value) > bounds.start)
+                ++count
+        }
+        const labels = {"agenda": qsTr("Agenda"), "day": qsTr("Day view"),
+                        "week": qsTr("Week view"), "month": qsTr("Month view"),
+                        "year": qsTr("Year view")}
+        const period = currentView === "agenda"
+                ? qsTr("from %1").arg(Qt.formatDate(bounds.start, "dddd, MMMM d"))
+                : currentView === "day"
+                  ? Qt.formatDate(bounds.start, "dddd, MMMM d") : periodTitle()
+        return qsTr("%1, %2, %n event(s)", "", count).arg(labels[currentView] || "")
+                .arg(period)
+    }
+
+    function canNudgeSelection() {
+        return currentView !== "year" && Boolean(selectedEvent && selectedEvent.id)
+                && eventEditable(selectedEvent)
+    }
+
+    // Moves the selected event by minutes and days, or changes its length by
+    // resizeMinutes, through the same path as dragging it.
+    function nudgeSelectedEvent(minutes, resizeMinutes, days) {
+        const value = selectedEvent
+        if (!canNudgeSelection())
+            return
+        const start = eventStart(value)
+        const end = eventEnd(value)
+        const title = value.summary || qsTr("Untitled event")
+        const multiDay = value.allDay || !Theme.sameDate(start, new Date(end.getTime() - 1))
+        if (multiDay) {
+            if (days === 0)
+                return
+            const target = new Date(start.getFullYear(), start.getMonth(),
+                                    start.getDate() + days)
+            moveEventToDate(value, target)
+            announce(qsTr("%1 moved to %2").arg(title)
+                     .arg(Qt.formatDate(target, "dddd, MMMM d")))
+            return
+        }
+        const duration = Math.round((end - start) / 60000)
+        const nextDuration = Math.max(15, duration + resizeMinutes)
+        if (resizeMinutes !== 0 && nextDuration === duration)
+            return
+        const moved = new Date(start.getFullYear(), start.getMonth(), start.getDate() + days,
+                               start.getHours(), start.getMinutes() + minutes)
+        rescheduleEvent(value, new Date(moved.getFullYear(), moved.getMonth(), moved.getDate()),
+                        moved.getHours() * 60 + moved.getMinutes(), nextDuration)
+        if (resizeMinutes !== 0) {
+            const movedEnd = new Date(moved.getTime() + nextDuration * 60000)
+            announce(qsTr("%1 now ends at %2").arg(title)
+                     .arg(Theme.formatTime(movedEnd, String(preferences.timeFormat
+                                                            || "system"))))
+        } else {
+            announce(qsTr("%1 moved to %2").arg(title)
+                     .arg(Qt.formatDate(moved, "ddd MMM d") + " "
+                          + Theme.formatTime(moved, String(preferences.timeFormat
+                                                           || "system"))))
+        }
+    }
+
     function navigationShortcutsEnabled() {
         return !editor.opened && !settingsDrawer.opened && !activityPanel.opened
+               && !quickAdd.opened
     }
 }

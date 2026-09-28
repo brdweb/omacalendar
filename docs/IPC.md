@@ -119,6 +119,14 @@ and cleanup; a started check is not proof of server support.
 - `events.create`, `events.update`, `events.remove`, `events.move`,
   `events.respond`, `events.undo`
 - `invitations.list`, `invitations.markSeen`
+- `contacts.suggest`
+
+`contacts.suggest` is additive and not yet released. It takes a non-empty
+`prefix` (at most 200 characters) and an optional `limit` (1 to 25, default 8)
+and returns `{"prefix": ..., "contacts": [{"email", "displayName"}]}`: distinct
+guest and organizer addresses from cached, non-deleted events whose address
+starts with the prefix or whose name contains it, case-insensitively, most
+used first. It reads only the local cache.
 
 `stats.dailyCounts` is additive and not yet released (added after 2.1,
 advertised in the next release). Discover it in `system.info` `methods`; the
