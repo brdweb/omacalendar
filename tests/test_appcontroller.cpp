@@ -64,6 +64,10 @@ class FakeDaemon final : public QObject {
   void setConflicts(const QJsonArray& conflicts) { m_conflicts = conflicts; }
   void setContacts(const QJsonArray& contacts) { m_contacts = contacts; }
   void setAccounts(const QJsonArray& accounts) { m_accounts = accounts; }
+  // Event mutations received, oldest first, as {method, params}.
+  [[nodiscard]] QList<QPair<QString, QJsonObject>> mutations() const {
+    return m_mutations;
+  }
   void setSyncStatus(const QString& accountId, const QJsonObject& status) {
     m_syncStatuses.insert(accountId, status);
   }
@@ -154,6 +158,31 @@ class FakeDaemon final : public QObject {
         response.insert(QStringLiteral("result"),
                         QJsonObject{{QStringLiteral("items"), m_operations},
                                     {QStringLiteral("count"), m_operations.size()}});
+      } else if (method == QStringLiteral("events.update") ||
+                 method == QStringLiteral("events.create")) {
+        m_mutations.append({method, params});
+        QJsonObject event = params.value(QStringLiteral("event")).toObject();
+        if (method == QStringLiteral("events.create")) {
+          event.insert(QStringLiteral("id"),
+                       QStringLiteral("created-%1").arg(m_mutations.size()));
+        }
+        event.insert(QStringLiteral("localRevision"), ++m_revision);
+        response.insert(QStringLiteral("result"),
+                        QJsonObject{{QStringLiteral("event"), event}});
+      } else if (method == QStringLiteral("events.remove")) {
+        m_mutations.append({method, params});
+        response.insert(
+            QStringLiteral("result"),
+            QJsonObject{{QStringLiteral("undoToken"),
+                         QStringLiteral("token-%1").arg(m_mutations.size())}});
+      } else if (method == QStringLiteral("events.undo")) {
+        m_mutations.append({method, params});
+        response.insert(
+            QStringLiteral("result"),
+            QJsonObject{{QStringLiteral("undone"), true},
+                        {QStringLiteral("event"),
+                         QJsonObject{{QStringLiteral("id"), QStringLiteral("restored")},
+                                     {QStringLiteral("localRevision"), 70}}}});
       } else if (method == QStringLiteral("accounts.list")) {
         response.insert(QStringLiteral("result"),
                         QJsonObject{{QStringLiteral("accounts"), m_accounts}});
@@ -232,6 +261,8 @@ class FakeDaemon final : public QObject {
   QJsonArray m_conflicts;
   QJsonArray m_contacts;
   QJsonArray m_accounts;
+  QList<QPair<QString, QJsonObject>> m_mutations;
+  int m_revision = 10;
   QHash<QString, QJsonObject> m_syncStatuses;
   QJsonArray m_calendars{
       QJsonObject{{QStringLiteral("id"), QStringLiteral("local-default")},
@@ -280,6 +311,7 @@ class AppControllerTest final : public QObject {
   void contactSuggestionsAreRelayed();
   void quickAddTextBecomesAnEditorDraft();
   void accountSyncStatesFollowTheDaemon();
+  void undoAndRedoWalkTheHistory();
 
  private:
   QTemporaryDir m_xdgRoot;
@@ -1021,6 +1053,81 @@ void AppControllerTest::accountSyncStatesFollowTheDaemon() {
                .toString(),
            QStringLiteral("reauthorization_required"));
   QVERIFY(controller.statusText() != QStringLiteral("Calendar is up to date locally"));
+}
+
+void AppControllerTest::undoAndRedoWalkTheHistory() {
+  FakeDaemon daemon(1);
+  QVERIFY(daemon.listen());
+  AppController controller;
+  controller.loadRange(QDate(2026, 9, 1), QDate(2026, 10, 1));
+  QTRY_COMPARE(controller.events().size(), 1);
+  QVERIFY(!controller.canUndo());
+  QSignalSpy completed(&controller, &AppController::mutationCompleted);
+  const auto last = [&daemon]() { return daemon.mutations().last(); };
+  const auto mutationCount = [&daemon]() { return daemon.mutations().size(); };
+
+  // An edit is undone by saving the prior state over the new revision and
+  // redone by saving the edit again.
+  QVariantMap edited = controller.events().first().toMap();
+  const QString eventId = edited.value(QStringLiteral("id")).toString();
+  const QString original = edited.value(QStringLiteral("summary")).toString();
+  edited.insert(QStringLiteral("summary"), QStringLiteral("Renamed"));
+  edited.insert(QStringLiteral("localRevision"), 3);
+  controller.saveEvent(edited, {});
+  QTRY_VERIFY(controller.canUndo());
+  QCOMPARE(completed.count(), 1);
+  QCOMPARE(completed.first().at(1).toBool(), true);
+
+  controller.undo();
+  QTRY_COMPARE(mutationCount(), 2);
+  QCOMPARE(last().first, QStringLiteral("events.update"));
+  QCOMPARE(last().second.value("event").toObject().value("summary").toString(),
+           original);
+  QCOMPARE(last().second.value("expectedLocalRevision").toInt(), 11);
+  QTRY_VERIFY(controller.canRedo());
+  QVERIFY(!controller.canUndo());
+  QCOMPARE(completed.count(), 1);
+
+  controller.redo();
+  QTRY_COMPARE(mutationCount(), 3);
+  QCOMPARE(last().second.value("event").toObject().value("summary").toString(),
+           QStringLiteral("Renamed"));
+  QCOMPARE(last().second.value("expectedLocalRevision").toInt(), 12);
+  QTRY_VERIFY(controller.canUndo());
+  QVERIFY(!controller.canRedo());
+
+  // A delete is undone with the daemon's token and redone by deleting the
+  // restored event.
+  controller.requestDeleteEvent(eventId, {});
+  QTRY_COMPARE(mutationCount(), 4);
+  QTRY_COMPARE(completed.count(), 2);
+  QCOMPARE(completed.last().at(0).toString(), QStringLiteral("Event deleted"));
+  controller.undo();
+  QTRY_COMPARE(mutationCount(), 5);
+  QCOMPARE(last().first, QStringLiteral("events.undo"));
+  QCOMPARE(last().second.value("undoToken").toString(), QStringLiteral("token-4"));
+  QTRY_VERIFY(controller.canRedo());
+  controller.redo();
+  QTRY_COMPARE(mutationCount(), 6);
+  QCOMPARE(last().first, QStringLiteral("events.remove"));
+  QCOMPARE(last().second.value("eventRef").toObject().value("eventId").toString(),
+           QStringLiteral("restored"));
+  QCOMPARE(last().second.value("expectedLocalRevision").toInt(), 70);
+
+  // A new change drops the redo steps; undoing a create deletes it.
+  controller.undo();
+  QTRY_COMPARE(mutationCount(), 7);
+  QTRY_VERIFY(controller.canRedo());
+  controller.saveEvent({{QStringLiteral("calendarId"), QStringLiteral("local-default")},
+                        {QStringLiteral("summary"), QStringLiteral("New")}},
+                       {});
+  QTRY_COMPARE(mutationCount(), 8);
+  QTRY_VERIFY(!controller.canRedo());
+  controller.undo();
+  QTRY_COMPARE(mutationCount(), 9);
+  QCOMPARE(last().first, QStringLiteral("events.remove"));
+  QCOMPARE(last().second.value("eventRef").toObject().value("eventId").toString(),
+           QStringLiteral("created-8"));
 }
 
 #include "test_appcontroller.moc"

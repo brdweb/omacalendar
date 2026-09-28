@@ -726,11 +726,18 @@ void AppController::removeEvent(const QString& eventId) {
 
 void AppController::saveEvent(const QVariantMap& values,
                               const QVariantMap& mutationOptions) {
+  saveEventWithHistory(values, mutationOptions, HistoryMode::Record);
+}
+
+void AppController::saveEventWithHistory(const QVariantMap& values,
+                                         const QVariantMap& mutationOptions,
+                                         const HistoryMode mode,
+                                         const QVariantMap& knownPrior) {
   const QJsonObject event = QJsonObject::fromVariantMap(values);
   const bool updating = !event.value(QStringLiteral("id")).toString().isEmpty();
   const QString mutationId = newUuid();
-  QVariantMap priorEvent;
-  if (updating) {
+  QVariantMap priorEvent = knownPrior;
+  if (updating && priorEvent.isEmpty()) {
     const QString eventId = event.value(QStringLiteral("id")).toString();
     const QString recurrenceId = event.value(QStringLiteral("recurrenceId")).toString();
     for (const QVariant& candidateValue : std::as_const(m_events)) {
@@ -765,38 +772,52 @@ void AppController::saveEvent(const QVariantMap& values,
   inverseOptions.insert(QStringLiteral("confirmedCrossProvider"), true);
   const bool calendarChanged =
       updating && !sourceCalendarId.isEmpty() && sourceCalendarId != targetCalendarId;
-  const ResultHandler saved = [this, updating, priorEvent, inverseOptions,
+  const ResultHandler saved = [this, mode, updating, priorEvent, inverseOptions, values,
                                calendarChanged](const QJsonValue& value) {
-    m_lastMutationId.clear();
-    m_lastUndoToken.clear();
+    QJsonObject responseEvent = value.toObject();
+    if (responseEvent.value(QStringLiteral("event")).isObject()) {
+      responseEvent = responseEvent.value(QStringLiteral("event")).toObject();
+    }
+    bool undoable = false;
     if (updating && !priorEvent.isEmpty() && !calendarChanged) {
-      QVariantMap inverseEvent = priorEvent;
-      QJsonObject responseEvent = value.toObject();
-      if (responseEvent.value(QStringLiteral("event")).isObject()) {
-        responseEvent = responseEvent.value(QStringLiteral("event")).toObject();
-      }
+      // Undoing an edit saves the prior state over the new revision.
+      HistoryEntry inverse;
+      inverse.kind = HistoryEntry::Kind::Restore;
+      inverse.event = priorEvent;
       if (!responseEvent.value(QStringLiteral("id")).toString().isEmpty()) {
-        inverseEvent.insert(QStringLiteral("id"),
-                            responseEvent.value(QStringLiteral("id")).toVariant());
+        inverse.event.insert(QStringLiteral("id"),
+                             responseEvent.value(QStringLiteral("id")).toVariant());
       }
       if (responseEvent.contains(QStringLiteral("localRevision"))) {
-        inverseEvent.insert(
+        inverse.event.insert(
             QStringLiteral("localRevision"),
             responseEvent.value(QStringLiteral("localRevision")).toVariant());
       }
-      m_lastUndoKind = QStringLiteral("update");
-      m_lastUndoEvent = inverseEvent;
-      m_lastUndoOptions = inverseOptions;
+      inverse.previous = values;
+      inverse.options = inverseOptions;
+      recordInverse(mode, inverse);
+      undoable = true;
     } else if (!updating) {
-      m_lastUndoKind = QStringLiteral("create");
-      m_lastUndoEvent = value.toObject().toVariantMap();
-      m_lastUndoOptions = inverseOptions;
-    } else {
-      m_lastUndoKind.clear();
-      m_lastUndoEvent.clear();
-      m_lastUndoOptions.clear();
+      HistoryEntry inverse;
+      inverse.kind = HistoryEntry::Kind::Remove;
+      inverse.event = responseEvent.toVariantMap();
+      inverse.options = inverseOptions;
+      recordInverse(mode, inverse);
+      undoable = true;
+    } else if (mode == HistoryMode::Record && !m_redoHistory.isEmpty()) {
+      // A change history cannot reverse still makes older redo steps stale.
+      m_redoHistory.clear();
+      emit historyChanged();
     }
-    setStatus(calendarChanged ? tr("Event moved") : tr("Saved — press Ctrl+Z to undo"));
+    if (mode == HistoryMode::Record) {
+      const QString message = calendarChanged ? tr("Event moved")
+                              : updating      ? tr("Event updated")
+                                              : tr("Event created");
+      setStatus(message);
+      emit mutationCompleted(message, undoable);
+    } else {
+      setStatus(mode == HistoryMode::Undo ? tr("Undone") : tr("Redone"));
+    }
     emit eventSaved();
     loadRange(m_rangeStart, m_rangeEnd);
   };
@@ -849,6 +870,12 @@ void AppController::saveEvent(const QVariantMap& values,
 
 void AppController::requestDeleteEvent(const QString& eventId,
                                        const QVariantMap& mutationOptions) {
+  deleteEventWithHistory(eventId, mutationOptions, HistoryMode::Record);
+}
+
+void AppController::deleteEventWithHistory(const QString& eventId,
+                                           const QVariantMap& mutationOptions,
+                                           const HistoryMode mode) {
   if (eventId.isEmpty()) {
     return;
   }
@@ -888,23 +915,27 @@ void AppController::requestDeleteEvent(const QString& eventId,
                .toString())},
   };
   send(QStringLiteral("events.remove"), params,
-       [this, mutationId](const QJsonValue& value) {
-         m_lastMutationId = mutationId;
-         m_lastUndoKind.clear();
-         m_lastUndoEvent.clear();
-         m_lastUndoOptions.clear();
-         m_lastUndoToken =
+       [this, mode, eventId, recurrenceId, mutationOptions](const QJsonValue& value) {
+         const QString undoToken =
              value.toObject().value(QStringLiteral("undoToken")).toString();
-         setStatus(tr("Delete queued — press Ctrl+Z within 10 seconds"));
-         const QString undoToken = m_lastUndoToken;
-         QTimer::singleShot(10000, this, [this, mutationId, undoToken]() {
-           if (m_lastUndoToken == undoToken) {
-             m_lastUndoToken.clear();
-             if (m_lastMutationId == mutationId) {
-               m_lastMutationId.clear();
-             }
-           }
-         });
+         if (!undoToken.isEmpty()) {
+           // The daemon holds a delete back briefly; its token restores the
+           // event until then.
+           HistoryEntry inverse;
+           inverse.kind = HistoryEntry::Kind::Undelete;
+           inverse.undoToken = undoToken;
+           inverse.event = {{QStringLiteral("id"), eventId},
+                            {QStringLiteral("recurrenceId"), recurrenceId}};
+           inverse.options = mutationOptions;
+           inverse.expiresAt = QDateTime::currentDateTimeUtc().addSecs(10);
+           recordInverse(mode, inverse);
+         }
+         if (mode == HistoryMode::Record) {
+           setStatus(tr("Event deleted"));
+           emit mutationCompleted(tr("Event deleted"), !undoToken.isEmpty());
+         } else {
+           setStatus(mode == HistoryMode::Undo ? tr("Undone") : tr("Redone"));
+         }
          loadRange(m_rangeStart, m_rangeEnd);
        });
 }
@@ -945,11 +976,7 @@ void AppController::respondToInvitation(const QString& eventId, const QString& r
        {QStringLiteral("expectedLocalRevision"), expectedLocalRevision},
        {QStringLiteral("guestNotificationPolicy"), QStringLiteral("all")},
        {QStringLiteral("clientMutationId"), mutationId}},
-      [this, mutationId](const QJsonValue&) {
-        m_lastMutationId = mutationId;
-        refresh();
-      },
-      false);
+      [this](const QJsonValue&) { refresh(); }, false);
 }
 
 void AppController::removeInvitation(const QString& eventId,
@@ -1469,38 +1496,99 @@ void AppController::setCurrentView(const QString& view) {
   setPreference(QStringLiteral("currentView"), view);
 }
 
-void AppController::undoLastMutation() {
-  if (m_lastMutationId.isEmpty() && m_lastUndoToken.isEmpty() &&
-      m_lastUndoKind.isEmpty()) {
+bool AppController::canUndo() const { return !m_undoHistory.isEmpty(); }
+bool AppController::canRedo() const { return !m_redoHistory.isEmpty(); }
+
+void AppController::undoLastMutation() { undo(); }
+
+void AppController::undo() {
+  if (m_undoHistory.isEmpty()) {
     setStatus(tr("Nothing to undo"));
     return;
   }
-  if (m_lastUndoToken.isEmpty() && !m_lastUndoKind.isEmpty()) {
-    const QString kind = m_lastUndoKind;
-    const QVariantMap event = m_lastUndoEvent;
-    const QVariantMap options = m_lastUndoOptions;
-    m_lastUndoKind.clear();
-    m_lastUndoEvent.clear();
-    m_lastUndoOptions.clear();
-    if (kind == QStringLiteral("create")) {
-      QVariantMap deleteOptions = options;
-      deleteOptions.insert(QStringLiteral("expectedLocalRevision"),
-                           event.value(QStringLiteral("localRevision"), -1));
-      requestDeleteEvent(event.value(QStringLiteral("id")).toString(), deleteOptions);
-    } else {
-      saveEvent(event, options);
-    }
+  const HistoryEntry entry = m_undoHistory.takeLast();
+  emit historyChanged();
+  applyHistoryEntry(entry, HistoryMode::Undo);
+}
+
+void AppController::redo() {
+  if (m_redoHistory.isEmpty()) {
+    setStatus(tr("Nothing to redo"));
     return;
   }
-  send(QStringLiteral("events.undo"),
-       {{QStringLiteral("clientMutationId"), m_lastMutationId},
-        {QStringLiteral("undoToken"), m_lastUndoToken}},
-       [this](const QJsonValue&) {
-         m_lastMutationId.clear();
-         m_lastUndoToken.clear();
-         setStatus(tr("Delete undone"));
-         refresh();
-       });
+  const HistoryEntry entry = m_redoHistory.takeLast();
+  emit historyChanged();
+  applyHistoryEntry(entry, HistoryMode::Redo);
+}
+
+void AppController::recordInverse(const HistoryMode mode, const HistoryEntry& inverse) {
+  QList<HistoryEntry>& target =
+      mode == HistoryMode::Undo ? m_redoHistory : m_undoHistory;
+  if (mode == HistoryMode::Record) {
+    m_redoHistory.clear();
+  }
+  target.append(inverse);
+  while (target.size() > kHistoryLimit) {
+    target.removeFirst();
+  }
+  emit historyChanged();
+}
+
+void AppController::applyHistoryEntry(const HistoryEntry& entry,
+                                      const HistoryMode mode) {
+  switch (entry.kind) {
+    case HistoryEntry::Kind::Restore:
+      saveEventWithHistory(entry.event, entry.options, mode, entry.previous);
+      return;
+    case HistoryEntry::Kind::Remove: {
+      QVariantMap options = entry.options;
+      options.insert(QStringLiteral("expectedLocalRevision"),
+                     entry.event.value(QStringLiteral("localRevision"), -1));
+      options.insert(QStringLiteral("recurrenceId"),
+                     entry.event.value(QStringLiteral("recurrenceId")));
+      deleteEventWithHistory(entry.event.value(QStringLiteral("id")).toString(),
+                             options, mode);
+      return;
+    }
+    case HistoryEntry::Kind::Undelete:
+      if (QDateTime::currentDateTimeUtc() > entry.expiresAt) {
+        setStatus(tr("The delete can no longer be undone"));
+        return;
+      }
+      undeleteWithHistory(entry, mode);
+      return;
+  }
+}
+
+void AppController::undeleteWithHistory(const HistoryEntry& entry,
+                                        const HistoryMode mode) {
+  send(
+      QStringLiteral("events.undo"),
+      {{QStringLiteral("clientMutationId"), newUuid()},
+       {QStringLiteral("undoToken"), entry.undoToken}},
+      [this, entry, mode](const QJsonValue& value) {
+        // Deleting the restored event again redoes (or re-undoes) the step.
+        HistoryEntry inverse;
+        inverse.kind = HistoryEntry::Kind::Remove;
+        inverse.event =
+            value.toObject().value(QStringLiteral("event")).toObject().toVariantMap();
+        if (inverse.event.value(QStringLiteral("id")).toString().isEmpty()) {
+          inverse.event = entry.event;
+        }
+        inverse.options = entry.options;
+        recordInverse(mode, inverse);
+        setStatus(mode == HistoryMode::Undo ? tr("Undone") : tr("Redone"));
+        refresh();
+      },
+      true,
+      [this](const QJsonObject& error) {
+        if (error.value(QStringLiteral("code")).toString() ==
+            QStringLiteral("undo_expired")) {
+          setStatus(tr("The delete can no longer be undone"));
+          return true;
+        }
+        return false;
+      });
 }
 
 bool AppController::canOpenExternalEventUrl(const QString& value) const {

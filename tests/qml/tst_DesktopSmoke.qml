@@ -27,6 +27,7 @@ Item {
     Component { id: activityFactory; Components.ActivityPanel {} }
     Component { id: sidebarFactory; Components.CalendarSidebar {} }
     Component { id: quickAddFactory; Components.QuickAddDialog {} }
+    Component { id: undoToastFactory; Components.UndoToast {} }
     Component { id: conflictMergeFactory; Components.ConflictMergeDialog {} }
     Component { id: icsImportFactory; Components.IcsImportDialog {} }
     Component { id: icsExportFactory; Components.IcsExportDialog {} }
@@ -556,6 +557,23 @@ Item {
                 tryVerify(function() { return anchor.activeFocus }, 1000,
                           "dialog " + index + " returns focus")
             }
+        }
+
+        function test_undo_toast_offers_undo_only_when_possible() {
+            const toast = createTemporaryObject(undoToastFactory, scene)
+            verify(!toast.visible)
+            const undoSpy = createTemporaryObject(signalSpyFactory, testCase, {
+                "target": toast, "signalName": "undoRequested"})
+            toast.show("Event deleted", true)
+            verify(toast.visible)
+            compare(findChild(toast, "undoToastMessage").text, "Event deleted")
+            const action = findChild(toast, "undoToastAction")
+            verify(action.visible)
+            action.clicked()
+            compare(undoSpy.count, 1)
+            verify(!toast.shown, "undoing dismisses the toast")
+            toast.show("Event moved", false)
+            verify(!action.visible, "a change that cannot be undone offers no Undo")
         }
 
         function test_editor_keeps_recurrence_rules() {

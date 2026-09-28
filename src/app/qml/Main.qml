@@ -572,6 +572,15 @@ ApplicationWindow {
                             running: true
                         }
                     }
+
+                    UndoToast {
+                        id: undoToast
+                        anchors.horizontalCenter: parent.horizontalCenter
+                        anchors.bottom: parent.bottom
+                        anchors.bottomMargin: Theme.spacingLG
+                        z: 50
+                        onUndoRequested: window.callApp("undo", [])
+                    }
                 }
 
                 Rectangle {
@@ -1018,8 +1027,30 @@ ApplicationWindow {
     }
     Shortcut {
         sequence: "Ctrl+Z"
+        enabled: !editor.opened
         context: Qt.ApplicationShortcut
-        onActivated: window.callApp("undoLastMutation", [])
+        onActivated: {
+            undoToast.dismiss()
+            window.callApp("undo", [])
+        }
+    }
+    Shortcut {
+        sequences: ["Ctrl+Shift+Z", "Ctrl+Y"]
+        enabled: !editor.opened
+        context: Qt.ApplicationShortcut
+        onActivated: {
+            undoToast.dismiss()
+            window.callApp("redo", [])
+        }
+    }
+    Connections {
+        target: App
+        ignoreUnknownSignals: true
+        function onMutationCompleted(message, undoable) {
+            undoToast.show(message, undoable)
+            window.announce(undoable ? qsTr("%1. Press Control Z to undo.").arg(message)
+                                     : message)
+        }
     }
 
     Connections {
