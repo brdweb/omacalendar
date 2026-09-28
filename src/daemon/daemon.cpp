@@ -441,6 +441,8 @@ Daemon::Daemon(QObject* parent)
     m_server.broadcast(QStringLiteral("operations.changed"),
                        {{QStringLiteral("revision"), m_database.changeRevision()}});
   });
+  connect(&m_caldav, &caldav::CalDavSync::tasksChanged, this,
+          [this](const QStringList& listIds) { emitTasksChanged(listIds); });
   connect(&m_reminders, &ReminderScheduler::reminderStateChanged, this, [this]() {
     m_server.broadcast(QStringLiteral("reminders.changed"),
                        {{QStringLiteral("revision"), m_database.changeRevision()}});

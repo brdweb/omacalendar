@@ -174,10 +174,14 @@ add_library(omacalendar_sync STATIC
   src/providers/caldav/caldavclient.h
   src/providers/caldav/caldavsync.cpp
   src/providers/caldav/caldavsync.h
+  src/providers/caldav/caldavtasksync.cpp
+  src/providers/caldav/caldavtasksync.h
   src/providers/caldav/caldavxml.cpp
   src/providers/caldav/caldavxml.h
   src/providers/caldav/icalcodec.cpp
   src/providers/caldav/icalcodec.h
+  src/providers/caldav/vtodocodec.cpp
+  src/providers/caldav/vtodocodec.h
   src/providers/google/googleauth.cpp
   src/providers/google/googleauth.h
   src/providers/google/googleclient.cpp

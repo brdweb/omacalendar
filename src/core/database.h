@@ -382,6 +382,30 @@ class Database final {
                      QString* errorMessage = nullptr);
   bool removeLocalTask(const QString& taskId, QString* errorMessage = nullptr);
 
+  // Provider sync. remoteId is the provider identity (a CalDAV resource URL
+  // or a Google task id).
+  [[nodiscard]] TaskList taskListByRemoteId(const QString& accountId,
+                                            const QString& remoteId,
+                                            QString* errorMessage = nullptr) const;
+  bool removeTaskList(const QString& listId, QString* errorMessage = nullptr);
+  // Tasks with a provider write still owed, removals included, oldest first.
+  [[nodiscard]] QList<Task> pendingTaskWrites(const QString& listId,
+                                              QString* errorMessage = nullptr) const;
+  // Applies a provider snapshot of a list. Tasks with a write still owed keep
+  // their local state. With complete set, clean tasks missing from the
+  // snapshot are removed. changed reports whether any row moved.
+  bool applyRemoteTasks(const QString& listId, const QList<Task>& remote, bool complete,
+                        bool* changed = nullptr, QString* errorMessage = nullptr);
+  // Records a provider acknowledgement. A removal deletes the row. When the
+  // task was edited again after sentRevision, it stays owed as an update.
+  // Otherwise the row takes the uploaded fields (they can include changes
+  // merged in from the provider) when uploaded is given.
+  bool completeTaskWrite(const QString& taskId, qint64 sentRevision,
+                         const QString& remoteId, const QString& etag,
+                         const QString& rawPayload, const QString& rawFormat,
+                         const Task* uploaded = nullptr,
+                         QString* errorMessage = nullptr);
+
   [[nodiscard]] QJsonValue setting(const QString& key, const QJsonValue& fallback = {},
                                    QString* errorMessage = nullptr) const;
   bool setSetting(const QString& key, const QJsonValue& value,

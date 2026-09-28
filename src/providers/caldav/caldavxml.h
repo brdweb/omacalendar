@@ -37,6 +37,10 @@ struct CalDavResponse {
   QString etag;
   QString calendarData;
 
+  // Component names from supported-calendar-component-set, upper case.
+  // Empty when the server did not report the property.
+  QStringList supportedComponents;
+
   bool isCollection = false;
   bool isCalendar = false;
   bool privilegesReported = false;
@@ -66,6 +70,19 @@ struct CalDavCollection {
   bool readOnly = false;
   bool canBind = false;
   bool canUnbind = false;
+  QStringList supportedComponents;
+
+  // RFC 4791: a collection that does not report the property accepts any
+  // component, so only an explicit list rules VEVENT or VTODO out.
+  [[nodiscard]] bool holdsEvents() const {
+    return supportedComponents.isEmpty() ||
+           supportedComponents.contains(QStringLiteral("VEVENT"));
+  }
+  // Task lists are only created for collections that explicitly accept
+  // VTODO, so ordinary calendars do not each turn into an empty task list.
+  [[nodiscard]] bool holdsTasks() const {
+    return supportedComponents.contains(QStringLiteral("VTODO"));
+  }
 };
 
 struct CalDavResource {

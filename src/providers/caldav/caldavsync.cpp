@@ -1,6 +1,7 @@
 #include "providers/caldav/caldavsync.h"
 
 #include <QCryptographicHash>
+#include <QDebug>
 #include <QFutureWatcher>
 #include <QJsonArray>
 #include <QPointer>
@@ -405,8 +406,16 @@ struct CalDavSync::FutureCapabilityProbe final {
 CalDavSync::CalDavSync(Database* database, QObject* parent)
     : Provider(QStringLiteral("caldav"), ProviderKind::CalDav, parent),
       m_database(database),
-      m_client(this) {
+      m_client(this),
+      m_tasks(database, &m_client, this) {
   m_parsePool.setMaxThreadCount(1);
+  connect(&m_tasks, &CalDavTaskSync::tasksChanged, this, &CalDavSync::tasksChanged);
+  connect(&m_tasks, &CalDavTaskSync::listFailed, this,
+          [](const QString&, const QString& listId, const QString& errorCode,
+             const QString&) {
+            qWarning().noquote()
+                << "CalDAV task list sync failed:" << listId << errorCode;
+          });
   m_pollTimer.setInterval(5 * 60 * 1000);
   connect(&m_pollTimer, &QTimer::timeout, this, &CalDavSync::syncAll);
   m_pollTimer.start();
@@ -726,6 +735,7 @@ bool CalDavSync::restoreAccounts(QString* errorMessage) {
 
 bool CalDavSync::disconnectAccount(const QString& accountId,
                                    const bool removeCachedData, QString* errorMessage) {
+  m_tasks.cancel(accountId);
   if (SyncJob* job = m_jobs.value(accountId, nullptr); job != nullptr) {
     if (job->futureProbeInProgress) {
       if (errorMessage != nullptr) {
@@ -875,6 +885,15 @@ void CalDavSync::setPollInterval(const int intervalMs) {
   // Changing the interval restarts the countdown, so only do it on a change.
   if (intervalMs > 0 && intervalMs != m_pollTimer.interval()) {
     m_pollTimer.setInterval(intervalMs);
+  }
+}
+
+void CalDavSync::syncTasks(const QString& accountId) {
+  if (m_loadedCredentials.contains(accountId)) {
+    m_tasks.syncStored(accountId);
+  } else {
+    // Loading the credentials goes through a full sync, which includes tasks.
+    syncAccount(accountId);
   }
 }
 
@@ -1099,7 +1118,14 @@ void CalDavSync::discoverCollections(SyncJob* job, const QUrl& homeUrl) {
           finish(job, parsed.error.code, parsed.error.message);
           return;
         }
-        for (const CalDavCollection& remote : CalDavXml::collections(parsed)) {
+        const QList<CalDavCollection> collections = CalDavXml::collections(parsed);
+        // Task lists are synced alongside, with their own requests.
+        m_tasks.syncDiscovered(job->accountId, job->homeUrl, collections);
+        for (const CalDavCollection& remote : collections) {
+          if (!remote.holdsEvents()) {
+            // A to-do-only collection is a task list, not a calendar.
+            continue;
+          }
           const QString canonicalHref =
               CalDavClient::canonicalResourceId(job->homeUrl, remote.href);
           Calendar existing =
