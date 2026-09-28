@@ -194,10 +194,16 @@ AppController::AppController(QObject* parent) : QObject(parent) {
           return;
         }
         const int parts = refreshPartsForNotification(event);
+        if (event == QStringLiteral("events.changed")) {
+          // Subscriptions announce a refresh only through changed events.
+          refreshAccountSyncStates(true);
+        }
         if (parts != 0) {
           scheduleRefresh(parts);
         } else if (event == QStringLiteral("sync.statusChanged")) {
           const QJsonObject status = data.value(QStringLiteral("status")).toObject();
+          setAccountSyncState(data.value(QStringLiteral("accountId")).toString(),
+                              status);
           const QString state = status.value(QStringLiteral("state")).toString();
           if (state == QStringLiteral("error") ||
               state == QStringLiteral("reauthorization_required")) {
@@ -254,6 +260,7 @@ bool AppController::busy() const { return m_activeRequests > 0; }
 QString AppController::statusText() const { return m_statusText; }
 QString AppController::lastError() const { return m_lastError; }
 QVariantList AppController::accounts() const { return m_accounts; }
+QVariantMap AppController::accountSyncStates() const { return m_accountSyncStates; }
 QVariantList AppController::calendars() const { return m_calendars; }
 QVariantList AppController::events() const { return m_events; }
 QVariantList AppController::calendarSets() const { return m_calendarSets; }
@@ -410,6 +417,7 @@ void AppController::refreshParts(const int parts) {
       m_accounts = variantList(value, QStringLiteral("accounts"));
       m_accountsModel.replace(m_accounts);
       emit accountsChanged();
+      refreshAccountSyncStates(false);
     });
   }
   m_scopeRequestsInFlight +=
@@ -653,7 +661,6 @@ void AppController::requestRangePage(const quint64 generation, const int offset,
         m_events = std::exchange(m_rangePages, {});
         applyDisplayTimes(&m_events);
         m_eventsModel.replace(m_events);
-        setStatus(tr("Calendar is up to date locally"));
         emit eventsChanged();
       },
       false,
@@ -1747,6 +1754,66 @@ void AppController::previewDiagnostics() {
     QDesktopServices::openUrl(QUrl::fromLocalFile(path));
     setStatus(tr("Opened privacy-safe diagnostics preview"));
   });
+}
+
+void AppController::setAccountSyncState(const QString& accountId,
+                                        const QJsonObject& status) {
+  if (accountId.isEmpty()) {
+    return;
+  }
+  // Calendar providers and ICS subscriptions name their fields differently.
+  const QString message = status.value(QStringLiteral("message")).toString();
+  const QString lastSyncAt = status.value(QStringLiteral("lastSyncAt")).toString();
+  const QVariantMap state{
+      {QStringLiteral("state"), status.value(QStringLiteral("state")).toString()},
+      {QStringLiteral("errorCode"),
+       status.value(QStringLiteral("errorCode")).toString()},
+      {QStringLiteral("message"),
+       message.isEmpty() ? status.value(QStringLiteral("errorMessage")).toString()
+                         : message},
+      {QStringLiteral("lastSyncAt"),
+       lastSyncAt.isEmpty() ? status.value(QStringLiteral("lastSuccessAt")).toString()
+                            : lastSyncAt}};
+  if (m_accountSyncStates.value(accountId).toMap() == state) {
+    return;
+  }
+  m_accountSyncStates.insert(accountId, state);
+  emit accountSyncStatesChanged();
+}
+
+void AppController::refreshAccountSyncStates(const bool icsOnly) {
+  if (!connected()) {
+    return;
+  }
+  QSet<QString> known;
+  for (const QVariant& value : std::as_const(m_accounts)) {
+    const QVariantMap account = value.toMap();
+    const QString accountId = account.value(QStringLiteral("id")).toString();
+    const QString provider = account.value(QStringLiteral("provider")).toString();
+    known.insert(accountId);
+    if (accountId.isEmpty() || provider == QStringLiteral("local") ||
+        (icsOnly && provider != QStringLiteral("ics"))) {
+      continue;
+    }
+    send(
+        QStringLiteral("sync.status"), {{QStringLiteral("accountId"), accountId}},
+        [this, accountId](const QJsonValue& result) {
+          setAccountSyncState(accountId, result.toObject());
+        },
+        false, [](const QJsonObject&) { return true; });
+  }
+  bool removed = false;
+  for (auto it = m_accountSyncStates.begin(); it != m_accountSyncStates.end();) {
+    if (known.contains(it.key())) {
+      ++it;
+    } else {
+      it = m_accountSyncStates.erase(it);
+      removed = true;
+    }
+  }
+  if (removed) {
+    emit accountSyncStatesChanged();
+  }
 }
 
 void AppController::syncAll() {

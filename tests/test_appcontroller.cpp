@@ -63,6 +63,10 @@ class FakeDaemon final : public QObject {
   void setOperations(const QJsonArray& items) { m_operations = items; }
   void setConflicts(const QJsonArray& conflicts) { m_conflicts = conflicts; }
   void setContacts(const QJsonArray& contacts) { m_contacts = contacts; }
+  void setAccounts(const QJsonArray& accounts) { m_accounts = accounts; }
+  void setSyncStatus(const QString& accountId, const QJsonObject& status) {
+    m_syncStatuses.insert(accountId, status);
+  }
 
   // Behave like an IPC 2.1 daemon, which has no settings.getMany.
   void setSettingsGetManySupported(const bool supported) {
@@ -72,10 +76,10 @@ class FakeDaemon final : public QObject {
     m_settings.insert(key, value);
   }
 
-  void broadcast(const QString& event) {
+  void broadcast(const QString& event, const QJsonObject& data = {}) {
     for (QLocalSocket* socket : std::as_const(m_sockets)) {
       socket->write(ipc::frame(
-          {{QStringLiteral("event"), event}, {QStringLiteral("data"), QJsonObject()}}));
+          {{QStringLiteral("event"), event}, {QStringLiteral("data"), data}}));
     }
   }
 
@@ -150,6 +154,12 @@ class FakeDaemon final : public QObject {
         response.insert(QStringLiteral("result"),
                         QJsonObject{{QStringLiteral("items"), m_operations},
                                     {QStringLiteral("count"), m_operations.size()}});
+      } else if (method == QStringLiteral("accounts.list")) {
+        response.insert(QStringLiteral("result"),
+                        QJsonObject{{QStringLiteral("accounts"), m_accounts}});
+      } else if (method == QStringLiteral("sync.status")) {
+        response.insert(QStringLiteral("result"),
+                        m_syncStatuses.value(params.value("accountId").toString()));
       } else if (method == QStringLiteral("contacts.suggest")) {
         response.insert(QStringLiteral("result"),
                         QJsonObject{{QStringLiteral("prefix"), params.value("prefix")},
@@ -221,6 +231,8 @@ class FakeDaemon final : public QObject {
   QJsonArray m_operations;
   QJsonArray m_conflicts;
   QJsonArray m_contacts;
+  QJsonArray m_accounts;
+  QHash<QString, QJsonObject> m_syncStatuses;
   QJsonArray m_calendars{
       QJsonObject{{QStringLiteral("id"), QStringLiteral("local-default")},
                   {QStringLiteral("enabled"), true}},
@@ -267,6 +279,7 @@ class AppControllerTest final : public QObject {
   void preferencesFallBackWithoutGetMany();
   void contactSuggestionsAreRelayed();
   void quickAddTextBecomesAnEditorDraft();
+  void accountSyncStatesFollowTheDaemon();
 
  private:
   QTemporaryDir m_xdgRoot;
@@ -956,6 +969,58 @@ void AppControllerTest::quickAddTextBecomesAnEditorDraft() {
   QCOMPARE(untimed.value(QStringLiteral("title")).toString(), QStringLiteral("Read"));
   QVERIFY(untimed.value(QStringLiteral("date")).toString().isEmpty());
   QCOMPARE(untimed.value(QStringLiteral("startMinute")).toInt(), -1);
+}
+
+void AppControllerTest::accountSyncStatesFollowTheDaemon() {
+  FakeDaemon daemon(0);
+  daemon.setAccounts(
+      QJsonArray{QJsonObject{{QStringLiteral("id"), QStringLiteral("google-1")},
+                             {QStringLiteral("provider"), QStringLiteral("google")}},
+                 QJsonObject{{QStringLiteral("id"), QStringLiteral("local")},
+                             {QStringLiteral("provider"), QStringLiteral("local")}},
+                 QJsonObject{{QStringLiteral("id"), QStringLiteral("ics-1")},
+                             {QStringLiteral("provider"), QStringLiteral("ics")}}});
+  daemon.setSyncStatus(
+      QStringLiteral("google-1"),
+      {{QStringLiteral("state"), QStringLiteral("idle")},
+       {QStringLiteral("lastSyncAt"), QStringLiteral("2026-09-28T09:00:00Z")}});
+  // Subscriptions report their error and last success under other names.
+  daemon.setSyncStatus(
+      QStringLiteral("ics-1"),
+      {{QStringLiteral("state"), QStringLiteral("error")},
+       {QStringLiteral("errorMessage"), QStringLiteral("HTTP 404")},
+       {QStringLiteral("lastSuccessAt"), QStringLiteral("2026-09-27T08:00:00Z")}});
+  QVERIFY(daemon.listen());
+  AppController controller;
+  QTRY_COMPARE(controller.accountSyncStates().size(), 2);
+  QVERIFY(!controller.accountSyncStates().contains(QStringLiteral("local")));
+  const QVariantMap google =
+      controller.accountSyncStates().value(QStringLiteral("google-1")).toMap();
+  QCOMPARE(google.value(QStringLiteral("state")).toString(), QStringLiteral("idle"));
+  QCOMPARE(google.value(QStringLiteral("lastSyncAt")).toString(),
+           QStringLiteral("2026-09-28T09:00:00Z"));
+  const QVariantMap ics =
+      controller.accountSyncStates().value(QStringLiteral("ics-1")).toMap();
+  QCOMPARE(ics.value(QStringLiteral("message")).toString(), QStringLiteral("HTTP 404"));
+  QCOMPARE(ics.value(QStringLiteral("lastSyncAt")).toString(),
+           QStringLiteral("2026-09-27T08:00:00Z"));
+
+  QSignalSpy changed(&controller, &AppController::accountSyncStatesChanged);
+  daemon.broadcast(
+      QStringLiteral("sync.statusChanged"),
+      {{QStringLiteral("accountId"), QStringLiteral("google-1")},
+       {QStringLiteral("status"),
+        QJsonObject{
+            {QStringLiteral("state"), QStringLiteral("reauthorization_required")},
+            {QStringLiteral("message"), QStringLiteral("Sign in again")}}}});
+  QTRY_COMPARE(changed.count(), 1);
+  QCOMPARE(controller.accountSyncStates()
+               .value(QStringLiteral("google-1"))
+               .toMap()
+               .value(QStringLiteral("state"))
+               .toString(),
+           QStringLiteral("reauthorization_required"));
+  QVERIFY(controller.statusText() != QStringLiteral("Calendar is up to date locally"));
 }
 
 #include "test_appcontroller.moc"

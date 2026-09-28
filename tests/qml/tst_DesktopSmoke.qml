@@ -24,6 +24,7 @@ Item {
     Component { id: attendeeEditorFactory; Components.AttendeeEditor {} }
     Component { id: mutationConfirmationFactory; Components.MutationConfirmationDialog {} }
     Component { id: activityFactory; Components.ActivityPanel {} }
+    Component { id: sidebarFactory; Components.CalendarSidebar {} }
     Component { id: settingsFactory; Components.AccountSettingsDrawer {} }
 
     Component {
@@ -405,6 +406,59 @@ Item {
             timelineEvent.commitMove(0, -260)
             compare(allDaySpy.count, 1, "released above the timeline top")
             compare(rescheduleSpy.count, 1)
+        }
+
+        function test_sidebar_shows_account_sync_state() {
+            const today = new Date()
+            const sidebar = createTemporaryObject(sidebarFactory, scene, {
+                "width": 280, "height": 900,
+                "accounts": [{"id": "g", "provider": "google", "displayName": "Work"},
+                             {"id": "l", "provider": "local", "displayName": "This device"},
+                             {"id": "i", "provider": "ics", "displayName": "Holidays"}],
+                "accountSyncStates": {
+                    "g": {"state": "reauthorization_required", "message": "Token revoked"},
+                    "i": {"state": "idle", "lastSyncAt": today.toISOString()}}})
+            verify(sidebar !== null)
+            wait(0)
+            compare(findChild(sidebar, "accountSyncText-0").text, "Sign-in expired")
+            const signIn = findChild(sidebar, "accountSyncAction-0")
+            verify(signIn.visible)
+            const reauthorize = createTemporaryObject(signalSpyFactory, testCase, {
+                "target": sidebar, "signalName": "accountReauthorizeRequested"})
+            signIn.clicked()
+            compare(reauthorize.count, 1)
+            compare(reauthorize.signalArguments[0][0], "g")
+            verify(findChild(sidebar, "accountSyncText-1").text.indexOf("Synced ") === 0,
+                   "the local account is not listed, so the subscription is second")
+            verify(!findChild(sidebar, "accountSyncAction-1").visible)
+            verify(findChild(sidebar, "accountSync-2") === null)
+
+            sidebar.accountSyncStates = {"g": {"state": "error", "message": "Timeout"}}
+            compare(findChild(sidebar, "accountSyncText-0").text, "Sync failed")
+            const syncSpy = createTemporaryObject(signalSpyFactory, testCase, {
+                "target": sidebar, "signalName": "accountSyncRequested"})
+            findChild(sidebar, "accountSyncAction-0").clicked()
+            compare(syncSpy.count, 1)
+
+            const attention = findChild(sidebar, "sidebarActivity")
+            verify(!attention.visible, "nothing needs attention")
+            sidebar.failedOperationCount = 2
+            verify(attention.visible)
+            const panelSpy = createTemporaryObject(signalSpyFactory, testCase, {
+                "target": sidebar, "signalName": "panelRequested"})
+            attention.clicked()
+            compare(panelSpy.signalArguments[0][0], "sync")
+        }
+
+        function test_activity_panel_reaches_conflicts_and_sync() {
+            const panel = createTemporaryObject(activityFactory, scene)
+            verify(panel !== null)
+            verify(findChild(panel, "conflictsTab") !== null)
+            verify(findChild(panel, "syncTab") !== null)
+            panel.mode = "conflicts"
+            compare(panel.mode, "conflicts", "a conflicts request is kept, not reset to search")
+            panel.mode = "sync"
+            compare(panel.mode, "sync")
         }
 
         function test_editor_keeps_recurrence_rules() {

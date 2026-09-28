@@ -341,6 +341,11 @@ ApplicationWindow {
                                                window.setCalendarVisible(calendarId, visible)
             onPanelRequested: panelName => window.openActivity(panelName)
             onSettingsRequested: settingsDrawer.open()
+            accounts: window.appList("accounts")
+            accountSyncStates: window.appValue("accountSyncStates", ({}))
+            onAccountReauthorizeRequested: accountId => window.callApp("reauthorizeAccount",
+                                                                       [accountId])
+            onAccountSyncRequested: accountId => window.callApp("syncAccount", [accountId])
         }
 
         Rectangle {
