@@ -11,6 +11,10 @@ ItemDelegate {
     property string continuationText: ""
     property string timeFormat: "system"
     property bool selected: false
+    // Search results: words to highlight in the title, and a click that jumps
+    // to the event (double-click still edits it).
+    property string highlight: ""
+    property bool jumpOnClick: false
     readonly property bool generatedInstance: Boolean(eventData.recurrenceRule
                                                        && eventData.recurrenceId)
     readonly property string operationState: eventData.operationState || ""
@@ -42,6 +46,7 @@ ItemDelegate {
         return ""
     }
     signal editRequested(var eventData)
+    signal jumpRequested(var eventData)
 
     width: ListView.view ? ListView.view.width : 400
     height: Math.max(68, details.implicitHeight + 24)
@@ -50,7 +55,11 @@ ItemDelegate {
     Accessible.description: eventDetails.text
                             + (displayStateLabel.length > 0 ? " · " + displayStateLabel : "")
     Accessible.role: Accessible.Button
-    onClicked: editRequested(eventData)
+    onClicked: jumpOnClick ? jumpRequested(eventData) : editRequested(eventData)
+    onDoubleClicked: {
+        if (jumpOnClick)
+            editRequested(eventData)
+    }
     ToolTip.visible: generatedInstance && hovered
     ToolTip.text: qsTr("Recurring event — choose an occurrence scope when editing")
     ToolTip.delay: 450
@@ -82,9 +91,15 @@ ItemDelegate {
             Layout.rightMargin: 12
             spacing: 3
             Text {
-                textFormat: Text.PlainText
+                objectName: "eventRowTitle"
+                // Styled only when highlighting; the title is escaped first so
+                // provider markup still shows literally.
+                textFormat: root.highlight.trim().length > 0 ? Text.StyledText
+                                                             : Text.PlainText
                 Layout.fillWidth: true
-                text: root.eventData.summary || qsTr("Untitled event")
+                text: root.highlight.trim().length > 0
+                      ? root.highlightedText(root.eventData.summary || qsTr("Untitled event"))
+                      : root.eventData.summary || qsTr("Untitled event")
                 color: Theme.text
                 font.pixelSize: Theme.fontSize
                 font.weight: Font.DemiBold
@@ -138,6 +153,43 @@ ItemDelegate {
                                                   : root.stateLabel === "Retrying"
                                                     ? "warning" : "info"
         }
+    }
+
+    function escapeHtml(value) {
+        return String(value).replace(/&/g, "&amp;").replace(/</g, "&lt;")
+                .replace(/>/g, "&gt;").replace(/"/g, "&quot;")
+    }
+
+    // Wraps each case-insensitive occurrence of a highlight word in the
+    // accent colour. Matching runs on the raw text; every piece is escaped.
+    function highlightedText(value) {
+        const source = String(value)
+        const words = highlight.toLowerCase().split(/\s+/).filter(function(word) {
+            return word.length > 0
+        })
+        const lower = source.toLowerCase()
+        const marks = new Array(source.length).fill(false)
+        for (const word of words) {
+            let from = lower.indexOf(word)
+            while (from >= 0) {
+                for (let index = from; index < from + word.length; ++index)
+                    marks[index] = true
+                from = lower.indexOf(word, from + word.length)
+            }
+        }
+        let result = ""
+        let index = 0
+        while (index < source.length) {
+            let end = index
+            while (end < source.length && marks[end] === marks[index])
+                ++end
+            const piece = escapeHtml(source.slice(index, end))
+            result += marks[index] ? "<font color=\"" + Theme.accent + "\"><b>" + piece
+                                     + "</b></font>"
+                                   : piece
+            index = end
+        }
+        return result
     }
 
     function eventDate(value) {

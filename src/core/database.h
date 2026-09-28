@@ -57,6 +57,9 @@ struct EventSearchQuery {
   QDateTime endUtc;
   QString accountId;
   QString invitationState;
+  // Case-insensitive substring of a guest's or the organizer's address or
+  // name. With it set, text may be empty.
+  QString attendee;
   int limit = 100;
   int offset = 0;
 };

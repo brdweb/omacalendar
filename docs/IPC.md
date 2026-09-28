@@ -198,6 +198,11 @@ and `limit`; `total` is the size of that filtered result. `events.search`
 similarly applies its text, date, calendar, account, and invitation-state
 filters before pagination.
 
+`events.search` additively accepts `attendee` (not yet released; the protocol
+minor remains 2.1): a case-insensitive substring, at most 200 characters, of a
+guest's or the organizer's address or display name. When `attendee` is given
+the `query` may be empty; a request with neither returns `invalid_params`.
+
 A same-account move preserves the canonical event identity. A cross-account or
 cross-provider move durably creates the destination first; deletion of the
 source depends on destination acknowledgment, so a destination failure cannot

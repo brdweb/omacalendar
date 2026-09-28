@@ -446,6 +446,12 @@ Item {
                                    : value.dayOffset < 0 ? text + " −1" : text
     }
 
+    // Scrolls so minute (of the display-zone day) sits an hour below the top.
+    function revealMinute(minute) {
+        timelineFlick.contentY = Math.max(0, Math.min(timelineFlick.contentHeight - timelineFlick.height,
+                                                (minute / 60 - 1 - firstHour) * pixelsPerHour))
+    }
+
     function hourPattern() {
         return Theme.hourPattern(timeFormat)
     }

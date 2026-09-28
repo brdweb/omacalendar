@@ -2296,10 +2296,20 @@ QJsonValue Daemon::onEventsUndo(const QJsonObject& params, ipc::Error* error) {
 
 QJsonValue Daemon::onEventsSearch(const QJsonObject& params, ipc::Error* error) {
   const QString query = params.value(QStringLiteral("query")).toString().trimmed();
-  if (query.isEmpty()) {
+  const QString attendee =
+      params.value(QStringLiteral("attendee")).toString().trimmed();
+  if (attendee.size() > 200) {
     if (error != nullptr) {
       *error = {QStringLiteral("invalid_params"),
-                QStringLiteral("A non-empty search query is required"), false};
+                QStringLiteral("attendee must be at most 200 characters"), false};
+    }
+    return {};
+  }
+  if (query.isEmpty() && attendee.isEmpty()) {
+    if (error != nullptr) {
+      *error = {QStringLiteral("invalid_params"),
+                QStringLiteral("A non-empty search query or attendee is required"),
+                false};
     }
     return {};
   }
@@ -2334,6 +2344,7 @@ QJsonValue Daemon::onEventsSearch(const QJsonObject& params, ipc::Error* error) 
   search.accountId = params.value(QStringLiteral("accountId")).toString().trimmed();
   search.invitationState =
       params.value(QStringLiteral("invitationState")).toString().trimmed();
+  search.attendee = attendee;
   search.limit = limit;
   search.offset = offset;
   QString dbError;

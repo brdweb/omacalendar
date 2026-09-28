@@ -28,6 +28,7 @@ Item {
     Component { id: sidebarFactory; Components.CalendarSidebar {} }
     Component { id: quickAddFactory; Components.QuickAddDialog {} }
     Component { id: undoToastFactory; Components.UndoToast {} }
+    Component { id: eventRowFactory; Components.EventRow {} }
     Component { id: conflictMergeFactory; Components.ConflictMergeDialog {} }
     Component { id: icsImportFactory; Components.IcsImportDialog {} }
     Component { id: icsExportFactory; Components.IcsExportDialog {} }
@@ -581,6 +582,56 @@ Item {
                 verify(findChild(view, "secondaryZoneCaption").parent.visible)
                 compare(findChild(view, "secondaryZoneCaption").text, "Kolkata")
             }
+        }
+
+        function test_search_results_highlight_and_jump() {
+            const event = Object.assign({}, representativeEvents()[0],
+                                        {"summary": "<b>Design</b> review & Needle"})
+            const row = createTemporaryObject(eventRowFactory, scene, {
+                "eventData": event, "width": 400, "highlight": "needle design",
+                "jumpOnClick": true})
+            const title = findChild(row, "eventRowTitle")
+            compare(title.textFormat, Text.StyledText)
+            verify(title.text.indexOf("&lt;b&gt;") >= 0, "provider markup stays literal")
+            verify(title.text.indexOf("&amp;") >= 0)
+            verify(title.text.indexOf("<b>Design</b>") >= 0, "matches keep their case")
+            verify(title.text.indexOf("<b>Needle</b>") >= 0)
+
+            const jumpSpy = createTemporaryObject(signalSpyFactory, testCase, {
+                "target": row, "signalName": "jumpRequested"})
+            const editSpy = createTemporaryObject(signalSpyFactory, testCase, {
+                "target": row, "signalName": "editRequested"})
+            row.clicked()
+            compare(jumpSpy.count, 1, "a click jumps to the result")
+            compare(editSpy.count, 0)
+            row.doubleClicked()
+            compare(editSpy.count, 1, "a double-click edits it")
+
+            row.highlight = ""
+            compare(title.textFormat, Text.PlainText)
+            compare(title.text, "<b>Design</b> review & Needle")
+        }
+
+        function test_search_filters_cover_time_and_guests() {
+            const panel = createTemporaryObject(activityFactory, scene, {"connected": true})
+            panel.open()
+            tryCompare(panel, "opened", true)
+            const requests = createTemporaryObject(signalSpyFactory, testCase, {
+                "target": panel, "signalName": "searchRequested"})
+            findChild(panel, "searchGuestFilter").text = "sam@example.com"
+            const when = findChild(panel, "searchWhenFilter")
+            when.currentIndex = 1
+            panel.submitSearch()
+            let filters = requests.signalArguments[requests.count - 1][1]
+            compare(filters.attendee, "sam@example.com")
+            verify(filters.start !== undefined && filters.end === undefined, "upcoming")
+            when.currentIndex = 2
+            panel.submitSearch()
+            filters = requests.signalArguments[requests.count - 1][1]
+            verify(filters.end !== undefined && filters.start === undefined, "past")
+            verify(!findChild(panel, "offlineSearchNote").visible)
+            panel.connected = false
+            verify(findChild(panel, "offlineSearchNote").visible)
         }
 
         function test_undo_toast_offers_undo_only_when_possible() {

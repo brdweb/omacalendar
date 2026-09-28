@@ -454,6 +454,7 @@ ApplicationWindow {
                         }
 
                         Loader {
+                            id: dayLoader
                             active: viewStack.currentIndex === 1
                             sourceComponent: Component {
                                 DayView {
@@ -485,6 +486,7 @@ ApplicationWindow {
                         }
 
                         Loader {
+                            id: weekLoader
                             active: viewStack.currentIndex === 2
                             sourceComponent: Component {
                                 WeekView {
@@ -719,6 +721,7 @@ ApplicationWindow {
         timeFormat: String(window.preferences.timeFormat || "system")
         onSearchRequested: (query, filters) => window.search(query, filters)
         onEventActivated: value => window.openEvent(value)
+        onResultJumpRequested: value => window.jumpToEvent(value)
         onInvitationResponseRequested: (invitationId, recurrenceId,
                                         expectedLocalRevision, response,
                                         recurrenceScope) =>
@@ -1714,16 +1717,50 @@ ApplicationWindow {
                                  String(preferences.displayTimeZone || ""))
     }
 
+    // Shows a search result in the calendar: its day, selected, and on a
+    // timeline scrolled to it. The year view has no events, so it opens the day.
+    function jumpToEvent(value) {
+        const start = eventStart(value)
+        if (isNaN(start.getTime())) {
+            openEvent(value)
+            return
+        }
+        if (currentView === "year")
+            setView("day")
+        selectDate(start)
+        selectedEvent = value
+        activityPanel.close()
+        if (!value.allDay) {
+            const minute = start.getHours() * 60 + start.getMinutes()
+            const dayView = currentView === "day" ? dayLoader.item as DayView : null
+            const weekView = currentView === "week" ? weekLoader.item as WeekView : null
+            if (dayView)
+                dayView.revealMinute(minute)
+            else if (weekView)
+                weekView.revealMinute(minute)
+        }
+        announce(qsTr("Showing %1, %2").arg(value.summary || qsTr("Untitled event"))
+                 .arg(Qt.formatDate(start, "dddd, MMMM d")))
+    }
+
+    // The daemon searches every cached event; without it, only the events
+    // loaded for the current views can be searched here.
     function search(query, filters) {
         const normalized = String(query || "").trim().toLowerCase()
-        if (normalized.length === 0) {
+        const requestedFilters = filters || ({})
+        const attendee = String(requestedFilters.attendee || "").trim().toLowerCase()
+        if (normalized.length === 0 && attendee.length === 0) {
             localSearchResults = []
             activeSearchFilters = ({})
             return
         }
-        const result = []
-        const requestedFilters = filters || ({})
         activeSearchFilters = requestedFilters
+        if (App.connected) {
+            localSearchResults = []
+            callApp("searchEvents", [query, requestedFilters])
+            return
+        }
+        const result = []
         const calendarIds = requestedFilters.calendarIds || []
         const rangeStart = requestedFilters.start
                 ? new Date(requestedFilters.start) : null
@@ -1764,13 +1801,22 @@ ApplicationWindow {
             let haystack = String(value.summary || "") + "\n"
                     + String(value.description || "") + "\n"
                     + String(value.location || "")
-            for (let attendeeIndex = 0; attendeeIndex < attendees.length; ++attendeeIndex)
-                haystack += "\n" + String(attendees[attendeeIndex].email || "")
-            if (haystack.toLowerCase().indexOf(normalized) >= 0)
-                result.push(value)
+            let people = ""
+            for (let attendeeIndex = 0; attendeeIndex < attendees.length; ++attendeeIndex) {
+                people += "\n" + String(attendees[attendeeIndex].email || "")
+                        + "\n" + String(attendees[attendeeIndex].displayName || "")
+            }
+            if (value.organizer)
+                people += "\n" + String(value.organizer.email || "")
+                        + "\n" + String(value.organizer.displayName || "")
+            haystack += people
+            if (normalized.length > 0 && haystack.toLowerCase().indexOf(normalized) < 0)
+                continue
+            if (attendee.length > 0 && people.toLowerCase().indexOf(attendee) < 0)
+                continue
+            result.push(value)
         }
         localSearchResults = result
-        callApp("searchEvents", [query, filters || {}])
     }
 
     function openActivity(modeName) {
