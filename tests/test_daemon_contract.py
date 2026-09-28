@@ -1491,6 +1491,20 @@ def run_account_lifecycle_contract(
     )
 
 
+def run_contacts_suggest_contract(harness: DaemonHarness) -> None:
+    result = harness.call("contacts.suggest", {"prefix": "nobody-here"})
+    require(
+        isinstance(result, dict) and result.get("contacts") == [],
+        "contacts.suggest did not return an empty list for an unknown prefix",
+    )
+    for params, context in (
+        ({}, "contacts.suggest without a prefix"),
+        ({"prefix": "   "}, "contacts.suggest with a blank prefix"),
+        ({"prefix": 3}, "contacts.suggest with a non-string prefix"),
+    ):
+        assert_ipc_error(harness.call_error("contacts.suggest", params), "invalid_params", context)
+
+
 def run_settings_get_many_contract(harness: DaemonHarness) -> None:
     harness.call("settings.set", {"key": "workDayStart", "value": 7})
     keys = ["workDayStart", "timeFormat", "defaultCalendarId"]
@@ -1686,6 +1700,7 @@ def run_contract(harness: DaemonHarness) -> None:
     require(schema == SCHEMA_VERSION, "database PRAGMA user_version is not schema 3")
     require(database_revision == initial_revision, "database/API revision mismatch")
     run_settings_get_many_contract(harness)
+    run_contacts_suggest_contract(harness)
     for owned_directory in (
         harness.root / "data" / "omacalendar",
         harness.root / "config" / "omacalendar",

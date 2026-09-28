@@ -5424,6 +5424,53 @@ bool Database::persistInvitationBaselines(const QList<Event>& invitations,
   return !changed || bumpChangeRevision(errorMessage);
 }
 
+QJsonArray Database::contactSuggestions(const QString& prefix, const int limit,
+                                        QString* errorMessage) const {
+  QString needle = prefix.trimmed().toLower();
+  needle.replace(QLatin1Char('\\'), QStringLiteral("\\\\"));
+  needle.replace(QLatin1Char('%'), QStringLiteral("\\%"));
+  needle.replace(QLatin1Char('_'), QStringLiteral("\\_"));
+  QSqlQuery query(m_database);
+  query.prepare(QStringLiteral(R"SQL(
+    WITH people AS (
+      SELECT lower(trim(json_extract(attendee.value, '$.email'))) AS email,
+             COALESCE(json_extract(attendee.value, '$.displayName'), '') AS name
+      FROM events AS e, json_each(e.attendees_json) AS attendee
+      WHERE e.deleted=0 AND json_valid(e.attendees_json)
+        AND json_type(attendee.value) = 'object'
+      UNION ALL
+      SELECT lower(trim(json_extract(e.organizer_json, '$.email'))),
+             COALESCE(json_extract(e.organizer_json, '$.displayName'), '')
+      FROM events AS e
+      WHERE e.deleted=0 AND json_valid(e.organizer_json)
+        AND json_type(e.organizer_json) = 'object'
+    )
+    SELECT email, MAX(name) AS name, COUNT(*) AS uses FROM people
+    WHERE email IS NOT NULL AND email LIKE '%_@_%'
+      AND (email LIKE ? || '%' ESCAPE '\' OR lower(name) LIKE '%' || ? || '%' ESCAPE '\')
+    GROUP BY email
+    ORDER BY uses DESC, email
+    LIMIT ?
+  )SQL"));
+  query.addBindValue(needle);
+  query.addBindValue(needle);
+  query.addBindValue(limit);
+  QJsonArray result;
+  if (!query.exec()) {
+    if (errorMessage != nullptr) {
+      *errorMessage = sqlError(query, QStringLiteral("suggest contacts"));
+    }
+    return result;
+  }
+  while (query.next()) {
+    result.append(QJsonObject{
+        {QStringLiteral("email"), query.value(0).toString()},
+        {QStringLiteral("displayName"), query.value(1).toString()},
+    });
+  }
+  return result;
+}
+
 QList<Event> Database::searchEvents(const QString& text, const QStringList& calendarIds,
                                     const int limit, const int offset,
                                     QString* errorMessage) const {

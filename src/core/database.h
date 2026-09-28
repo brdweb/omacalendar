@@ -202,6 +202,10 @@ class Database final {
                                  QString* errorMessage = nullptr) const;
   [[nodiscard]] QList<Event> eventsByUid(const QString& calendarId, const QString& uid,
                                          QString* errorMessage = nullptr) const;
+  // Distinct guest and organizer addresses from cached events whose address
+  // starts with, or whose name contains, prefix; most used first.
+  [[nodiscard]] QJsonArray contactSuggestions(const QString& prefix, int limit,
+                                              QString* errorMessage = nullptr) const;
   [[nodiscard]] QList<Event> searchEvents(const QString& text,
                                           const QStringList& calendarIds = {},
                                           int limit = 100, int offset = 0,

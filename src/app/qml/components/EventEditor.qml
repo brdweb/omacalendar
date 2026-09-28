@@ -28,7 +28,7 @@ Dialog {
                                      || sourceCalendar.readOnly === true
     readonly property bool recurring: Boolean(eventData && (eventData.recurrenceRule
                                                               || eventData.recurrenceId))
-    readonly property bool hasGuests: attendeeField.text.trim().length > 0
+    readonly property bool hasGuests: attendeeEditor.hasGuests
     readonly property var writableCalendars: App.calendars.filter(
                                                  function(calendar) {
                                                      return calendar.enabled !== false
@@ -82,7 +82,8 @@ Dialog {
         locationField.text = ""
         urlField.text = ""
         notesField.text = ""
-        attendeeField.text = ""
+        attendeeEditor.organizerEmail = ""
+        attendeeEditor.load([])
         allDay.checked = false
         timeKindBox.currentIndex = 0
         const startValue = new Date(dateValue.getFullYear(), dateValue.getMonth(),
@@ -122,7 +123,8 @@ Dialog {
         locationField.text = eventData.location || ""
         urlField.text = eventData.url || eventData.meetingUrl || ""
         notesField.text = eventData.description || ""
-        attendeeField.text = attendeeText(eventData.attendees || [])
+        attendeeEditor.organizerEmail = String((eventData.organizer || {}).email || "")
+        attendeeEditor.load(eventData.attendees || [])
         allDay.checked = eventData.allDay === true
         timeKindBox.currentIndex = eventData.timeKind === "floating" ? 1 : 0
         const start = eventData.allDay
@@ -262,6 +264,9 @@ Dialog {
                     && !App.isValidTimeZone(selectedTimeZone()))
                 return qsTr("Enter a valid IANA time zone.")
         }
+        const attendeeError = attendeeEditor.validationError()
+        if (attendeeError)
+            return attendeeError
         const recurrenceError = recurrenceEditor.validationError()
         if (recurrenceError)
             return recurrenceError
@@ -291,31 +296,7 @@ Dialog {
     }
 
     function parsedAttendees() {
-        const values = attendeeField.text.split(/[\n,;]/)
-        const result = []
-        const existing = eventData.attendees || []
-        for (let index = 0; index < values.length; ++index) {
-            const email = values[index].trim()
-            if (email.length === 0)
-                continue
-            let preserved = null
-            for (let candidateIndex = 0; candidateIndex < existing.length;
-                 ++candidateIndex) {
-                const candidate = existing[candidateIndex]
-                if (String(candidate.email || "").toLowerCase()
-                        === email.toLowerCase()) {
-                    preserved = Object.assign({}, candidate)
-                    break
-                }
-            }
-            if (preserved) {
-                preserved.email = email
-                result.push(preserved)
-            } else {
-                result.push({"email": email})
-            }
-        }
-        return result
+        return attendeeEditor.result()
     }
 
     function reminderValues() {
@@ -406,15 +387,6 @@ Dialog {
         const timestamp = isNaN(parsed.getTime())
                 ? String(value) : Qt.formatDateTime(parsed, Locale.ShortFormat)
         return reminderMethodLabel(method) + qsTr(" at ") + timestamp
-    }
-
-    function attendeeText(values) {
-        const result = []
-        for (let index = 0; index < values.length; ++index) {
-            if (values[index].email)
-                result.push(values[index].email)
-        }
-        return result.join(", ")
     }
 
     function calendarIndex(calendarId) {
@@ -833,22 +805,10 @@ Dialog {
                 }
 
                 SectionLabel { text: qsTr("GUESTS") }
-                TextArea {
-                    id: attendeeField
+                AttendeeEditor {
+                    id: attendeeEditor
                     Layout.fillWidth: true
-                    Layout.preferredHeight: 64
-                    placeholderText: qsTr("Guest email addresses, separated by commas")
-                    color: Theme.text
-                    placeholderTextColor: Theme.mutedText
-                    enabled: !editor.readOnly && editor.attendeeEditingSupported
-                    wrapMode: TextEdit.Wrap
-                    selectByMouse: true
-                    Accessible.name: qsTr("Event guests")
-                    background: Rectangle {
-                        radius: Theme.radiusMD
-                        color: Theme.background
-                        border.color: attendeeField.activeFocus ? Theme.focus : Theme.border
-                    }
+                    editable: !editor.readOnly && editor.attendeeEditingSupported
                 }
                 AppComboBox {
                     id: notificationBox

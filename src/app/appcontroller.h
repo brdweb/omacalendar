@@ -101,6 +101,9 @@ class AppController final : public QObject {
                              const QVariantMap& mutationOptions = {});
   Q_INVOKABLE void requestDeleteEvent(const QString& eventId,
                                       const QVariantMap& mutationOptions = {});
+  // Asks for guest addresses seen in cached events; answers with
+  // contactSuggestionsReady. Quietly does nothing while disconnected.
+  Q_INVOKABLE void suggestContacts(const QString& prefix);
   Q_INVOKABLE void searchEvents(const QString& query, const QVariantMap& filters = {});
   Q_INVOKABLE void respondToInvitation(const QString& eventId, const QString& response,
                                        const QString& recurrenceScope,
@@ -186,6 +189,7 @@ class AppController final : public QObject {
   void selectedDateChanged();
   void googleOAuthConfiguredChanged();
   void eventSaved();
+  void contactSuggestionsReady(const QString& prefix, const QVariantList& contacts);
   void accountSetupStarted();
   void icsImportPreviewReady(const QVariantMap& preview);
   void icsImportCompleted(const QVariantMap& result);

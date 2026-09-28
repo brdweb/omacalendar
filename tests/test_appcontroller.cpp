@@ -62,6 +62,7 @@ class FakeDaemon final : public QObject {
   [[nodiscard]] QJsonArray subscribedTopics() const { return m_subscribedTopics; }
   void setOperations(const QJsonArray& items) { m_operations = items; }
   void setConflicts(const QJsonArray& conflicts) { m_conflicts = conflicts; }
+  void setContacts(const QJsonArray& contacts) { m_contacts = contacts; }
 
   // Behave like an IPC 2.1 daemon, which has no settings.getMany.
   void setSettingsGetManySupported(const bool supported) {
@@ -149,6 +150,10 @@ class FakeDaemon final : public QObject {
         response.insert(QStringLiteral("result"),
                         QJsonObject{{QStringLiteral("items"), m_operations},
                                     {QStringLiteral("count"), m_operations.size()}});
+      } else if (method == QStringLiteral("contacts.suggest")) {
+        response.insert(QStringLiteral("result"),
+                        QJsonObject{{QStringLiteral("prefix"), params.value("prefix")},
+                                    {QStringLiteral("contacts"), m_contacts}});
       } else if (method == QStringLiteral("conflicts.list")) {
         response.insert(QStringLiteral("result"),
                         QJsonObject{{QStringLiteral("conflicts"), m_conflicts},
@@ -215,6 +220,7 @@ class FakeDaemon final : public QObject {
   QJsonArray m_subscribedTopics;
   QJsonArray m_operations;
   QJsonArray m_conflicts;
+  QJsonArray m_contacts;
   QJsonArray m_calendars{
       QJsonObject{{QStringLiteral("id"), QStringLiteral("local-default")},
                   {QStringLiteral("enabled"), true}},
@@ -259,6 +265,7 @@ class AppControllerTest final : public QObject {
   void activityListsLoadAndRefreshIndependently();
   void preferencesLoadInOneRequest();
   void preferencesFallBackWithoutGetMany();
+  void contactSuggestionsAreRelayed();
 
  private:
   QTemporaryDir m_xdgRoot;
@@ -902,6 +909,28 @@ void AppControllerTest::preferencesFallBackWithoutGetMany() {
   methods = settledMethods(daemon);
   QCOMPARE(methods.count(QStringLiteral("settings.getMany")), 0);
   QCOMPARE(methods.count(QStringLiteral("settings.get")), 10);
+}
+
+void AppControllerTest::contactSuggestionsAreRelayed() {
+  FakeDaemon daemon(0);
+  daemon.setContacts(QJsonArray{
+      QJsonObject{{QStringLiteral("email"), QStringLiteral("sam@example.com")},
+                  {QStringLiteral("displayName"), QStringLiteral("Sam")}}});
+  QVERIFY(daemon.listen());
+  AppController controller;
+  QTRY_VERIFY(controller.connected());
+  QSignalSpy ready(&controller, &AppController::contactSuggestionsReady);
+  controller.suggestContacts(QStringLiteral("  sa "));
+  QTRY_COMPARE(ready.count(), 1);
+  QCOMPARE(ready.first().at(0).toString(), QStringLiteral("sa"));
+  const QVariantList contacts = ready.first().at(1).toList();
+  QCOMPARE(contacts.size(), 1);
+  QCOMPARE(contacts.first().toMap().value(QStringLiteral("email")).toString(),
+           QStringLiteral("sam@example.com"));
+  // A blank prefix asks nothing.
+  controller.suggestContacts(QStringLiteral("   "));
+  QTest::qWait(200);
+  QCOMPARE(ready.count(), 1);
 }
 
 #include "test_appcontroller.moc"

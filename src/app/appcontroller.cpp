@@ -670,6 +670,24 @@ void AppController::requestRangePage(const quint64 generation, const int offset,
       });
 }
 
+void AppController::suggestContacts(const QString& prefix) {
+  const QString trimmed = prefix.trimmed();
+  if (trimmed.isEmpty() || !connected()) {
+    return;
+  }
+  send(
+      QStringLiteral("contacts.suggest"),
+      {{QStringLiteral("prefix"), trimmed}, {QStringLiteral("limit"), 8}},
+      [this, trimmed](const QJsonValue& value) {
+        emit contactSuggestionsReady(trimmed,
+                                     variantList(value, QStringLiteral("contacts")));
+      },
+      false,
+      // Suggestions are optional; an older daemon without the method, or any
+      // other failure, simply offers none.
+      [](const QJsonObject&) { return true; });
+}
+
 void AppController::createEvent(const QVariantMap& values) { saveEvent(values, {}); }
 
 void AppController::updateEvent(const QVariantMap& values) { saveEvent(values, {}); }

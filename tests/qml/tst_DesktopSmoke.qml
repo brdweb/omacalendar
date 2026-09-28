@@ -21,6 +21,7 @@ Item {
     Component { id: timelineCanvasFactory; Components.TimelineCanvas {} }
     Component { id: timelineEventFactory; Components.TimelineEvent {} }
     Component { id: editorFactory; Components.EventEditor {} }
+    Component { id: attendeeEditorFactory; Components.AttendeeEditor {} }
     Component { id: mutationConfirmationFactory; Components.MutationConfirmationDialog {} }
     Component { id: activityFactory; Components.ActivityPanel {} }
     Component { id: settingsFactory; Components.AccountSettingsDrawer {} }
@@ -373,6 +374,39 @@ Item {
             compare(preview.text,
                     "Every 2 weeks on Monday, Wednesday and Friday, 5 times")
             editor.close()
+        }
+
+        function test_attendee_chips_keep_guests_and_flag_bad_addresses() {
+            const guests = createTemporaryObject(attendeeEditorFactory, scene, {
+                "width": 500, "organizerEmail": "avery@example.com"})
+            verify(guests !== null)
+            guests.load([{"email": "avery@example.com", "displayName": "Avery"},
+                         {"email": "me@example.com", "partstat": "ACCEPTED",
+                          "xProvider": "keep"}])
+            wait(0)
+            const organizerChip = findChild(guests, "attendeeChip-0")
+            verify(organizerChip !== null)
+            verify(organizerChip.Accessible.name.indexOf("organizer") >= 0)
+            verify(findChild(guests, "attendeeChip-1").Accessible.name.indexOf("Accepted") >= 0)
+
+            const input = findChild(guests, "attendeeInput")
+            input.text = "bob@example.com, ME@example.com"
+            verify(guests.commitInput())
+            compare(guests.attendees.length, 3, "duplicates are ignored case-insensitively")
+            compare(input.text, "")
+
+            input.text = "not-an-address"
+            verify(!guests.commitInput())
+            compare(input.text, "not-an-address", "a bad address stays for correction")
+            verify(guests.validationError().indexOf("not-an-address") >= 0)
+            input.text = ""
+            guests.invalidEntry = ""
+
+            guests.removeAt(2)
+            const saved = guests.result()
+            compare(saved.length, 2)
+            compare(saved[1].xProvider, "keep", "provider attendee fields survive")
+            compare(saved[1].partstat, "ACCEPTED")
         }
 
         function test_provider_markup_remains_literal() {
