@@ -26,7 +26,7 @@ namespace {
 
 // Answers the desktop controller like omacalendard does, with events.list
 // capped at the daemon's default page size so multi-page ranges are
-// exercised. Every other method succeeds with an empty result.
+// exercised. Calendar visibility, sets, operations and conflicts can change.
 class FakeDaemon final : public QObject {
  public:
   static constexpr int kPageCap = 500;
@@ -59,6 +59,9 @@ class FakeDaemon final : public QObject {
   // Every method received, in order.
   [[nodiscard]] QStringList methods() const { return m_methods; }
   void clearMethods() { m_methods.clear(); }
+  [[nodiscard]] QJsonArray subscribedTopics() const { return m_subscribedTopics; }
+  void setOperations(const QJsonArray& items) { m_operations = items; }
+  void setConflicts(const QJsonArray& conflicts) { m_conflicts = conflicts; }
 
   // Behave like an IPC 2.1 daemon, which has no settings.getMany.
   void setSettingsGetManySupported(const bool supported) {
@@ -89,6 +92,9 @@ class FakeDaemon final : public QObject {
                            {QStringLiteral("result"), QJsonObject()}};
       const QString method = request.value(QStringLiteral("method")).toString();
       m_methods.append(method);
+      if (method == QStringLiteral("system.subscribe")) {
+        m_subscribedTopics = params.value(QStringLiteral("topics")).toArray();
+      }
       if (method == QStringLiteral("settings.getMany")) {
         if (m_settingsGetManySupported) {
           QJsonObject values = params.value(QStringLiteral("fallbacks")).toObject();
@@ -138,6 +144,14 @@ class FakeDaemon final : public QObject {
             break;
           }
         }
+      } else if (method == QStringLiteral("outbox.list")) {
+        response.insert(QStringLiteral("result"),
+                        QJsonObject{{QStringLiteral("items"), m_operations},
+                                    {QStringLiteral("count"), m_operations.size()}});
+      } else if (method == QStringLiteral("conflicts.list")) {
+        response.insert(QStringLiteral("result"),
+                        QJsonObject{{QStringLiteral("conflicts"), m_conflicts},
+                                    {QStringLiteral("count"), m_conflicts.size()}});
       } else if (method == QStringLiteral("events.list")) {
         m_eventListRequests.append(params);
         const QJsonObject page = eventPage(params);
@@ -197,6 +211,9 @@ class FakeDaemon final : public QObject {
   QJsonObject m_settings;
   bool m_settingsGetManySupported = true;
   QList<QJsonObject> m_eventListRequests;
+  QJsonArray m_subscribedTopics;
+  QJsonArray m_operations;
+  QJsonArray m_conflicts;
   QJsonArray m_calendars{
       QJsonObject{{QStringLiteral("id"), QStringLiteral("local-default")},
                   {QStringLiteral("enabled"), true}},
@@ -238,6 +255,7 @@ class AppControllerTest final : public QObject {
   void oversizedRangePagesAreRequestedInSmallerPages();
   void requestsOnlyVisibleCalendars();
   void notificationsReloadOnlyWhatChanged();
+  void activityListsLoadAndRefreshIndependently();
   void preferencesLoadInOneRequest();
   void preferencesFallBackWithoutGetMany();
 
@@ -787,6 +805,47 @@ void AppControllerTest::notificationsReloadOnlyWhatChanged() {
   QCOMPARE(settledMethods(daemon), (QStringList{QStringLiteral("calendarSets.list"),
                                                 QStringLiteral("events.list"),
                                                 QStringLiteral("invitations.list")}));
+}
+
+void AppControllerTest::activityListsLoadAndRefreshIndependently() {
+  FakeDaemon daemon(0);
+  daemon.setOperations(QJsonArray{
+      QJsonObject{{QStringLiteral("id"), 11},
+                  {QStringLiteral("state"), QStringLiteral("blocked")}}});
+  daemon.setConflicts(QJsonArray{
+      QJsonObject{{QStringLiteral("id"), 12},
+                  {QStringLiteral("strategy"), QStringLiteral("keep_remote")}}});
+  QVERIFY(daemon.listen());
+  AppController controller;
+  QTRY_COMPARE(controller.operationsModel()->rowCount(), 1);
+  QTRY_COMPARE(controller.conflictsModel()->rowCount(), 1);
+  QCOMPARE(controller.operations().constFirst().toMap().value(QStringLiteral("state"))
+               .toString(), QStringLiteral("blocked"));
+  QCOMPARE(controller.conflicts().constFirst().toMap().value(QStringLiteral("id"))
+               .toInt(), 12);
+  QVERIFY(daemon.subscribedTopics().contains(QStringLiteral("operations")));
+  QVERIFY(daemon.subscribedTopics().contains(QStringLiteral("conflicts")));
+  settledMethods(daemon);
+
+  daemon.setOperations(QJsonArray{
+      QJsonObject{{QStringLiteral("id"), 11},
+                  {QStringLiteral("state"), QStringLiteral("pending")}},
+      QJsonObject{{QStringLiteral("id"), 13},
+                  {QStringLiteral("state"), QStringLiteral("blocked")}}});
+  daemon.clearMethods();
+  daemon.broadcast(QStringLiteral("operations.changed"));
+  QCOMPARE(settledMethods(daemon), QStringList{QStringLiteral("outbox.list")});
+  QCOMPARE(controller.operationsModel()->rowCount(), 2);
+  QCOMPARE(controller.operations().constFirst().toMap().value(QStringLiteral("state"))
+               .toString(), QStringLiteral("pending"));
+  QCOMPARE(controller.conflictsModel()->rowCount(), 1);
+
+  daemon.setConflicts({});
+  daemon.clearMethods();
+  daemon.broadcast(QStringLiteral("conflicts.changed"));
+  QCOMPARE(settledMethods(daemon), QStringList{QStringLiteral("conflicts.list")});
+  QCOMPARE(controller.conflictsModel()->rowCount(), 0);
+  QCOMPARE(controller.operationsModel()->rowCount(), 2);
 }
 
 void AppControllerTest::preferencesLoadInOneRequest() {

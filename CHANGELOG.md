@@ -45,6 +45,8 @@ Versioning once public releases begin.
 - The year view counts an event on every day it covers, matching the month
   and agenda views, instead of only on its start date, so multi-day events
   and overnight events no longer leave their later days looking empty.
+- The activity panel loads queued operations and conflicts on connection, then
+  refreshes each list when its daemon notification arrives (#64).
 
 ## [1.1.1] - 2026-09-22
 

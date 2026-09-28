@@ -119,7 +119,8 @@ AppController::AppController(QObject* parent) : QObject(parent) {
            QJsonArray{QStringLiteral("accounts"), QStringLiteral("calendars"),
                       QStringLiteral("calendarSets"), QStringLiteral("events"),
                       QStringLiteral("invitations"), QStringLiteral("reminders"),
-                      QStringLiteral("sync"), QStringLiteral("google")}}};
+                      QStringLiteral("sync"), QStringLiteral("google"),
+                      QStringLiteral("operations"), QStringLiteral("conflicts")}}};
       if (m_subscriptionRevision >= 0) {
         subscription.insert(QStringLiteral("sinceRevision"), m_subscriptionRevision);
       }
@@ -353,6 +354,12 @@ int AppController::refreshPartsForNotification(const QString& event) {
   if (event == QStringLiteral("calendarSets.changed")) {
     return RefreshCalendarSets;
   }
+  if (event == QStringLiteral("operations.changed")) {
+    return RefreshOperations;
+  }
+  if (event == QStringLiteral("conflicts.changed")) {
+    return RefreshConflicts;
+  }
   // Calendar changes can hide or remove events, invalidate the default
   // calendar, and change calendar-set membership: new calendars join the
   // built-in set and removed ones leave every set. Account changes can do
@@ -448,6 +455,20 @@ void AppController::refreshParts(const int parts) {
       applyDisplayTimes(&m_invitations);
       m_invitationsModel.replace(m_invitations);
       emit invitationsChanged();
+    });
+  }
+  if ((parts & RefreshOperations) != 0) {
+    background(QStringLiteral("outbox.list"), {}, [this](const QJsonValue& value) {
+      m_operations = variantList(value, QStringLiteral("items"));
+      m_operationsModel.replace(m_operations);
+      emit operationsChanged();
+    });
+  }
+  if ((parts & RefreshConflicts) != 0) {
+    background(QStringLiteral("conflicts.list"), {}, [this](const QJsonValue& value) {
+      m_conflicts = variantList(value, QStringLiteral("conflicts"));
+      m_conflictsModel.replace(m_conflicts);
+      emit conflictsChanged();
     });
   }
   if ((parts & RefreshPreferences) != 0) {

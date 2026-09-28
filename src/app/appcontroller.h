@@ -232,7 +232,9 @@ class AppController final : public QObject {
     RefreshInvitations = 1 << 4,
     RefreshPreferences = 1 << 5,
     RefreshEvents = 1 << 6,
-    RefreshAll = (1 << 7) - 1,
+    RefreshOperations = 1 << 7,
+    RefreshConflicts = 1 << 8,
+    RefreshAll = (1 << 9) - 1,
   };
 
   // The daemon's default events.list page size. Pages shrink when a response
