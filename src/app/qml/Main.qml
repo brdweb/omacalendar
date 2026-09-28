@@ -276,6 +276,13 @@ ApplicationWindow {
             }
 
             AppButton {
+                text: qsTr("Quick add")
+                quiet: true
+                toolTipText: qsTr("Describe an event in one line  Q")
+                onClicked: quickAdd.openEmpty()
+            }
+
+            AppButton {
                 text: qsTr("New event")
                 iconText: "+"
                 primary: true
@@ -605,6 +612,11 @@ ApplicationWindow {
         onJoinRequested: url => App.openExternalEventUrl(url)
     }
 
+    QuickAddDialog {
+        id: quickAdd
+        onDraftAccepted: draft => editor.openDraft(draft, App.selectedDate)
+    }
+
     MutationConfirmationDialog {
         id: mutationConfirmation
         onConfirmed: (context, options) => {
@@ -837,6 +849,12 @@ ApplicationWindow {
         sequence: "Ctrl+N"
         context: Qt.ApplicationShortcut
         onActivated: editor.openNew(App.selectedDate, 540)
+    }
+    Shortcut {
+        sequences: ["Ctrl+Shift+N", "Q"]
+        enabled: window.navigationShortcutsEnabled()
+        context: Qt.ApplicationShortcut
+        onActivated: quickAdd.openEmpty()
     }
     Shortcut {
         sequence: "Ctrl+F"
@@ -1619,5 +1637,6 @@ ApplicationWindow {
 
     function navigationShortcutsEnabled() {
         return !editor.opened && !settingsDrawer.opened && !activityPanel.opened
+               && !quickAdd.opened
     }
 }

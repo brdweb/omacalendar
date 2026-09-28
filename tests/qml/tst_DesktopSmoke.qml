@@ -376,6 +376,44 @@ Item {
             editor.close()
         }
 
+        function test_quick_add_draft_prefills_the_editor() {
+            const editor = createTemporaryObject(editorFactory, scene)
+            verify(editor !== null)
+            editorSaveSpy.target = editor
+            editorSaveSpy.clear()
+
+            editor.openDraft({"title": "Trip to Denver", "location": "", "recurrenceRule": "",
+                              "date": "2026-10-03", "endDate": "2026-10-07",
+                              "allDay": true, "startMinute": -1, "durationMinutes": 0},
+                             new Date(2026, 8, 28))
+            tryCompare(editor, "opened", true)
+            editor.submit()
+            compare(editorSaveSpy.count, 1)
+            const trip = editorSaveSpy.signalArguments[0][0]
+            compare(trip.summary, "Trip to Denver")
+            compare(trip.allDay, true)
+            compare(trip.startDate, "2026-10-03")
+            compare(trip.endDate, "2026-10-07", "the exclusive end survives the editor")
+            tryCompare(editor, "opened", false)
+
+            editorSaveSpy.clear()
+            editor.openDraft({"title": "Standup", "location": "Room 4",
+                              "recurrenceRule": "FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR",
+                              "date": "", "endDate": "", "allDay": false,
+                              "startMinute": 555, "durationMinutes": 15},
+                             new Date(2026, 8, 28))
+            tryCompare(editor, "opened", true)
+            editor.submit()
+            compare(editorSaveSpy.count, 1)
+            const standup = editorSaveSpy.signalArguments[0][0]
+            compare(standup.summary, "Standup")
+            compare(standup.location, "Room 4")
+            compare(standup.allDay, false)
+            compare(standup.recurrenceRule, "FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR")
+            compare((Date.parse(standup.endUtc) - Date.parse(standup.startUtc)) / 60000, 15)
+            tryCompare(editor, "opened", false)
+        }
+
         function test_attendee_chips_keep_guests_and_flag_bad_addresses() {
             const guests = createTemporaryObject(attendeeEditorFactory, scene, {
                 "width": 500, "organizerEmail": "avery@example.com"})

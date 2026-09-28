@@ -18,6 +18,7 @@
 
 #include "core/domain.h"
 #include "core/paths.h"
+#include "core/quickadd.h"
 #include "providers/google/googleoauthconfig.h"
 #include "startuprequest.h"
 
@@ -668,6 +669,22 @@ void AppController::requestRangePage(const quint64 generation, const int offset,
         }
         return false;
       });
+}
+
+QVariantMap AppController::parseQuickAdd(const QString& text) const {
+  const QuickAddDraft draft = omacalendar::parseQuickAdd(text, QDate::currentDate());
+  return {
+      {QStringLiteral("title"), draft.title},
+      {QStringLiteral("location"), draft.location},
+      {QStringLiteral("recurrenceRule"), draft.recurrenceRule},
+      {QStringLiteral("date"),
+       draft.date.isValid() ? draft.date.toString(Qt::ISODate) : QString()},
+      {QStringLiteral("endDate"),
+       draft.endDate.isValid() ? draft.endDate.toString(Qt::ISODate) : QString()},
+      {QStringLiteral("allDay"), draft.allDay},
+      {QStringLiteral("startMinute"), draft.startMinute},
+      {QStringLiteral("durationMinutes"), draft.durationMinutes},
+  };
 }
 
 void AppController::suggestContacts(const QString& prefix) {

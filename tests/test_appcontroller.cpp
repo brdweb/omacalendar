@@ -266,6 +266,7 @@ class AppControllerTest final : public QObject {
   void preferencesLoadInOneRequest();
   void preferencesFallBackWithoutGetMany();
   void contactSuggestionsAreRelayed();
+  void quickAddTextBecomesAnEditorDraft();
 
  private:
   QTemporaryDir m_xdgRoot;
@@ -931,6 +932,29 @@ void AppControllerTest::contactSuggestionsAreRelayed() {
   controller.suggestContacts(QStringLiteral("   "));
   QTest::qWait(200);
   QCOMPARE(ready.count(), 1);
+}
+
+void AppControllerTest::quickAddTextBecomesAnEditorDraft() {
+  AppController controller;
+  const QVariantMap draft =
+      controller.parseQuickAdd(QStringLiteral("Lunch with Sam fri 12:30 1h @ Café"));
+  QCOMPARE(draft.value(QStringLiteral("title")).toString(),
+           QStringLiteral("Lunch with Sam"));
+  QCOMPARE(draft.value(QStringLiteral("location")).toString(), QStringLiteral("Café"));
+  QCOMPARE(draft.value(QStringLiteral("startMinute")).toInt(), 12 * 60 + 30);
+  QCOMPARE(draft.value(QStringLiteral("durationMinutes")).toInt(), 60);
+  QCOMPARE(draft.value(QStringLiteral("allDay")).toBool(), false);
+  const QDate date =
+      QDate::fromString(draft.value(QStringLiteral("date")).toString(), Qt::ISODate);
+  QVERIFY(date.isValid());
+  QCOMPARE(date.dayOfWeek(), 5);
+  QVERIFY(date >= QDate::currentDate() && date < QDate::currentDate().addDays(7));
+  QVERIFY(draft.value(QStringLiteral("endDate")).toString().isEmpty());
+
+  const QVariantMap untimed = controller.parseQuickAdd(QStringLiteral("Read"));
+  QCOMPARE(untimed.value(QStringLiteral("title")).toString(), QStringLiteral("Read"));
+  QVERIFY(untimed.value(QStringLiteral("date")).toString().isEmpty());
+  QCOMPARE(untimed.value(QStringLiteral("startMinute")).toInt(), -1);
 }
 
 #include "test_appcontroller.moc"

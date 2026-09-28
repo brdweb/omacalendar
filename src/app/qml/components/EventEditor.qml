@@ -114,6 +114,25 @@ Dialog {
         titleField.forceActiveFocus()
     }
 
+    // Opens a new event pre-filled from a quick-add draft; fallbackDate is used
+    // when the text named no day.
+    function openDraft(draft, fallbackDate) {
+        const date = draft.date ? new Date(draft.date + "T00:00:00") : fallbackDate
+        openNew(date, draft.startMinute >= 0 ? draft.startMinute : defaultStartMinute,
+                draft.durationMinutes > 0 ? draft.durationMinutes : undefined)
+        titleField.text = draft.title || ""
+        locationField.text = draft.location || ""
+        if (draft.allDay) {
+            allDay.checked = true
+            if (draft.endDate) {
+                const inclusiveEnd = new Date(draft.endDate + "T00:00:00")
+                inclusiveEnd.setDate(inclusiveEnd.getDate() - 1)
+                endDateField.text = Qt.formatDate(inclusiveEnd, "yyyy-MM-dd")
+            }
+        }
+        recurrenceEditor.load(draft.recurrenceRule || "")
+    }
+
     function openExisting(value) {
         eventData = value || ({})
         editing = Boolean(eventData.id)

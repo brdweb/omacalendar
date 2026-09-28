@@ -48,6 +48,7 @@ qt_add_qml_module(omacalendar
     qml/components/IcsImportDialog.qml
     qml/components/MonthCell.qml
     qml/components/MutationConfirmationDialog.qml
+    qml/components/QuickAddDialog.qml
     qml/components/RecurrenceEditor.qml
     qml/components/SectionLabel.qml
     qml/components/SettingsAccountsTab.qml

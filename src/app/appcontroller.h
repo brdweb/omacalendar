@@ -104,6 +104,10 @@ class AppController final : public QObject {
   // Asks for guest addresses seen in cached events; answers with
   // contactSuggestionsReady. Quietly does nothing while disconnected.
   Q_INVOKABLE void suggestContacts(const QString& prefix);
+  // Reads one line of quick-add text into an editor draft: title, location,
+  // recurrenceRule, date and endDate (yyyy-MM-dd, empty when not given),
+  // allDay, startMinute (-1 when not given) and durationMinutes (0 likewise).
+  Q_INVOKABLE [[nodiscard]] QVariantMap parseQuickAdd(const QString& text) const;
   Q_INVOKABLE void searchEvents(const QString& query, const QVariantMap& filters = {});
   Q_INVOKABLE void respondToInvitation(const QString& eventId, const QString& response,
                                        const QString& recurrenceScope,
