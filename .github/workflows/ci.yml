@@ -161,6 +161,9 @@ jobs:
           UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1
           QT_NO_GLIB: '1'
           QT_QPA_PLATFORM: offscreen
+          # Sanitizers slow the daemon's startup over the 120,000-event
+          # performance fixture; startup time is reported, not gated.
+          OMACALENDAR_PERF_STARTUP_TIMEOUT: '120'
         run: ctest --test-dir build-sanitized --output-on-failure
 
   arch-current:

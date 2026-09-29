@@ -65,6 +65,8 @@ class CalDavTaskSync final : public QObject {
   QHash<QString, std::shared_ptr<Job>> m_jobs;
   // Accounts to sync again once their running job ends.
   QSet<QString> m_again;
+  // A rerun owed after a finished job, until it starts; counts as syncing.
+  QSet<QString> m_rerunQueued;
 };
 
 }  // namespace omacalendar::caldav

@@ -60,12 +60,13 @@ bool CalDavTaskSync::current(const std::shared_ptr<Job>& job) const {
 }
 
 bool CalDavTaskSync::isSyncing(const QString& accountId) const {
-  return m_jobs.contains(accountId);
+  return m_jobs.contains(accountId) || m_rerunQueued.contains(accountId);
 }
 
 void CalDavTaskSync::cancel(const QString& accountId) {
   m_jobs.remove(accountId);
   m_again.remove(accountId);
+  m_rerunQueued.remove(accountId);
 }
 
 void CalDavTaskSync::syncDiscovered(const QString& accountId, const QUrl& homeUrl,
@@ -146,6 +147,7 @@ void CalDavTaskSync::syncStored(const QString& accountId) {
     m_again.insert(accountId);
     return;
   }
+  m_rerunQueued.remove(accountId);
   auto job = std::make_shared<Job>();
   job->accountId = accountId;
   for (const TaskList& list : m_database->taskLists()) {
@@ -471,7 +473,12 @@ void CalDavTaskSync::finish(const std::shared_ptr<Job>& job) {
     emit tasksChanged(changed);
   }
   if (m_again.remove(accountId)) {
-    QTimer::singleShot(0, this, [this, accountId]() { syncStored(accountId); });
+    m_rerunQueued.insert(accountId);
+    QTimer::singleShot(0, this, [this, accountId]() {
+      if (m_rerunQueued.contains(accountId)) {
+        syncStored(accountId);
+      }
+    });
   }
 }
 

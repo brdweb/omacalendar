@@ -120,6 +120,12 @@ class IsolatedDaemon:
         self.process: subprocess.Popen[bytes] | None = None
         self._log_file: Any = None
         self.env = os.environ.copy()
+        # Seconds from launch to the first answered ping, per start. Startup is
+        # reported, not gated; sanitizer builds may raise the limit through
+        # OMACALENDAR_PERF_STARTUP_TIMEOUT.
+        self.startup_seconds: list[float] = []
+        self.startup_timeout = float(
+            os.environ.get("OMACALENDAR_PERF_STARTUP_TIMEOUT", "15"))
 
         for name, relative in {
             "XDG_DATA_HOME": "data",
@@ -156,7 +162,8 @@ class IsolatedDaemon:
             stdout=self._log_file,
             stderr=subprocess.STDOUT,
         )
-        deadline = time.monotonic() + 15.0
+        launched = time.monotonic()
+        deadline = launched + self.startup_timeout
         last_error = "socket was not created"
         while time.monotonic() < deadline:
             if self.process.poll() is not None:
@@ -168,6 +175,8 @@ class IsolatedDaemon:
                     client = JsonSocket(self.socket_path, timeout=0.5)
                     _, result = client.call("system.ping")
                     if isinstance(result, dict) and result.get("ok") is True:
+                        self.startup_seconds.append(
+                            round(time.monotonic() - launched, 3))
                         return
                     last_error = f"startup ping returned {result!r}"
                 except (OSError, HarnessError, socket.timeout) as error:
@@ -841,6 +850,7 @@ def benchmark(args: argparse.Namespace, root: Path) -> dict[str, Any]:
                 "end": iso_utc(REFERENCE_END),
             },
             "searchMarker": SEARCH_MARKER,
+            "daemonStartupSeconds": daemon.startup_seconds,
         },
         "measurements": {
             "boundedAgenda": agenda,
