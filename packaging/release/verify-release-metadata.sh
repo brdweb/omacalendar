@@ -67,10 +67,11 @@ extract_domain_constant() {
 ipc_protocol_major=$(extract_domain_constant kIpcProtocolMajor)
 ipc_protocol_minor=$(extract_domain_constant kIpcProtocolMinor)
 ipc_protocol_version="${ipc_protocol_major}.${ipc_protocol_minor}"
+database_schema_version=$(extract_domain_constant kDatabaseSchemaVersion)
 if ! grep -Fq \
-  "| \`${release_version}\` | ${ipc_protocol_version} | 2 |" \
+  "| \`${release_version}\` | ${ipc_protocol_version} | ${database_schema_version} |" \
   "${repository_root}/docs/COMPATIBILITY.md"; then
-  echo "compatibility matrix has no exact app ${release_version}, IPC ${ipc_protocol_version}, schema 2 row" >&2
+  echo "compatibility matrix has no exact app ${release_version}, IPC ${ipc_protocol_version}, schema ${database_schema_version} row" >&2
   exit 1
 fi
 
@@ -80,7 +81,7 @@ if [[ ! -s ${acceptance_record} ]]; then
   exit 1
 fi
 if ! grep -Fq \
-  "App ${release_version}; IPC ${ipc_protocol_version}; schema 2" \
+  "App ${release_version}; IPC ${ipc_protocol_version}; schema ${database_schema_version}" \
   "${acceptance_record}"; then
   echo "release acceptance record has no exact app, IPC, and schema identity" >&2
   exit 1

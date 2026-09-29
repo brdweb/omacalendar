@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Black-box IPC 2.1 release-foundation contract.
+"""Black-box IPC 2 release-foundation contract.
 
 The test launches the built daemon with disposable XDG roots and drives it
 through the built CLI plus one raw Unix-socket subscriber. It must never read
@@ -27,7 +27,7 @@ from typing import Any
 
 
 PROTOCOL_MAJOR = 2
-PROTOCOL_MINOR = 1
+PROTOCOL_MINOR = 2
 SCHEMA_VERSION = 3
 
 
@@ -2878,7 +2878,7 @@ def main() -> int:
     finally:
         signal.signal(signal.SIGTERM, previous_sigterm)
         signal.signal(signal.SIGINT, previous_sigint)
-    print("daemon IPC 2.1 release-foundation contract passed")
+    print("daemon IPC 2 release-foundation contract passed")
     return 0
 
 

@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.28)
 
 project(OmaCalendar
-  VERSION 1.1.1
+  VERSION 2.0.0
   DESCRIPTION "A local-first calendar for Omarchy Linux"
   LANGUAGES CXX
 )

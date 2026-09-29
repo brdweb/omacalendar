@@ -6,6 +6,65 @@ Versioning once public releases begin.
 
 ## [Unreleased]
 
+## [2.0.0] - 2026-09-29
+
+A feature release: tasks, guests' availability, undo, printing and a reworked
+desktop UI, on a faster daemon. It moves the local IPC to 2.2 (additive) and
+the calendar database to schema 3.
+
+### Upgrade notes
+
+- The calendar database migrates from schema 2 to 3 the first time the 2.0.0
+  daemon opens it. The migration is one-way; back up first if you may need to
+  return to 1.1.1 (see docs/BACKUP_AND_RECOVERY.md).
+- Connected Google accounts are asked to sign in again once: the app now also
+  requests the `calendar.freebusy` and `tasks` permissions (OAuth scope
+  version 4).
+- IPC 2.2 is additive. Clients written for 2.0 or 2.1, including the widget,
+  keep working and can discover the new methods through `system.info`.
+
+### Added
+
+- Tasks. A Tasks panel (Ctrl+Shift+T) groups to-dos into Overdue, Today,
+  Upcoming, No date and Completed, with quick add, a task editor, a due count
+  in the sidebar and open tasks listed in the agenda on their due day. Every
+  installation has a device-only Tasks list; CalDAV to-do collections (VTODO)
+  and Google Tasks lists sync both ways (#59, #70, #71, #72). CalDAV writes are
+  conditional and merge with concurrent server changes; Google Tasks keeps the
+  last write.
+- Guests' availability in the event editor: a busy bar per guest across
+  working hours, and "Find next free time" to move the event to the next slot
+  everyone checked is free. Your own busy time is computed locally; other
+  guests are looked up through a connected Google account (#54, #68).
+- Undo and redo for event edits, with an Undo toast (#53).
+- A second time zone column beside the day and week timelines (#55).
+- Search by time range and guest, with highlighted matches and a jump to the
+  result's date (#58).
+- Reminder notifications offer Join for events with a video call and
+  "Remind at start" (#56).
+- Print (Ctrl+P) saves a date range as a PDF, as a day-by-day list or as month
+  grids (#60).
+- Event attachments are listed in the editor, and Google events can get a
+  Google Meet link (#61).
+- A structured recurrence editor that keeps rules it cannot show (#47).
+- Guest chips with address suggestions from cached events, and RSVP status
+  (#48).
+- Natural-language quick add, such as "Dentist tomorrow 3pm @ Main St Clinic"
+  (#49).
+- A year heat-map, ISO week numbers, and dragging between the all-day lane
+  and the timeline (#50).
+- Per-account sync status in the sidebar, with reachable Conflicts and Sync
+  tabs (#51).
+- Keyboard move and resize of events, view-change announcements for screen
+  readers, and contrast-safe event text (#52).
+- IPC 2.2 methods: `settings.getMany`, `stats.dailyCounts`,
+  `contacts.suggest`, `freebusy.query`, `sync.setInteractive`,
+  `taskLists.list`/`setEnabled` and `tasks.list`/`create`/`update`/`remove`,
+  plus the `events.search` `attendee` parameter, `events.get` `attachments`,
+  `addConference` on `events.create`/`events.update`, and the
+  `events.freeBusy` and `tasks.changed` notifications (see docs/IPC.md).
+- A report-only desktop view benchmark (see docs/PERFORMANCE.md).
+
 ### Changed
 
 - The desktop app keeps only the visible calendar view alive and finds each
@@ -18,6 +77,10 @@ Versioning once public releases begin.
   calendar set; hiding all calendars clears the view without an IPC query (#42).
 - The activity panel, settings and search lists update the rows that changed
   instead of rebuilding, so they keep their scroll position and focus.
+- Timelines remember their scroll position, view switches are smoother and
+  the agenda is virtualized (#46).
+- Google and CalDAV poll every 2 minutes while the app is in use, 5 minutes
+  otherwise and 10 on battery, and sync after resume or reconnect (#57).
 - The calendar database keeps temporary data in memory, uses a larger page
   cache and memory-mapped reads, and refreshes its query statistics on close.
 - Bound historical recurring-series reads by their last occurrence, with a
@@ -26,30 +89,24 @@ Versioning once public releases begin.
 - Remote sync responses commit in bounded chunks so widget IPC stays
   responsive during large Google, CalDAV, and ICS imports; sync cursors and
   coverage advance only after the last chunk, and notifications are coalesced.
-
-### Added
-
-- The `settings.getMany` IPC method reads several settings in one request
-  (see docs/IPC.md).
-- Add `stats.dailyCounts` for bounded local-day counts without transferring
-  full event DTOs (#43).
-- A report-only desktop view benchmark (see docs/PERFORMANCE.md).
+- CalDAV collections that accept only to-dos are no longer listed as event
+  calendars.
 
 ### Fixed
-
-- Yearly `stats.dailyCounts` now accommodates realistic recurrence volumes
-  without silently truncating counts or rejecting valid 366-day ranges (#43).
 
 - The desktop app reads every page of a date range from the calendar
   service. Previously it showed only the first 500 events, so a busy year
   view or a month with several shared calendars silently lost the rest. A
   page that arrives for a range the user has already navigated away from is
-  now discarded instead of overwriting the current view.
+  now discarded instead of overwriting the current view (#33).
 - The year view counts an event on every day it covers, matching the month
   and agenda views, instead of only on its start date, so multi-day events
-  and overnight events no longer leave their later days looking empty.
+  and overnight events no longer leave their later days looking empty (#34).
+- Yearly `stats.dailyCounts` accommodates realistic recurrence volumes
+  without silently truncating counts or rejecting valid 366-day ranges (#43).
 - The activity panel loads queued operations and conflicts on connection, then
   refreshes each list when its daemon notification arrives (#64).
+- Dragging an event in the month view no longer throws a ReferenceError.
 
 ## [1.1.1] - 2026-09-22
 
@@ -343,7 +400,8 @@ Versioning once public releases begin.
   and emits verifiable build provenance for tagged release candidates. The
   separately documented historical OAuth incident remains a pre-tag gate.
 
-[Unreleased]: https://github.com/brdweb/omacalendar/compare/v1.1.1...HEAD
+[Unreleased]: https://github.com/brdweb/omacalendar/compare/v2.0.0...HEAD
+[2.0.0]: https://github.com/brdweb/omacalendar/compare/v1.1.1...v2.0.0
 [1.1.1]: https://github.com/brdweb/omacalendar/compare/v1.1.0...v1.1.1
 [1.1.0]: https://github.com/brdweb/omacalendar/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/brdweb/omacalendar/compare/v1.0.0-rc.5...v1.0.0

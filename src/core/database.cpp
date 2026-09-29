@@ -18,8 +18,6 @@
 namespace omacalendar {
 namespace {
 
-constexpr int kCurrentSchemaVersion = 3;
-
 QString compactJson(const QJsonValue& value) {
   if (value.isArray()) {
     return QString::fromUtf8(
@@ -472,7 +470,7 @@ bool Database::execute(const QString& sql, QString* errorMessage) const {
 }
 
 bool Database::migrate(QString* errorMessage) {
-  if (schemaVersion() > kCurrentSchemaVersion) {
+  if (schemaVersion() > kDatabaseSchemaVersion) {
     if (errorMessage != nullptr) {
       *errorMessage = QStringLiteral("Database schema is newer than this build");
     }
@@ -487,7 +485,7 @@ bool Database::migrate(QString* errorMessage) {
            repairInclusiveAllDayEndDates(errorMessage) &&
            migrateSeriesBounds(errorMessage) && ensureTaskSchema(errorMessage);
   }
-  if (schemaVersion() == kCurrentSchemaVersion) {
+  if (schemaVersion() == kDatabaseSchemaVersion) {
     return ensureOutboxMoveSchema(errorMessage) &&
            ensureConflictUniquenessSchema(errorMessage) &&
            ensureReminderDeliverySchema(errorMessage) &&
@@ -860,7 +858,7 @@ bool Database::migrate(QString* errorMessage) {
         INSERT INTO calendar_set_members(set_id,calendar_id,position)
         VALUES ('all-calendars','local-default',0)
       )SQL"),
-      QStringLiteral("PRAGMA user_version = 3"),
+      QStringLiteral("PRAGMA user_version = %1").arg(kDatabaseSchemaVersion),
   };
 
   for (const QString& statement : statements) {
@@ -1470,6 +1468,10 @@ bool Database::migrateSeriesBounds(QString* errorMessage) {
       return false;
     }
   }
+  // This step takes schema 2 to exactly 3. A later schema adds its own step
+  // after this one and updates migrate() to chain them.
+  static_assert(kDatabaseSchemaVersion == 3,
+                "chain a migration step from schema 3 to the new version");
   if (!repairSeriesBounds(errorMessage) ||
       !ensureReadPerformanceIndexes(errorMessage) ||
       !execute(QStringLiteral("PRAGMA user_version = 3"), errorMessage)) {

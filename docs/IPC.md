@@ -1,4 +1,4 @@
-# Local IPC protocol 2.1
+# Local IPC protocol 2.2
 
 ## Transport and trust boundary
 
@@ -24,7 +24,7 @@ Every request carries `protocolMajor: 2`. `protocolMinor` is optional request
 metadata and does not participate in routing: requests that omit it, send `0`,
 or send an unknown value remain compatible when the major is `2`. A different
 major is rejected with `incompatible_protocol`. The daemon advertises
-`protocolMinor: 1` through `system.info`; clients discover additive fields and
+`protocolMinor: 2` through `system.info`; clients discover additive fields and
 methods from that response rather than requiring an exact minor match.
 
 ```json
@@ -92,8 +92,7 @@ replaces the connection's prior list and may contain `*`, a family such as
   `calendarSets.activate`
 - `settings.get`, `settings.set`, `settings.getMany`
 
-`settings.getMany` is an additive, not yet released method that reads several
-settings in one request; the protocol minor advances when it first ships. It
+`settings.getMany` (added in IPC 2.2) reads several settings in one request. It
 takes `keys`, an array of 1 to 64 setting names, and an optional `fallbacks`
 object mapping a key to the value returned when that key is unset. The result is `{"values": {...}}` with one entry per requested key,
 resolved exactly as `settings.get` resolves it. Clients find it in
@@ -122,8 +121,7 @@ and cleanup; a started check is not proof of server support.
 - `contacts.suggest`
 - `freebusy.query`
 
-`freebusy.query` is additive and not yet released (the protocol minor remains
-2.1). It takes ISO `start` and `end` at most 8 days apart and up to 20
+`freebusy.query` (added in IPC 2.2) takes ISO `start` and `end` at most 8 days apart and up to 20
 `attendees` addresses, plus optional `calendarId` (whose Google account is used
 for remote lookups) and `excludeEventId`/`excludeRecurrenceId` (the event being
 edited, which does not count as busy). It answers at once with `requestId`,
@@ -137,16 +135,14 @@ notification carries the same `requestId` with the remaining `attendees` and
 `permission` when the account's grant does not cover free/busy). Intervals are
 `{start, end}` in UTC.
 
-`contacts.suggest` is additive and not yet released. It takes a non-empty
+`contacts.suggest` (added in IPC 2.2) takes a non-empty
 `prefix` (at most 200 characters) and an optional `limit` (1 to 25, default 8)
 and returns `{"prefix": ..., "contacts": [{"email", "displayName"}]}`: distinct
 guest and organizer addresses from cached, non-deleted events whose address
 starts with the prefix or whose name contains it, case-insensitively, most
 used first. It reads only the local cache.
 
-`stats.dailyCounts` is additive and not yet released (added after 2.1,
-advertised in the next release). Discover it in `system.info` `methods`; the
-protocol minor remains 2.1 until that release. It takes required ISO dates
+`stats.dailyCounts` (added in IPC 2.2) takes required ISO dates
 `start` and exclusive `end` (at most 366 days apart), optional `calendarIds`
 (same scope as `events.list`; omitted means all calendars), and optional
 `timeZone` (IANA ID; defaults to the configured display zone, then the
@@ -208,14 +204,13 @@ instead of synthesizing one from the displayed start time. `events.get` accepts
 an optional `recurrenceId` (directly or in `eventRef`) and returns the detached
 or generated occurrence rather than the series master.
 
-`events.get` additively returns `attachments` (not yet released; the protocol
-minor remains 2.1): `[{title, url, mimeType}]` read on demand from the stored
+`events.get` additively returns `attachments` (IPC 2.2): `[{title, url, mimeType}]` read on demand from the stored
 Google event or iCalendar `ATTACH` properties of that occurrence, falling back
 to the series master. Only HTTP(S) links are listed; inline binary attachments
 are omitted. `events.list` does not carry attachments.
 
 `events.create` and `events.update` additively accept `addConference: true` on
-the event (not yet released) to create a Google Meet link. It applies only to
+the event (IPC 2.2) to create a Google Meet link. It applies only to
 Google calendars whose `capabilities.conferenceProperties.allowedConferenceSolutionTypes`
 include `hangoutsMeet`; other calendars answer `conference_unsupported`. It is
 ignored when the event already has a `conferenceUrl`. The daemon generates the
@@ -228,8 +223,7 @@ and `limit`; `total` is the size of that filtered result. `events.search`
 similarly applies its text, date, calendar, account, and invitation-state
 filters before pagination.
 
-`events.search` additively accepts `attendee` (not yet released; the protocol
-minor remains 2.1): a case-insensitive substring, at most 200 characters, of a
+`events.search` additively accepts `attendee` (IPC 2.2): a case-insensitive substring, at most 200 characters, of a
 guest's or the organizer's address or display name. When `attendee` is given
 the `query` may be empty; a request with neither returns `invalid_params`.
 
@@ -243,8 +237,7 @@ silently discard the source event.
 - `taskLists.list`, `taskLists.setEnabled`
 - `tasks.list`, `tasks.create`, `tasks.update`, `tasks.remove`
 
-These methods are additive and not yet released (the protocol minor remains
-2.1). Every installation has the device-only list `local-tasks`. CalDAV
+These methods were added in IPC 2.2. Every installation has the device-only list `local-tasks`. CalDAV
 collections whose `supported-calendar-component-set` includes `VTODO` appear as
 task lists of their account (collections that accept only `VTODO` are no longer
 listed as event calendars). Each connected Google account adds its Google Tasks
@@ -304,8 +297,7 @@ deletion recreates the event with a new provider identity.
 - `import.preview`, `import.commit`
 - `export.create`, `export.run`
 
-`sync.setInteractive` is additive and not yet released (the protocol minor
-remains 2.1). A desktop client sends `{"interactive": true}` while its window
+`sync.setInteractive` (added in IPC 2.2): a desktop client sends `{"interactive": true}` while its window
 is active and `false` when it is not; it returns `interactive`,
 `pollIntervalSeconds` and `leaseSeconds`. Google and CalDAV poll every 2
 minutes while a client is interactive, every 5 minutes otherwise and every 10

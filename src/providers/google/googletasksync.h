@@ -66,6 +66,8 @@ class GoogleTaskSync final : public QObject {
   GoogleClient* m_client;
   QHash<QString, std::shared_ptr<Job>> m_jobs;
   QSet<QString> m_again;
+  // A rerun owed after a finished job, until it starts; counts as syncing.
+  QSet<QString> m_rerunQueued;
 };
 
 }  // namespace omacalendar::google
