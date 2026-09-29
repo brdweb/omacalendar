@@ -858,7 +858,7 @@ bool Database::migrate(QString* errorMessage) {
         INSERT INTO calendar_set_members(set_id,calendar_id,position)
         VALUES ('all-calendars','local-default',0)
       )SQL"),
-      QStringLiteral("PRAGMA user_version = 3"),
+      QStringLiteral("PRAGMA user_version = %1").arg(kDatabaseSchemaVersion),
   };
 
   for (const QString& statement : statements) {
@@ -1468,6 +1468,10 @@ bool Database::migrateSeriesBounds(QString* errorMessage) {
       return false;
     }
   }
+  // This step takes schema 2 to exactly 3. A later schema adds its own step
+  // after this one and updates migrate() to chain them.
+  static_assert(kDatabaseSchemaVersion == 3,
+                "chain a migration step from schema 3 to the new version");
   if (!repairSeriesBounds(errorMessage) ||
       !ensureReadPerformanceIndexes(errorMessage) ||
       !execute(QStringLiteral("PRAGMA user_version = 3"), errorMessage)) {
