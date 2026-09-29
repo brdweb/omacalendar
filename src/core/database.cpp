@@ -18,8 +18,6 @@
 namespace omacalendar {
 namespace {
 
-constexpr int kCurrentSchemaVersion = 3;
-
 QString compactJson(const QJsonValue& value) {
   if (value.isArray()) {
     return QString::fromUtf8(
@@ -472,7 +470,7 @@ bool Database::execute(const QString& sql, QString* errorMessage) const {
 }
 
 bool Database::migrate(QString* errorMessage) {
-  if (schemaVersion() > kCurrentSchemaVersion) {
+  if (schemaVersion() > kDatabaseSchemaVersion) {
     if (errorMessage != nullptr) {
       *errorMessage = QStringLiteral("Database schema is newer than this build");
     }
@@ -487,7 +485,7 @@ bool Database::migrate(QString* errorMessage) {
            repairInclusiveAllDayEndDates(errorMessage) &&
            migrateSeriesBounds(errorMessage) && ensureTaskSchema(errorMessage);
   }
-  if (schemaVersion() == kCurrentSchemaVersion) {
+  if (schemaVersion() == kDatabaseSchemaVersion) {
     return ensureOutboxMoveSchema(errorMessage) &&
            ensureConflictUniquenessSchema(errorMessage) &&
            ensureReminderDeliverySchema(errorMessage) &&

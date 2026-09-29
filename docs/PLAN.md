@@ -1,8 +1,9 @@
 # Product scope
 
-OmaCalendar 1.1 is a native calendar for current x86-64 Arch/Omarchy.
+OmaCalendar 2.0 is a native calendar for current x86-64 Arch/Omarchy.
 It provides agenda, day, week, month and year views, calendar sets, event
-editing, recurrence, invitations, reminders and a local offline cache.
+editing, recurrence, invitations, reminders, tasks, guests' availability,
+undo, printing and a local offline cache.
 Google Calendar, CalDAV, local calendars and read-only ICS subscriptions
 share one background service. The optional widget is released separately.
 

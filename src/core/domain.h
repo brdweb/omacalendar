@@ -10,7 +10,9 @@
 namespace omacalendar {
 
 inline constexpr int kIpcProtocolMajor = 2;
-inline constexpr int kIpcProtocolMinor = 1;
+inline constexpr int kIpcProtocolMinor = 2;
+// The SQLite user_version this build creates and migrates to.
+inline constexpr int kDatabaseSchemaVersion = 3;
 
 enum class ProviderKind {
   Local,

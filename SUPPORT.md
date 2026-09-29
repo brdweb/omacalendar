@@ -1,8 +1,8 @@
 # Support
 
-OmaCalendar 1.1 supports current x86-64 Arch/Omarchy using the native Arch
+OmaCalendar 2.0 supports current x86-64 Arch/Omarchy using the native Arch
 package. Google Calendar, local calendars, CalDAV and read-only ICS feeds
-are available. Radicale and Nextcloud have automated integration coverage;
+are available, with tasks on CalDAV to-do lists and Google Tasks. Radicale and Nextcloud have automated integration coverage;
 other CalDAV servers may differ in recurrence and scheduling behavior.
 
 Report bugs in [GitHub issues](https://github.com/brdweb/omacalendar/issues).
