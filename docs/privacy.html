@@ -8,24 +8,27 @@
 </head>
 <body>
   <main>
-    <div class="eyebrow">Effective September 2, 2026</div>
+    <div class="eyebrow">Effective September 29, 2026</div>
     <h1>Privacy Policy</h1>
     <p>OmaCalendar is a local-first, open-source Linux application. It has no OmaCalendar-operated cloud backend, advertising, analytics, or sale of personal data.</p>
 
     <h2>Information the application accesses</h2>
-    <p>When you connect Google Calendar, OmaCalendar requests permission to read your calendar list; view, create, update, and delete calendar events; and, after explicit confirmation, permanently delete an owned non-primary secondary calendar you select. OmaCalendar does not use that permission to create or rename Google calendars, delete a primary calendar, or delete a calendar you do not own. When you connect a CalDAV account, it accesses calendars and events using the credentials and server you provide.</p>
+    <p>When you connect Google Calendar, OmaCalendar requests permission to read your calendar list; view, create, update, and delete calendar events; and, after explicit confirmation, permanently delete an owned non-primary secondary calendar you select. OmaCalendar does not use that permission to create or rename Google calendars, delete a primary calendar, or delete a calendar you do not own. When you connect a CalDAV account, it accesses calendars, events, and supported task lists using the credentials and server you provide.</p>
+
+    <p>OmaCalendar also requests Google Tasks access to read, create, update, complete, and delete tasks and task lists you manage in the app. Task titles, notes, due dates, and completion state are synchronized directly with Google. Tasks in the built-in local list remain on your device.</p>
+    <p>When you add guests to an event, OmaCalendar sends their email addresses and the event time range to Google to look up availability permitted by that account. Google returns busy intervals, not event details. These remote results stay in daemon memory for five minutes and are not written to the database.</p>
 
     <h2>How information is used and stored</h2>
-    <p>Calendar information is used only to display and manage your calendars and synchronize changes you request. Event data is cached in a local SQLite database on your device for offline and responsive use. OAuth refresh tokens and CalDAV credentials are stored in the Linux desktop Secret Service rather than in the calendar database.</p>
-    <p>Calendar information is exchanged only between your device and the provider you configure, such as Google or your CalDAV server. The project does not operate an intermediary service that receives your calendar data.</p>
+    <p>Calendar and task information is used only to display and manage your calendars and tasks and synchronize changes you request. Event and task data is cached in a local SQLite database on your device for offline and responsive use. OAuth refresh tokens and CalDAV credentials are stored in the Linux desktop Secret Service rather than in the calendar database.</p>
+    <p>Calendar and task information is exchanged only between your device and the provider you configure, such as Google or your CalDAV server. The project does not operate an intermediary service that receives your calendar or task data.</p>
 
     <h2>How sensitive data is protected</h2>
-    <p>OmaCalendar sends Google Calendar data directly between your device and Google's HTTPS API endpoints, which protects the data in transit with TLS. The Google authorization flow uses a loopback redirect, a unique state value, and PKCE-S256 to protect the authorization response and code exchange.</p>
+    <p>OmaCalendar sends Google Calendar and Tasks data directly between your device and Google's HTTPS API endpoints, which protects the data in transit with TLS. The Google authorization flow uses a loopback redirect, a unique state value, and PKCE-S256 to protect the authorization response and code exchange.</p>
     <p>Google OAuth refresh tokens and other provider credentials are stored through the Linux desktop Secret Service, which restricts access to the signed-in user and applies the protection provided by that user's keyring. Tokens and passwords are excluded from the SQLite calendar cache, application logs, and diagnostic exports. When you enter a CalDAV or subscription password, it travels once over OmaCalendar's owner-only local interprocess socket to the background service so it can be stored in Secret Service; it is not retained in interprocess messages. OmaCalendar restricts that socket, its local data directories, and SQLite database files to the operating-system user.</p>
     <p>The local SQLite calendar cache is not separately encrypted by OmaCalendar. Its protection therefore also depends on the security of your operating-system account, keyring, filesystem, and device. Device encryption and a strong login password are recommended, especially on shared or portable computers.</p>
 
     <h2>Sharing and retention</h2>
-    <p>OmaCalendar does not sell or share your calendar information with advertisers or data brokers. Disconnecting an account removes its stored credentials. The disconnect dialog retains downloaded calendar data by default for offline reference and offers an explicit option to remove that account's cached data instead. Other local data remains until you remove it or clear the application's data. Your calendar provider may retain data according to its own policies.</p>
+    <p>OmaCalendar does not sell or share your calendar or task information with advertisers or data brokers. Disconnecting an account removes its stored credentials. The disconnect dialog retains downloaded calendar and task data by default for offline reference and offers an explicit option to remove that account's cached data instead. Other local data remains until you remove it or clear the application's data. Your calendar or task provider may retain data according to its own policies.</p>
 
     <h2>Your choices</h2>
     <p>You may disconnect an account in OmaCalendar, choose whether its downloaded data is retained locally, and revoke Google access at any time from your Google Account security settings. You may also delete OmaCalendar's local application data and credentials from your system.</p>

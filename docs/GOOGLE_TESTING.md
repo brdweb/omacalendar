@@ -30,7 +30,10 @@ calendar database.
 
 Google approved OmaCalendar's production OAuth branding and requested Calendar
 scopes; Branding and Data Access both showed verified status when checked on
-2026-09-06. The approval email was checked again on 2026-09-09. Before the
+2026-09-06. The approval email was checked again on 2026-09-09. Version 2.0.0 adds
+`calendar.freebusy` and `tasks`; the earlier approval does not establish
+verification of the expanded scope set. Check Google Auth Platform for current
+review status. Before the
 replacement candidate is accepted, a new external account that was never
 on the test-user allowlist must still complete code exchange, calendar
 discovery, one event write, Secret Service token persistence, and app/daemon
@@ -38,7 +41,7 @@ restart without an unverified-app bypass.
 
 ## 1. Project configuration
 
-In a disposable Google Cloud project, enable the Google Calendar API and
+In a disposable Google Cloud project, enable the Google Calendar API and Google Tasks API and
 create a **Desktop app** OAuth client. Configure the consent screen for the
 accounts in the acceptance test. OmaCalendar requests only these scopes:
 
@@ -116,7 +119,7 @@ For a new or replacement OAuth project, publish those pages, verify ownership
 of the authorized domain in Google Search Console, and make the product name,
 support email, homepage, privacy-policy URL, and requested scopes match the
 application.
-Add all three scopes above under **Google Auth Platform → Data Access** before
+Add all five scopes above under **Google Auth Platform → Data Access** before
 testing the updated consent flow.
 Because the Calendar scopes are sensitive, prepare a short screen-recording
 that shows the complete browser consent flow and how each requested permission
