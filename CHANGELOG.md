@@ -6,6 +6,13 @@ Versioning once public releases begin.
 
 ## [Unreleased]
 
+### Changed
+
+- The in-app widget installer and `omacalendar-widgetctl` install the
+  companion widget 0.1.3 instead of 0.1.0, pinned to the signed `v0.1.3` tag's
+  commit. An existing widget keeps working; to move it to 0.1.3, restore the
+  Omarchy clock and install the widget again.
+
 ## [2.0.0] - 2026-09-29
 
 A feature release: tasks, guests' availability, undo, printing and a reworked

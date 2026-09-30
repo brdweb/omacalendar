@@ -28,9 +28,9 @@ namespace omacalendar {
 namespace {
 
 constexpr auto kWidgetSourceUrl = "https://github.com/brdweb/omacalendar-widget.git";
-constexpr auto kWidgetSourceRef = "v0.1.0";
+constexpr auto kWidgetSourceRef = "v0.1.3";
 #ifndef OMACALENDAR_WIDGET_SOURCE_COMMIT
-#define OMACALENDAR_WIDGET_SOURCE_COMMIT "1aeaf5de3460b87053d494f82b9435b3c371f309"
+#define OMACALENDAR_WIDGET_SOURCE_COMMIT "4b8caca4b40551369bf741fb17ec31dbe0fc9a0c"
 #endif
 constexpr auto kWidgetSourceCommit = OMACALENDAR_WIDGET_SOURCE_COMMIT;
 

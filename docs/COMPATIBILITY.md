@@ -14,10 +14,11 @@ database, so back up before upgrading if you may need to go back (see
 asked to sign in again once, because 2.0.0 also requests the
 `calendar.freebusy` and `tasks` permissions.
 
-The companion widget 0.1.0 uses IPC 2.0 and remains compatible with the
-additive IPC 2.1 and 2.2 revisions. It requires Omarchy 4.0.0 or newer and Quickshell
-0.3.1 or newer. Both connect to the native socket-activated service. Previous
-releases retain their compatibility information in their signed source tags.
+The app's widget installer installs companion widget 0.1.3, which uses IPC 2.0
+and remains compatible with the additive IPC 2.1 and 2.2 revisions. It requires
+Omarchy 4.0.0 or newer and Quickshell 0.3.1 or newer. The app and the widget
+both connect to the native socket-activated service. Previous releases retain
+their compatibility information in their signed source tags.
 
 Google Calendar uses the desktop browser for OAuth. Connected accounts need
 a functioning Secret Service keyring. CalDAV recurrence and invitation
