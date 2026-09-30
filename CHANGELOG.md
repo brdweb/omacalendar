@@ -6,12 +6,19 @@ Versioning once public releases begin.
 
 ## [Unreleased]
 
+## [2.0.1] - 2026-09-30
+
+A companion-widget update. No IPC, schema, or feature change in the app.
+
 ### Changed
 
 - The in-app widget installer and `omacalendar-widgetctl` install the
-  companion widget 0.1.3 instead of 0.1.0, pinned to the signed `v0.1.3` tag's
-  commit. An existing widget keeps working; to move it to 0.1.3, restore the
-  Omarchy clock and install the widget again.
+  companion widget 0.2.0 instead of 0.1.0, pinned to the commit of the signed
+  `v0.2.0` widget tag. Widget 0.2.0 adds a Tasks view for this app's IPC 2.2
+  and connects once the calendar service starts after the Omarchy shell. An
+  existing widget keeps working; to move it to 0.2.0, restore the Omarchy
+  clock, install the widget again, and restart the shell
+  (`omarchy restart shell`).
 
 ## [2.0.0] - 2026-09-29
 
@@ -407,7 +414,8 @@ the calendar database to schema 3.
   and emits verifiable build provenance for tagged release candidates. The
   separately documented historical OAuth incident remains a pre-tag gate.
 
-[Unreleased]: https://github.com/brdweb/omacalendar/compare/v2.0.0...HEAD
+[Unreleased]: https://github.com/brdweb/omacalendar/compare/v2.0.1...HEAD
+[2.0.1]: https://github.com/brdweb/omacalendar/compare/v2.0.0...v2.0.1
 [2.0.0]: https://github.com/brdweb/omacalendar/compare/v1.1.1...v2.0.0
 [1.1.1]: https://github.com/brdweb/omacalendar/compare/v1.1.0...v1.1.1
 [1.1.0]: https://github.com/brdweb/omacalendar/compare/v1.0.0...v1.1.0
