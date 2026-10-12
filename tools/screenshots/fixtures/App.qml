@@ -20,6 +20,10 @@ QtObject {
         "America/Los_Angeles", "UTC"
     ]
 
+    readonly property var accountSyncStates: ({
+        "account-cloud": {"state": "idle", "lastSyncAt": new Date().toISOString()}
+    })
+
     readonly property var accounts: [
         {
             "id": "account-local",
@@ -42,6 +46,7 @@ QtObject {
             "name": "Focus",
             "color": "#7aa2f7",
             "enabled": true,
+            "lastSyncAt": new Date().toISOString(),
             "readOnly": false,
             "capabilities": {
                 "provider": "local",
@@ -56,6 +61,7 @@ QtObject {
             "name": "Studio",
             "color": "#bb9af7",
             "enabled": true,
+            "lastSyncAt": new Date().toISOString(),
             "readOnly": false,
             "capabilities": {
                 "provider": "google",
@@ -71,6 +77,7 @@ QtObject {
             "name": "Community",
             "color": "#9ece6a",
             "enabled": true,
+            "lastSyncAt": new Date().toISOString(),
             "readOnly": true,
             "capabilities": {
                 "provider": "google",
@@ -145,6 +152,39 @@ QtObject {
         allDayEvent("event-25", "calendar-team", "Release candidate",
                     "#bb9af7", "2026-09-30", "2026-10-01", false)
     ]
+
+    readonly property bool tasksSupported: true
+    readonly property var taskLists: [
+        {"id": "local-tasks", "name": "Personal tasks", "color": "#7aa2f7",
+         "enabled": true, "readOnly": false},
+        {"id": "studio-tasks", "name": "Studio checklist", "color": "#bb9af7",
+         "enabled": true, "readOnly": false}
+    ]
+    readonly property var tasks: [
+        task("task-01", "studio-tasks", "Review prototype feedback", -1),
+        task("task-02", "local-tasks", "Plan next week's focus blocks", 0),
+        task("task-03", "studio-tasks", "Prepare workshop outline", 0),
+        task("task-04", "studio-tasks", "Polish the launch checklist", 1),
+        task("task-05", "local-tasks", "Collect ideas for the next project", null)
+    ]
+    property var freeBusy: ({})
+    property var eventAttachments: ({})
+
+    function task(id, listId, title, offset) {
+        const due = new Date()
+        due.setDate(due.getDate() + Number(offset || 0))
+        return {"id": id, "listId": listId, "title": title,
+                "dueDate": offset === null ? "" : Qt.formatDate(due, "yyyy-MM-dd"),
+                "completed": false, "notes": ""}
+    }
+    function createTask(value) { value }
+    function updateTask(value) { value }
+    function setTaskCompleted(id, completed) { id; completed }
+    function removeTask(id) { id }
+    function loadEventAttachments(id, recurrenceId) {
+        eventAttachments = {"eventId": id, "recurrenceId": recurrenceId,
+                            "attachments": []}
+    }
 
     readonly property var invitations: []
     readonly property var conflicts: []
