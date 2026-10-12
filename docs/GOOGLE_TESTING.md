@@ -28,16 +28,18 @@ calendar database.
 
 ## Production verification status
 
-Google approved OmaCalendar's production OAuth branding and requested Calendar
-scopes; Branding and Data Access both showed verified status when checked on
-2026-09-06. The approval email was checked again on 2026-09-09. Version 2.0.0 adds
-`calendar.freebusy` and `tasks`; the earlier approval does not establish
-verification of the expanded scope set. Check Google Auth Platform for current
-review status. Before the
-replacement candidate is accepted, a new external account that was never
-on the test-user allowlist must still complete code exchange, calendar
-discovery, one event write, Secret Service token persistence, and app/daemon
-restart without an unverified-app bypass.
+Google's approval email dated 2026-09-03 explicitly approves
+`calendar.events` and `calendar.calendars`. Branding and Data Access were
+recorded as verified on 2026-09-06. On 2026-10-09, the approval email was read
+again and the connected mailbox was searched for later project-specific
+verification messages; no expanded-scope approval was found.
+
+Version 2.0.0 adds `calendar.freebusy` and `tasks`. The original approval does
+not establish review status for that expanded scope set. The owner confirmed
+acceptance testing complete and reports the Google integration running normally.
+Successful operation is separate from Google's scope-review status. Current
+expanded-scope approval has not been independently confirmed: check **Google
+Auth Platform → Data Access / Verification Center** in the production project.
 
 ## 1. Project configuration
 
@@ -129,9 +131,9 @@ provide the scope justifications and video, and submit it for Google review.
 
 The project owner must perform the Cloud Console submission from the account
 that owns the OAuth project. Google, not the application build, removes the
-warning after approval. OmaCalendar's production project has completed this
-review; repeat it if the public identity, client, or requested scopes materially
-change.
+warning after approval. OmaCalendar's original scope set completed this review. Confirm the expanded
+2.0 scope set in Verification Center; repeat review when the public identity,
+client, or requested scopes materially change.
 
 ## 5. Test matrix
 

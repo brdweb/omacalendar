@@ -66,6 +66,7 @@ expected=(
   desktop-month.png
   desktop-week.png
   desktop-agenda.png
+  desktop-tasks.png
   event-editor.png
 )
 
@@ -87,6 +88,10 @@ mkdir -p -- "${ocr_dir}"
 for file_name in "${expected[@]}"; do
   stem="${file_name%.png}"
   tesseract "${output_dir}/${file_name}" "${ocr_dir}/${stem}" 2>/dev/null
+  if ! rg -qi 'OmaCalendar|calendars' "${ocr_dir}/${stem}.txt"; then
+    echo "Screenshot text check failed for ${file_name}; check installed fonts." >&2
+    exit 1
+  fi
 done
 
 identity_pattern='/home/'
@@ -116,4 +121,10 @@ done
 printf 'Captured and privacy-checked:\n'
 for file_name in "${expected[@]}"; do
   identify -format '  %f  %wx%h  %b\n' "${output_dir}/${file_name}"
+done
+
+# Keep the website gallery in sync with the reviewed documentation images.
+mkdir -p -- "${repo_dir}/site/screenshots"
+for file_name in "${expected[@]}"; do
+  install -m 0644 "${output_dir}/${file_name}" "${repo_dir}/site/screenshots/${file_name}"
 done

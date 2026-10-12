@@ -72,6 +72,13 @@ Item {
             wait(350)
             capture(appWindow, "desktop-agenda.png")
 
+            appWindow.openTasks()
+            wait(350)
+            capture(appWindow, "desktop-tasks.png")
+            // Close the drawer through its normal keyboard shortcut.
+            keyClick(Qt.Key_T, Qt.ControlModifier | Qt.ShiftModifier)
+            wait(350)
+
             appWindow.currentView = "week"
             wait(250)
             positionWeekTimeline(appWindow)
