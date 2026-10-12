@@ -10,6 +10,7 @@
 #include <QSet>
 #include <QTimeZone>
 #include <QUrl>
+#include <QVector>
 #include <cmath>
 #include <limits>
 #include <memory>
@@ -29,6 +30,37 @@ struct ComponentDeleter {
 
 using ComponentPtr = std::unique_ptr<icalcomponent, ComponentDeleter>;
 constexpr qsizetype kMaximumCalendarBytes = 16 * 1024 * 1024;
+constexpr int kMaximumComponentDepth = 32;
+constexpr int kMaximumComponents = 10000;
+
+bool hasSafeComponentStructure(const QByteArray& payload) {
+  int depth = 0;
+  int count = 0;
+  qsizetype position = 0;
+  while (position < payload.size()) {
+    qsizetype end = position;
+    while (end < payload.size() && payload.at(end) != '\r' &&
+           payload.at(end) != '\n') {
+      ++end;
+    }
+    // A line beginning with whitespace continues the previous property.
+    const QByteArray prefix =
+        payload.mid(position, qMin(end - position, qsizetype(6))).toUpper();
+    if (prefix == "BEGIN:") {
+      if (++depth > kMaximumComponentDepth || ++count > kMaximumComponents) {
+        return false;
+      }
+    } else if (prefix.startsWith("END:") && --depth < 0) {
+      return false;
+    }
+    position = end;
+    if (position < payload.size() && payload.at(position++) == '\r' &&
+        position < payload.size() && payload.at(position) == '\n') {
+      ++position;
+    }
+  }
+  return depth == 0;
+}
 
 ICalendarError serializationError(const QString& code, const QString& message);
 
@@ -727,15 +759,23 @@ QString componentText(const icalcomponent* component) {
 }
 
 void collectEvents(icalcomponent* component, QList<icalcomponent*>* events) {
-  if (icalcomponent_isa(component) == ICAL_VEVENT_COMPONENT) {
-    events->append(component);
-    return;
-  }
-  for (icalcomponent* child =
-           icalcomponent_get_first_component(component, ICAL_ANY_COMPONENT);
-       child != nullptr;
-       child = icalcomponent_get_next_component(component, ICAL_ANY_COMPONENT)) {
-    collectEvents(child, events);
+  QVector<icalcomponent*> pending{component};
+  while (!pending.isEmpty()) {
+    icalcomponent* current = pending.takeLast();
+    if (icalcomponent_isa(current) == ICAL_VEVENT_COMPONENT) {
+      events->append(current);
+      continue;
+    }
+    QList<icalcomponent*> children;
+    for (icalcomponent* child =
+             icalcomponent_get_first_component(current, ICAL_ANY_COMPONENT);
+         child != nullptr;
+         child = icalcomponent_get_next_component(current, ICAL_ANY_COMPONENT)) {
+      children.append(child);
+    }
+    for (auto child = children.crbegin(); child != children.crend(); ++child) {
+      pending.append(*child);
+    }
   }
 }
 
@@ -1098,6 +1138,12 @@ ICalendarParseResult ICalendarCodec::parse(const QByteArray& payload) {
   if (payload.contains('\0')) {
     result.error = {QStringLiteral("embedded_nul"),
                     QStringLiteral("The iCalendar resource contains a NUL byte")};
+    return result;
+  }
+  if (!hasSafeComponentStructure(payload)) {
+    result.error = {
+        QStringLiteral("invalid_structure"),
+        QStringLiteral("The iCalendar resource has excessive or invalid component nesting")};
     return result;
   }
 

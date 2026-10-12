@@ -533,6 +533,7 @@ class CalDavHardeningTest final : public QObject {
   void crossOriginRedirectIsNotFollowed();
   void schedulingRequiresProof();
   void calendarRevisionTimestampsRespectMethodAndPrecision();
+  void excessiveComponentStructureIsRejected();
   void parsedTimeKindsMatchMutationIdentity();
   void cachedTimeKindMigrationIndexesSharedResources();
   void floatingOccurrenceReferencesRoundTripThroughWireIdentity();
@@ -704,6 +705,42 @@ void CalDavHardeningTest::calendarRevisionTimestampsRespectMethodAndPrecision() 
   QVERIFY2(patched.ok(), qPrintable(patched.error.message));
   QCOMPARE(caldav::ICalendarCodec::parse(patched.payload).events.first().updatedAt,
            changed.updatedAt);
+}
+
+void CalDavHardeningTest::excessiveComponentStructureIsRejected() {
+  QByteArray nested = "BEGIN:VCALENDAR\r\n";
+  for (int i = 0; i < 32; ++i) nested += "BEGIN:VJUNK\r\n";
+  for (int i = 0; i < 32; ++i) nested += "END:VJUNK\r\n";
+  nested += "END:VCALENDAR\r\n";
+  const auto deep = caldav::ICalendarCodec::parse(nested);
+  QVERIFY(!deep.ok());
+  QCOMPARE(deep.error.code, QStringLiteral("invalid_structure"));
+  const auto carriageReturns = caldav::ICalendarCodec::parse(
+      QByteArray(nested).replace("\r\n", "\r"));
+  QVERIFY(!carriageReturns.ok());
+  QCOMPARE(carriageReturns.error.code, QStringLiteral("invalid_structure"));
+
+  QByteArray wide = "BEGIN:VCALENDAR\r\n";
+  for (int i = 0; i < 10000; ++i) wide += "BEGIN:VJUNK\r\nEND:VJUNK\r\n";
+  wide += "END:VCALENDAR\r\n";
+  const auto many = caldav::ICalendarCodec::parse(wide);
+  QVERIFY(!many.ok());
+  QCOMPARE(many.error.code, QStringLiteral("invalid_structure"));
+
+  const auto ordinary = caldav::ICalendarCodec::parse(
+      "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\n"
+      "UID:ordinary@example.test\r\nDTSTART:20261011T120000Z\r\n"
+      "DTEND:20261011T130000Z\r\nBEGIN:VALARM\r\n"
+      "ACTION:DISPLAY\r\nTRIGGER:-PT15M\r\nDESCRIPTION:Reminder\r\n"
+      "END:VALARM\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n");
+  QVERIFY2(ordinary.ok(), qPrintable(ordinary.error.message));
+  QCOMPARE(ordinary.events.size(), 1);
+  const auto folded = caldav::ICalendarCodec::parse(
+      "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\n"
+      "UID:folded@example.test\r\nDTSTART:20261011T120000Z\r\n"
+      "DTEND:20261011T130000Z\r\nDESCRIPTION:Text\r\n"
+      " BEGIN:literal text\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n");
+  QVERIFY2(folded.ok(), qPrintable(folded.error.message));
 }
 
 void CalDavHardeningTest::parsedTimeKindsMatchMutationIdentity() {

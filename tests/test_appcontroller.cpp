@@ -394,6 +394,7 @@ class AppControllerTest final : public QObject {
   void startupArgumentsRejectUnsafeImportTargets();
   void controllerDispatchesValidatedIcsFile();
   void applicationInstanceAllowsOnePrimary();
+  void fallbackRuntimeDirectoryMustBePrivate();
   void applicationInstanceRoutesActivation();
   void nativeAndFlatpakInstancesAreIndependent();
   void flatpakActivationRecoversAfterKilledPrimary();
@@ -893,6 +894,47 @@ void AppControllerTest::applicationInstanceAllowsOnePrimary() {
   ApplicationInstance primary;
   ApplicationInstance secondary;
   QVERIFY(primary.claimPrimary());
+  QVERIFY(!secondary.claimPrimary());
+}
+
+void AppControllerTest::fallbackRuntimeDirectoryMustBePrivate() {
+  QTemporaryDir temporary(QStringLiteral("/tmp/omac-runtime-XXXXXX"));
+  QVERIFY(temporary.isValid());
+  const QByteArray originalRuntime = qgetenv("XDG_RUNTIME_DIR");
+  const QByteArray originalTemp = qgetenv("TMPDIR");
+  const auto restore = qScopeGuard([&]() {
+    originalRuntime.isNull() ? qunsetenv("XDG_RUNTIME_DIR")
+                             : qputenv("XDG_RUNTIME_DIR", originalRuntime);
+    originalTemp.isNull() ? qunsetenv("TMPDIR")
+                          : qputenv("TMPDIR", originalTemp);
+  });
+  qunsetenv("XDG_RUNTIME_DIR");
+  qputenv("TMPDIR", temporary.path().toUtf8());
+  if (!paths::runtimeDirectory().startsWith(temporary.path())) {
+    QSKIP("Qt does not use TMPDIR for its temporary path on this platform");
+  }
+  const QString fallback = paths::runtimeDirectory();
+  QVERIFY(QDir().mkpath(fallback));
+  QVERIFY(QFile::setPermissions(fallback, QFileDevice::ReadOwner |
+                                             QFileDevice::WriteOwner |
+                                             QFileDevice::ExeOwner |
+                                             QFileDevice::ReadOther |
+                                             QFileDevice::WriteOther |
+                                             QFileDevice::ExeOther));
+  ApplicationInstance unsafe;
+  QVERIFY(!unsafe.claimPrimary());
+  QVERIFY(!unsafe.forwardToPrimary(QStringLiteral("omacalendar://settings")));
+
+  QVERIFY(QDir().rmdir(fallback));
+  QVERIFY(QFile::link(temporary.path(), fallback));
+  ApplicationInstance linked;
+  QVERIFY(!linked.claimPrimary());
+  QVERIFY(!linked.forwardToPrimary(QStringLiteral("omacalendar://settings")));
+  QVERIFY(QFile::remove(fallback));
+
+  ApplicationInstance primary;
+  QVERIFY(primary.claimPrimary());
+  ApplicationInstance secondary;
   QVERIFY(!secondary.claimPrimary());
 }
 

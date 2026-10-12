@@ -4,7 +4,6 @@
 
 #include <QDir>
 #include <QFile>
-#include <QFileInfo>
 #include <QLocalSocket>
 #include <QLockFile>
 #include <QThread>
@@ -36,8 +35,7 @@ ApplicationInstance::~ApplicationInstance() {
 }
 
 bool ApplicationInstance::claimPrimary() {
-  const QFileInfo socketInfo(m_serverPath);
-  if (!QDir().mkpath(socketInfo.absolutePath())) {
+  if (!paths::ensureRuntimeDirectory()) {
     return false;
   }
 
@@ -65,17 +63,20 @@ bool ApplicationInstance::claimPrimary() {
 
   // Owning the lock proves no live primary owns this endpoint.
   QLocalServer::removeServer(m_serverPath);
+  m_server.setSocketOptions(QLocalServer::UserAccessOption);
   if (!m_server.listen(m_serverPath)) {
     m_lock.reset();
     m_kernelLock.reset();
     return false;
   }
-
   m_primary = true;
   return true;
 }
 
 bool ApplicationInstance::forwardToPrimary(const QString& startupArgument) const {
+  if (!paths::ensureRuntimeDirectory()) {
+    return false;
+  }
   QLocalSocket socket;
   for (int attempt = 0; attempt < 20; ++attempt) {
     socket.connectToServer(m_serverPath, QIODevice::ReadWrite);
