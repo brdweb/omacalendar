@@ -6,6 +6,10 @@ Versioning once public releases begin.
 
 ## [Unreleased]
 
+## [2.0.2] - 2026-10-12
+
+A security hardening update. No IPC, schema, packaging, or feature change.
+
 ### Fixed
 
 - Reject iCalendar resources with excessive component nesting or component
@@ -421,7 +425,8 @@ the calendar database to schema 3.
   and emits verifiable build provenance for tagged release candidates. The
   separately documented historical OAuth incident remains a pre-tag gate.
 
-[Unreleased]: https://github.com/brdweb/omacalendar/compare/v2.0.1...HEAD
+[Unreleased]: https://github.com/brdweb/omacalendar/compare/v2.0.2...HEAD
+[2.0.2]: https://github.com/brdweb/omacalendar/compare/v2.0.1...v2.0.2
 [2.0.1]: https://github.com/brdweb/omacalendar/compare/v2.0.0...v2.0.1
 [2.0.0]: https://github.com/brdweb/omacalendar/compare/v1.1.1...v2.0.0
 [1.1.1]: https://github.com/brdweb/omacalendar/compare/v1.1.0...v1.1.1
