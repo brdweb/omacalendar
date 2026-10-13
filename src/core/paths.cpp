@@ -1,12 +1,12 @@
 #include "core/paths.h"
 
-#include <cerrno>
 #include <sys/stat.h>
 #include <unistd.h>
 
 #include <QDir>
 #include <QFile>
 #include <QStandardPaths>
+#include <cerrno>
 
 namespace omacalendar::paths {
 namespace {
@@ -76,10 +76,9 @@ bool ensureRuntimeDirectory(QString* errorMessage) {
     return false;
   }
 
-  struct stat info {};
+  struct stat info{};
   if (::lstat(path.constData(), &info) != 0 || !S_ISDIR(info.st_mode) ||
-      info.st_uid != ::getuid() ||
-      (fallback && (info.st_mode & 077) != 0)) {
+      info.st_uid != ::getuid() || (fallback && (info.st_mode & 077) != 0)) {
     if (errorMessage != nullptr) {
       *errorMessage =
           QStringLiteral("Runtime directory is not private and owned by this user: %1")
@@ -87,12 +86,12 @@ bool ensureRuntimeDirectory(QString* errorMessage) {
     }
     return false;
   }
-  if (!fallback &&
-      !QFile::setPermissions(directory, QFileDevice::ReadOwner |
-                                           QFileDevice::WriteOwner |
-                                           QFileDevice::ExeOwner)) {
+  if (!fallback && !QFile::setPermissions(directory, QFileDevice::ReadOwner |
+                                                         QFileDevice::WriteOwner |
+                                                         QFileDevice::ExeOwner)) {
     if (errorMessage != nullptr) {
-      *errorMessage = QStringLiteral("Could not restrict permissions on %1").arg(directory);
+      *errorMessage =
+          QStringLiteral("Could not restrict permissions on %1").arg(directory);
     }
     return false;
   }
@@ -100,7 +99,8 @@ bool ensureRuntimeDirectory(QString* errorMessage) {
 }
 
 bool ensureDirectories(QString* errorMessage) {
-  const QStringList directories = {dataDirectory(), configDirectory(), cacheDirectory()};
+  const QStringList directories = {dataDirectory(), configDirectory(),
+                                   cacheDirectory()};
   for (const QString& directory : directories) {
     QDir dir;
     if (!dir.mkpath(directory)) {

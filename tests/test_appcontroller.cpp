@@ -905,8 +905,7 @@ void AppControllerTest::fallbackRuntimeDirectoryMustBePrivate() {
   const auto restore = qScopeGuard([&]() {
     originalRuntime.isNull() ? qunsetenv("XDG_RUNTIME_DIR")
                              : qputenv("XDG_RUNTIME_DIR", originalRuntime);
-    originalTemp.isNull() ? qunsetenv("TMPDIR")
-                          : qputenv("TMPDIR", originalTemp);
+    originalTemp.isNull() ? qunsetenv("TMPDIR") : qputenv("TMPDIR", originalTemp);
   });
   qunsetenv("XDG_RUNTIME_DIR");
   qputenv("TMPDIR", temporary.path().toUtf8());
@@ -915,12 +914,10 @@ void AppControllerTest::fallbackRuntimeDirectoryMustBePrivate() {
   }
   const QString fallback = paths::runtimeDirectory();
   QVERIFY(QDir().mkpath(fallback));
-  QVERIFY(QFile::setPermissions(fallback, QFileDevice::ReadOwner |
-                                             QFileDevice::WriteOwner |
-                                             QFileDevice::ExeOwner |
-                                             QFileDevice::ReadOther |
-                                             QFileDevice::WriteOther |
-                                             QFileDevice::ExeOther));
+  QVERIFY(QFile::setPermissions(fallback,
+                                QFileDevice::ReadOwner | QFileDevice::WriteOwner |
+                                    QFileDevice::ExeOwner | QFileDevice::ReadOther |
+                                    QFileDevice::WriteOther | QFileDevice::ExeOther));
   ApplicationInstance unsafe;
   QVERIFY(!unsafe.claimPrimary());
   QVERIFY(!unsafe.forwardToPrimary(QStringLiteral("omacalendar://settings")));

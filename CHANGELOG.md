@@ -6,6 +6,13 @@ Versioning once public releases begin.
 
 ## [Unreleased]
 
+### Fixed
+
+- Reject iCalendar resources with excessive component nesting or component
+  counts before parsing, and traverse event components without recursion.
+- Create private fallback runtime directories and reject unsafe existing
+  directories or symlinks before desktop instance locking and activation.
+
 ## [2.0.1] - 2026-09-30
 
 A companion-widget update. No IPC, schema, or feature change in the app.

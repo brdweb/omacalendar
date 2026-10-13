@@ -715,8 +715,8 @@ void CalDavHardeningTest::excessiveComponentStructureIsRejected() {
   const auto deep = caldav::ICalendarCodec::parse(nested);
   QVERIFY(!deep.ok());
   QCOMPARE(deep.error.code, QStringLiteral("invalid_structure"));
-  const auto carriageReturns = caldav::ICalendarCodec::parse(
-      QByteArray(nested).replace("\r\n", "\r"));
+  const auto carriageReturns =
+      caldav::ICalendarCodec::parse(QByteArray(nested).replace("\r\n", "\r"));
   QVERIFY(!carriageReturns.ok());
   QCOMPARE(carriageReturns.error.code, QStringLiteral("invalid_structure"));
 

@@ -39,8 +39,7 @@ bool hasSafeComponentStructure(const QByteArray& payload) {
   qsizetype position = 0;
   while (position < payload.size()) {
     qsizetype end = position;
-    while (end < payload.size() && payload.at(end) != '\r' &&
-           payload.at(end) != '\n') {
+    while (end < payload.size() && payload.at(end) != '\r' && payload.at(end) != '\n') {
       ++end;
     }
     // A line beginning with whitespace continues the previous property.
@@ -1143,7 +1142,8 @@ ICalendarParseResult ICalendarCodec::parse(const QByteArray& payload) {
   if (!hasSafeComponentStructure(payload)) {
     result.error = {
         QStringLiteral("invalid_structure"),
-        QStringLiteral("The iCalendar resource has excessive or invalid component nesting")};
+        QStringLiteral(
+            "The iCalendar resource has excessive or invalid component nesting")};
     return result;
   }
 
