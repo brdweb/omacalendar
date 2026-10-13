@@ -2003,10 +2003,8 @@ Item {
             compare(editorSaveSpy.count, 1)
             const saved = editorSaveSpy.signalArguments[0][0]
             compare(saved.reminders.length, 2)
-            compare(JSON.stringify(saved.reminders[0]),
-                    JSON.stringify(absoluteReminder))
-            compare(JSON.stringify(saved.reminders[1]),
-                    JSON.stringify(relativeReminder))
+            compare(saved.reminders[0], absoluteReminder)
+            compare(saved.reminders[1], relativeReminder)
             tryCompare(editor, "opened", false)
 
             editorSaveSpy.clear()
@@ -2020,8 +2018,7 @@ Item {
             editor.submit()
             compare(editorSaveSpy.count, 1)
             const edited = editorSaveSpy.signalArguments[0][0]
-            compare(JSON.stringify(edited.reminders[0]),
-                    JSON.stringify(absoluteReminder))
+            compare(edited.reminders[0], absoluteReminder)
             compare(edited.reminders[1].method, "email")
             compare(edited.reminders[1].minutes, 15)
             compare(edited.reminders[1].xProvider, "keep-relative")
@@ -2039,8 +2036,7 @@ Item {
             compare(editorSaveSpy.count, 1)
             const removed = editorSaveSpy.signalArguments[0][0]
             compare(removed.reminders.length, 1)
-            compare(JSON.stringify(removed.reminders[0]),
-                    JSON.stringify(relativeReminder))
+            compare(removed.reminders[0], relativeReminder)
             tryCompare(editor, "opened", false)
 
             editorSaveSpy.target = null
