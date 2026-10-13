@@ -2,8 +2,9 @@
 
 | App version | IPC | Schema | Distribution |
 |---|---:|---:|---|
-| `2.0.1` | 2.2 | 3 | Current x86-64 Arch/Omarchy |
-| `2.0.0` | 2.2 | 3 | Previous x86-64 Arch/Omarchy release |
+| `2.0.2` | 2.2 | 3 | Current x86-64 Arch/Omarchy |
+| `2.0.1` | 2.2 | 3 | Previous x86-64 Arch/Omarchy release |
+| `2.0.0` | 2.2 | 3 | Earlier x86-64 Arch/Omarchy release |
 | `1.1.1` | 2.1 | 2 | Earlier x86-64 Arch/Omarchy release |
 | `1.1.0` | 2.1 | 2 | Earlier x86-64 Arch/Omarchy release |
 | `1.0.0` | 2.0 | 2 | Earlier x86-64 Arch/Omarchy release |
