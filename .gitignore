@@ -28,3 +28,7 @@ google-oauth*.json
 
 # Local Hermes workspace state
 .hermes/
+
+# Personal agent notes
+AGENTS.local.md
+CLAUDE.local.md
