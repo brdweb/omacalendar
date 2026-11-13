@@ -180,6 +180,7 @@ add_library(omacalendar_sync STATIC
   src/sync/provider.h
   src/sync/localprovider.cpp
   src/sync/localprovider.h
+  src/sync/networkerrorcode.h
   src/sync/retrypolicy.cpp
   src/sync/retrypolicy.h
   src/sync/syncactivity.cpp

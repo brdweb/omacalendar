@@ -3,6 +3,7 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 import OmaCalendar
+import "../StatusLabels.js" as StatusLabels
 
 Drawer {
     id: root
@@ -592,7 +593,8 @@ Drawer {
                                 spacing: Theme.spacingSM
                                 StatusBadge {
                                     dotOnly: true
-                                    text: operationCard.modelData.state || qsTr("pending")
+                                    text: StatusLabels.operationStateLabel(
+                                              operationCard.modelData.state)
                                     tone: operationCard.modelData.state === "blocked"
                                           ? "danger"
                                           : operationCard.modelData.state === "retry_wait"
@@ -613,8 +615,10 @@ Drawer {
                                     Text {
                                         textFormat: Text.PlainText
                                         Layout.fillWidth: true
+                                        objectName: "operationStateText-" + String(operationCard.modelData.id)
                                         text: operationCard.modelData.errorMessage
-                                              || String(operationCard.modelData.state || qsTr("pending")).replace(/_/g, " ")
+                                              || StatusLabels.operationStateLabel(
+                                                  operationCard.modelData.state)
                                         color: Theme.mutedText
                                         font.pixelSize: Theme.microFontSize
                                         elide: Text.ElideRight

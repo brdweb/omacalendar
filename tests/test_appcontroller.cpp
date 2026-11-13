@@ -259,8 +259,16 @@ class FakeDaemon final : public QObject {
             QStringLiteral("result"),
             QJsonObject{{QStringLiteral("undoToken"),
                          QStringLiteral("token-%1").arg(m_mutations.size())}});
-      } else if (method == QStringLiteral("sync.setInteractive")) {
+      } else if (method == QStringLiteral("sync.setInteractive") ||
+                 method == QStringLiteral("google.oauthCancel")) {
         m_mutations.append({method, params});
+      } else if (method == QStringLiteral("google.oauthStart")) {
+        m_mutations.append({method, params});
+        response.insert(
+            QStringLiteral("result"),
+            QJsonObject{
+                {QStringLiteral("accountId"), QStringLiteral("google-new")},
+                {QStringLiteral("state"), QStringLiteral("waiting_for_browser")}});
       } else if (method == QStringLiteral("events.undo")) {
         m_mutations.append({method, params});
         response.insert(
@@ -418,6 +426,10 @@ class AppControllerTest final : public QObject {
   void pdfExportValidatesItsRequest();
   void pdfExportWaitsForHydration();
   void oauthUrlNotificationRejectsNonGoogleHosts();
+  void errorCodesMapToFriendlyTextAndAction_data();
+  void errorCodesMapToFriendlyTextAndAction();
+  void syncErrorsCarryTheirAccountAndAction();
+  void googleSignInCanBeCancelled();
   void tasksLoadRefreshAndMutate();
   void subscriptionFallsBackWithoutTasks();
 
@@ -684,6 +696,185 @@ void AppControllerTest::pdfExportWaitsForHydration() {
   daemon.broadcast(QStringLiteral("events.changed"));
   QTRY_COMPARE(pdfRequests(), 2);
   QVERIFY(!QFile::exists(path));
+}
+
+void AppControllerTest::errorCodesMapToFriendlyTextAndAction_data() {
+  QTest::addColumn<QString>("code");
+  QTest::addColumn<QString>("provider");
+  QTest::addColumn<QString>("action");
+  QTest::addColumn<QString>("fragment");
+  // Codes as the daemon and its providers report them.
+  QTest::newRow("google expired") << "invalid_grant" << "google" << "sign_in"
+                                  << "sign in again";
+  QTest::newRow("google needs auth") << "authentication_required" << "google"
+                                     << "sign_in" << "sign in again";
+  QTest::newRow("google scopes") << "oauth_scope_upgrade" << "google" << "sign_in"
+                                 << "free/busy";
+  QTest::newRow("google timeout") << "authorization_timeout" << "google" << "sign_in"
+                                  << "timed out";
+  QTest::newRow("google denied") << "access_denied" << "google" << "sign_in"
+                                 << "not granted";
+  QTest::newRow("caldav password") << "http_401" << "caldav" << "account_settings"
+                                   << "username or password";
+  QTest::newRow("caldav credentials") << "authentication_required" << "caldav"
+                                      << "account_settings" << "username or password";
+  QTest::newRow("ics forbidden") << "http_403" << "ics" << "account_settings"
+                                 << "refused access";
+  QTest::newRow("keyring") << "keyring_error" << "google" << "retry" << "keyring";
+  QTest::newRow("keyring lookup") << "credentials_unavailable" << "ics" << "retry"
+                                  << "keyring";
+  QTest::newRow("no secret service") << "helper_unavailable" << "" << "retry"
+                                     << "Secret Service";
+  QTest::newRow("host") << "host_not_found" << "caldav" << "retry"
+                        << "could not be found";
+  QTest::newRow("offline") << "network_unavailable" << "caldav" << "retry"
+                           << "internet connection";
+  QTest::newRow("network") << "network_error" << "ics" << "retry"
+                           << "internet connection";
+  QTest::newRow("tls") << "tls_error" << "caldav" << "retry" << "secure connection";
+  QTest::newRow("timeout") << "timeout" << "ics" << "retry" << "too long";
+  QTest::newRow("rate limit") << "http_429" << "caldav" << "retry" << "limiting";
+  QTest::newRow("google rate limit") << "rateLimitExceeded" << "google" << "retry"
+                                     << "limiting";
+  QTest::newRow("server") << "http_503" << "caldav" << "retry" << "having trouble";
+  QTest::newRow("not found") << "http_404" << "caldav" << "account_settings"
+                             << "No calendar was found";
+  QTest::newRow("database") << "database_error" << "" << "" << "local database";
+}
+
+void AppControllerTest::errorCodesMapToFriendlyTextAndAction() {
+  QFETCH(QString, code);
+  QFETCH(QString, provider);
+  QFETCH(QString, action);
+  QFETCH(QString, fragment);
+  AppController controller;
+  const QString raw = QStringLiteral("Raw service text");
+  const QVariantMap friendly = controller.describeError(code, raw, provider);
+  const QString message = friendly.value(QStringLiteral("message")).toString();
+  QVERIFY2(message.contains(fragment, Qt::CaseInsensitive), qPrintable(message));
+  QVERIFY(message != raw);
+  QVERIFY2(!message.contains(QLatin1Char('_')), qPrintable(message));
+  QCOMPARE(friendly.value(QStringLiteral("action")).toString(), action);
+  // The service's wording stays available under Details.
+  QCOMPARE(friendly.value(QStringLiteral("details")).toString(),
+           QStringLiteral("%1 (%2)").arg(raw, code));
+}
+
+void AppControllerTest::syncErrorsCarryTheirAccountAndAction() {
+  FakeDaemon daemon(0);
+  daemon.setAccounts(
+      QJsonArray{QJsonObject{{QStringLiteral("id"), QStringLiteral("dav-1")},
+                             {QStringLiteral("provider"), QStringLiteral("caldav")}},
+                 QJsonObject{{QStringLiteral("id"), QStringLiteral("google-1")},
+                             {QStringLiteral("provider"), QStringLiteral("google")}}});
+  QVERIFY(daemon.listen());
+  AppController controller;
+  QTRY_COMPARE(controller.accounts().size(), 2);
+  QTRY_VERIFY(daemon.subscribeCount() > 0);
+
+  daemon.broadcast(
+      QStringLiteral("sync.statusChanged"),
+      {{QStringLiteral("accountId"), QStringLiteral("dav-1")},
+       {QStringLiteral("status"),
+        QJsonObject{{QStringLiteral("state"), QStringLiteral("error")},
+                    {QStringLiteral("errorCode"), QStringLiteral("http_401")},
+                    {QStringLiteral("message"),
+                     QStringLiteral("CalDAV credentials were rejected")}}}});
+  QTRY_COMPARE(controller.lastErrorAction(), QStringLiteral("account_settings"));
+  QVERIFY(controller.lastError().contains(QStringLiteral("username or password")));
+  QCOMPARE(controller.lastErrorAccountId(), QStringLiteral("dav-1"));
+  QCOMPARE(controller.lastErrorDetails(),
+           QStringLiteral("CalDAV credentials were rejected (http_401)"));
+
+  daemon.broadcast(
+      QStringLiteral("sync.statusChanged"),
+      {{QStringLiteral("accountId"), QStringLiteral("google-1")},
+       {QStringLiteral("status"),
+        QJsonObject{
+            {QStringLiteral("state"), QStringLiteral("reauthorization_required")},
+            {QStringLiteral("errorCode"), QStringLiteral("authentication_required")},
+            {QStringLiteral("message"), QStringLiteral("Token has been revoked")}}}});
+  QTRY_COMPARE(controller.lastErrorAction(), QStringLiteral("sign_in"));
+  QCOMPARE(controller.lastErrorAccountId(), QStringLiteral("google-1"));
+
+  controller.dismissError();
+  QVERIFY(controller.lastError().isEmpty());
+  QVERIFY(controller.lastErrorAction().isEmpty());
+  QVERIFY(controller.lastErrorAccountId().isEmpty());
+  QVERIFY(controller.lastErrorDetails().isEmpty());
+
+  // An unknown code keeps the service's text and offers nothing to press.
+  daemon.broadcast(
+      QStringLiteral("sync.statusChanged"),
+      {{QStringLiteral("accountId"), QStringLiteral("dav-1")},
+       {QStringLiteral("status"),
+        QJsonObject{{QStringLiteral("state"), QStringLiteral("error")},
+                    {QStringLiteral("errorCode"), QStringLiteral("something_new")},
+                    {QStringLiteral("message"), QStringLiteral("Odd failure")}}}});
+  QTRY_COMPARE(controller.lastError(), QStringLiteral("Odd failure"));
+  QVERIFY(controller.lastErrorAction().isEmpty());
+  QVERIFY(controller.lastErrorDetails().isEmpty());
+}
+
+void AppControllerTest::googleSignInCanBeCancelled() {
+  FakeDaemon daemon(0);
+  daemon.setAccounts(QJsonArray{
+      QJsonObject{{QStringLiteral("id"), QStringLiteral("google-new")},
+                  {QStringLiteral("provider"), QStringLiteral("google")},
+                  {QStringLiteral("authStatus"), QStringLiteral("authorizing")}}});
+  QVERIFY(daemon.listen());
+  AppController controller;
+  QTRY_COMPARE(controller.accounts().size(), 1);
+  QTRY_VERIFY(daemon.subscribeCount() > 0);
+  QVERIFY(controller.googleSignInState().isEmpty());
+
+  const auto cancels = [&daemon]() {
+    QList<QJsonObject> result;
+    for (const auto& [method, params] : daemon.mutations()) {
+      if (method == QStringLiteral("google.oauthCancel")) {
+        result.append(params);
+      }
+    }
+    return result;
+  };
+
+  controller.connectGoogleConfigured(QStringLiteral("Work"));
+  QTRY_COMPARE(controller.googleSignInState(), QStringLiteral("waiting"));
+  QCOMPARE(controller.googleSignInAccountId(), QStringLiteral("google-new"));
+  controller.cancelGoogleSignIn();
+  QCOMPARE(controller.googleSignInState(), QStringLiteral("cancelled"));
+  QTRY_COMPARE(cancels().size(), 1);
+  QCOMPARE(cancels().first().value(QStringLiteral("accountId")).toString(),
+           QStringLiteral("google-new"));
+  // Nothing is waiting any more, so a second cancel sends nothing.
+  controller.cancelGoogleSignIn();
+  QTest::qWait(50);
+  QCOMPARE(cancels().size(), 1);
+
+  // The daemon gives up on an abandoned browser.
+  controller.connectGoogleConfigured(QStringLiteral("Work"));
+  QTRY_COMPARE(controller.googleSignInState(), QStringLiteral("waiting"));
+  daemon.broadcast(QStringLiteral("sync.statusChanged"),
+                   {{QStringLiteral("accountId"), QStringLiteral("google-new")},
+                    {QStringLiteral("status"),
+                     QJsonObject{{QStringLiteral("state"), QStringLiteral("error")},
+                                 {QStringLiteral("errorCode"),
+                                  QStringLiteral("authorization_timeout")},
+                                 {QStringLiteral("message"),
+                                  QStringLiteral("Google authorization timed out")}}}});
+  QTRY_COMPARE(controller.googleSignInState(), QStringLiteral("timed_out"));
+  QVERIFY(controller.lastError().contains(QStringLiteral("timed out")));
+  QCOMPARE(controller.lastErrorAction(), QStringLiteral("sign_in"));
+
+  // A token arriving starts the first sync.
+  controller.connectGoogleConfigured(QStringLiteral("Work"));
+  QTRY_COMPARE(controller.googleSignInState(), QStringLiteral("waiting"));
+  daemon.broadcast(
+      QStringLiteral("sync.statusChanged"),
+      {{QStringLiteral("accountId"), QStringLiteral("google-new")},
+       {QStringLiteral("status"),
+        QJsonObject{{QStringLiteral("state"), QStringLiteral("syncing")}}}});
+  QTRY_COMPARE(controller.googleSignInState(), QStringLiteral("connected"));
 }
 
 void AppControllerTest::oauthUrlNotificationRejectsNonGoogleHosts() {

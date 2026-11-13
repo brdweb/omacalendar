@@ -409,42 +409,16 @@ ApplicationWindow {
                 anchors.fill: parent
                 spacing: 0
 
-                Rectangle {
-                    visible: App.lastError.length > 0
+                ErrorBanner {
+                    objectName: "errorBanner"
                     Layout.fillWidth: true
-                    implicitHeight: errorRow.implicitHeight + 18
-                    color: Theme.alpha(Theme.danger, 0.1)
-                    border.color: Theme.alpha(Theme.danger, 0.3)
-                    RowLayout {
-                        id: errorRow
-                        anchors.fill: parent
-                        anchors.leftMargin: Theme.spacingMD
-                        anchors.rightMargin: Theme.spacingSM
-                        anchors.topMargin: Theme.spacingSM
-                        anchors.bottomMargin: Theme.spacingSM
-                        spacing: Theme.spacingSM
-                        StatusBadge { dotOnly: true; text: qsTr("Error"); tone: "danger" }
-                        Text {
-                            textFormat: Text.PlainText
-                            Layout.fillWidth: true
-                            text: App.lastError
-                            color: Theme.text
-                            font.pixelSize: Theme.smallFontSize
-                            wrapMode: Text.Wrap
-                        }
-                        AppButton {
-                            visible: !App.connected
-                            text: qsTr("Reconnect")
-                            compact: true
-                            onClicked: App.reconnect()
-                        }
-                        AppButton {
-                            text: qsTr("Details")
-                            compact: true
-                            quiet: true
-                            onClicked: window.openActivity("sync")
-                        }
-                    }
+                    message: App.lastError
+                    details: String(window.appValue("lastErrorDetails", ""))
+                    action: String(window.appValue("lastErrorAction", ""))
+                    connected: App.connected
+                    onActionRequested: action => window.handleErrorAction(action)
+                    onDismissRequested: window.callApp("dismissError", [])
+                    onActivityRequested: window.openActivity("sync")
                 }
 
                 Item {
@@ -840,6 +814,9 @@ ApplicationWindow {
         busy: App.busy
         statusText: App.statusText
         lastError: App.lastError
+        googleSignInState: String(window.appValue("googleSignInState", ""))
+        onCancelGoogleSignInRequested: window.callApp("cancelGoogleSignIn", [])
+        onDismissErrorRequested: window.callApp("dismissError", [])
         preferences: window.preferences
         systemTimeZoneId: String(window.appValue("systemTimeZoneId", "UTC"))
         availableTimeZoneIds: window.appValue("availableTimeZoneIds", ["UTC"])
@@ -1183,6 +1160,24 @@ ApplicationWindow {
     function appObject(name) {
         const value = appValue(name, {})
         return value && typeof value === "object" ? value : {}
+    }
+
+    // The error banner's action: the same paths the sidebar and the
+    // settings use for the account the error is about.
+    function handleErrorAction(action) {
+        const accountId = String(window.appValue("lastErrorAccountId", ""))
+        if (action === "reconnect") {
+            App.reconnect()
+        } else if (action === "sign_in" && accountId.length > 0) {
+            window.callApp("reauthorizeAccount", [accountId])
+        } else if (action === "sign_in" || action === "account_settings") {
+            settingsDrawer.openAccounts()
+        } else if (action === "retry") {
+            if (accountId.length > 0)
+                window.callApp("syncAccount", [accountId])
+            else
+                window.callApp("syncAll", [])
+        }
     }
 
     function callApp(methodName, argumentsList) {

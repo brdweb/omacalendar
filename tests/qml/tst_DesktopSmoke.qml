@@ -55,6 +55,7 @@ Item {
         }
     }
     Component { id: settingsFactory; Components.AccountSettingsDrawer {} }
+    Component { id: errorBannerFactory; Components.ErrorBanner {} }
 
     Component {
         id: signalSpyFactory
@@ -543,6 +544,175 @@ Item {
             timelineEvent.commitMove(0, -260)
             compare(allDaySpy.count, 1, "released above the timeline top")
             compare(rescheduleSpy.count, 1)
+        }
+
+        function test_error_banner_actions_and_dismiss() {
+            const banner = createTemporaryObject(errorBannerFactory, scene, {
+                "width": 700,
+                "message": "Google needs you to sign in again before this account can sync.",
+                "details": "Token has been expired or revoked. (invalid_grant)",
+                "action": "sign_in", "connected": true})
+            verify(banner !== null)
+            verify(banner.visible)
+            const action = findChild(banner, "errorBannerAction")
+            verify(action.visible)
+            compare(action.text, "Sign in")
+            const actions = createTemporaryObject(signalSpyFactory, testCase, {
+                "target": banner, "signalName": "actionRequested"})
+            action.clicked()
+            compare(actions.count, 1)
+            compare(actions.signalArguments[0][0], "sign_in")
+
+            banner.action = "retry"
+            compare(action.text, "Retry")
+            banner.action = "account_settings"
+            compare(action.text, "Open account settings")
+            banner.action = ""
+            verify(!action.visible, "no action without a fix to offer")
+            banner.connected = false
+            verify(action.visible)
+            compare(action.text, "Reconnect", "the calendar service comes first")
+            action.clicked()
+            compare(actions.signalArguments[1][0], "reconnect")
+
+            // The service's own words stay one click away.
+            const detailsRow = findChild(banner, "errorBannerDetailsRow")
+            verify(!detailsRow.visible)
+            findChild(banner, "errorBannerDetails").clicked()
+            verify(detailsRow.visible)
+            compare(findChild(banner, "errorBannerDetailsText").text,
+                    "Token has been expired or revoked. (invalid_grant)")
+            banner.details = ""
+            const activity = createTemporaryObject(signalSpyFactory, testCase, {
+                "target": banner, "signalName": "activityRequested"})
+            findChild(banner, "errorBannerDetails").clicked()
+            compare(activity.count, 1, "without details, Details opens Activity")
+
+            const dismissed = createTemporaryObject(signalSpyFactory, testCase, {
+                "target": banner, "signalName": "dismissRequested"})
+            findChild(banner, "errorBannerDismiss").clicked()
+            compare(dismissed.count, 1)
+            banner.message = ""
+            verify(!banner.visible)
+        }
+
+        function test_account_status_labels_are_human() {
+            const settings = createTemporaryObject(settingsFactory, scene, {
+                "accounts": [
+                    {"id": "g", "provider": "google", "displayName": "Work",
+                     "authStatus": "reauthorization_required"},
+                    {"id": "c", "provider": "caldav", "displayName": "Fastmail",
+                     "authStatus": "credential_storage_pending"},
+                    {"id": "i", "provider": "ics", "displayName": "Holidays",
+                     "authStatus": "connected"}
+                ],
+                "connected": true
+            })
+            verify(settings !== null)
+            settings.openAccounts()
+            tryCompare(settings, "opened", true)
+            const content = scene.Window.window.contentItem
+            compare(findChild(content, "accountStatusText-g").text,
+                    "Google · Sign-in needed")
+            compare(findChild(content, "accountStatusText-c").text,
+                    "CalDAV · Saving password…")
+            compare(findChild(content, "accountStatusText-i").text,
+                    "ICS subscription · Connected")
+            settings.close()
+            tryCompare(settings, "opened", false)
+
+            const activity = createTemporaryObject(activityFactory, scene, {
+                "operations": [
+                    {"id": 7, "operation": "update", "state": "retry_wait",
+                     "errorMessage": ""},
+                    {"id": 8, "operation": "create", "state": "pending",
+                     "errorMessage": ""}
+                ]
+            })
+            verify(activity !== null)
+            activity.mode = "sync"
+            activity.open()
+            tryCompare(activity, "opened", true)
+            compare(findChild(content, "operationStateText-7").text, "Will retry soon")
+            compare(findChild(content, "operationStateText-8").text, "Waiting to send")
+            activity.close()
+            tryCompare(activity, "opened", false)
+        }
+
+        function test_setup_error_persists() {
+            const settings = createTemporaryObject(settingsFactory, scene, {
+                "accounts": [], "connected": true})
+            verify(settings !== null)
+            settings.openAccounts()
+            tryCompare(settings, "opened", true)
+            const content = scene.Window.window.contentItem
+            const timer = findChild(settings, "submissionTimer")
+            verify(timer !== null)
+
+            // A failed CalDAV setup keeps its message until dismissed.
+            settings.beginSubmission("caldav")
+            verify(timer.running, "a pending request still times out")
+            settings.lastError = "The server did not accept the username or password."
+            const caldavText = findChild(content, "caldavSubmissionText")
+            compare(caldavText.text, "The server did not accept the username or password.")
+            compare(settings.submissionTone, "danger")
+            verify(!timer.running, "errors do not clear themselves")
+            const dismissError = createTemporaryObject(signalSpyFactory, testCase, {
+                "target": settings, "signalName": "dismissErrorRequested"})
+            findChild(content, "caldavSubmissionDismiss").clicked()
+            compare(settings.submissionForm, "")
+            compare(dismissError.count, 1, "dismissing also clears the banner")
+            settings.lastError = ""
+
+            // Google waits for the browser with a way out.
+            settings.beginSubmission("google")
+            verify(!timer.running, "the browser is not raced")
+            settings.googleSignInState = "waiting"
+            const googleText = findChild(content, "googleSubmissionText")
+            verify(googleText.text.indexOf("Waiting for browser") === 0, googleText.text)
+            const cancel = findChild(content, "googleSignInCancel")
+            verify(cancel.visible)
+            const cancelSpy = createTemporaryObject(signalSpyFactory, testCase, {
+                "target": settings, "signalName": "cancelGoogleSignInRequested"})
+            cancel.clicked()
+            compare(cancelSpy.count, 1)
+            settings.googleSignInState = "cancelled"
+            compare(googleText.text, "Google sign-in cancelled.")
+            verify(!cancel.visible)
+
+            settings.beginSubmission("google")
+            settings.googleSignInState = "waiting"
+            settings.googleSignInState = "timed_out"
+            verify(googleText.text.indexOf("timed out") > 0, googleText.text)
+            compare(settings.submissionTone, "danger")
+            verify(!timer.running)
+
+            // Sending the form again replaces the old outcome.
+            settings.beginSubmission("google")
+            verify(settings.submissionPending)
+            compare(settings.submissionMessage, "")
+            settings.googleSignInState = "waiting"
+            settings.googleSignInState = "connected"
+            compare(settings.submissionTone, "success")
+            verify(timer.running, "success clears itself")
+
+            // CalDAV fields are labelled, the password can be shown and the
+            // help lists common servers.
+            const password = findChild(content, "caldavPassword")
+            compare(password.echoMode, TextInput.Password)
+            findChild(content, "caldavShowPassword").clicked()
+            compare(password.echoMode, TextInput.Normal)
+            findChild(content, "caldavShowPassword").clicked()
+            compare(password.echoMode, TextInput.Password)
+            const helpToggle = findChild(content, "caldavHelpToggle")
+            compare(helpToggle.text, "Where do I find the server address?")
+            helpToggle.clicked()
+            compare(helpToggle.text, "Hide server addresses")
+            compare(findChild(content, "caldavEndpointField").Accessible.name,
+                    "CalDAV server URL")
+            compare(findChild(content, "caldavUser").Accessible.name, "CalDAV username")
+            settings.close()
+            tryCompare(settings, "opened", false)
         }
 
         function test_sidebar_shows_account_sync_state() {
