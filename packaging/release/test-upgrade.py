@@ -120,12 +120,30 @@ def snapshot(h: DaemonHarness, ids: list[str], settings: dict[str, Any], interva
     }
 
 
-def schema_two_version(path: Path) -> None:
+def known_fields(actual: Any, expected: Any) -> Any:
+    """Drop fields the previous version did not report: IPC changes within a
+    major version are additive, so a candidate may return more."""
+    if isinstance(actual, dict) and isinstance(expected, dict):
+        return {key: known_fields(value, expected[key])
+                for key, value in actual.items() if key in expected}
+    if isinstance(actual, list) and isinstance(expected, list) and len(actual) == len(expected):
+        return [known_fields(a, e) for a, e in zip(actual, expected)]
+    return actual
+
+
+# The column each schema added, so the prior artifact can be shown not to
+# have the candidate's shape yet.
+FIRST_COLUMN_OF_NEXT_SCHEMA = {2: "series_until_utc", 3: "color"}
+PREVIOUS_SCHEMA = 3
+
+
+def prior_schema_version(path: Path) -> None:
     with sqlite3.connect(path) as connection:
-        equal(connection.execute("PRAGMA user_version").fetchone()[0], 2,
-              "prior artifact did not create schema 2")
+        equal(connection.execute("PRAGMA user_version").fetchone()[0], PREVIOUS_SCHEMA,
+              f"prior artifact did not create schema {PREVIOUS_SCHEMA}")
         columns = {row[1] for row in connection.execute("PRAGMA table_info(events)")}
-        require("series_until_utc" not in columns, "prior artifact already has series bounds")
+        column = FIRST_COLUMN_OF_NEXT_SCHEMA[PREVIOUS_SCHEMA]
+        require(column not in columns, f"prior artifact already has events.{column}")
 
 
 def assert_series_bounds(path: Path, ids: list[str]) -> None:
@@ -235,7 +253,7 @@ def upgrade(previous: Path, candidate: Path, old_version: str, new_version: str,
             require(any(e["summary"] == "Synthetic exception" for e in before["occurrences"]),
                     "seed detached exception not visible")
             h.stop()
-            schema_two_version(h.database_path)
+            prior_schema_version(h.database_path)
             backup = root / "backup"
             backup.mkdir(mode=0o700)
             for name in ("data", "config"):
@@ -250,9 +268,10 @@ def upgrade(previous: Path, candidate: Path, old_version: str, new_version: str,
                 require(h.call("system.health")["ok"], "candidate unhealthy")
                 require(h.call("system.info")["schemaVersion"] == 4,
                         "candidate did not report schema 4")
-                equal(h.call("events.list", historical_range)["events"], historical_before,
-                      f"candidate restart {number + 1} changed finite recurrence")
-                equal(snapshot(h, ids, settings, interval), before, f"candidate restart {number + 1} changed profile")
+                equal(known_fields(h.call("events.list", historical_range)["events"], historical_before),
+                      historical_before, f"candidate restart {number + 1} changed finite recurrence")
+                equal(known_fields(snapshot(h, ids, settings, interval), before), before,
+                      f"candidate restart {number + 1} changed profile")
                 h.stop()
                 assert_series_bounds(h.database_path, historical_ids)
             for name in ("data", "config"):
@@ -268,7 +287,7 @@ def upgrade(previous: Path, candidate: Path, old_version: str, new_version: str,
             equal(tree_digest(root / "synthetic-secrets"), original_secret_fixture,
                   "synthetic credential storage changed during upgrade/restore")
             print(f"PASS: {old_version} -> {new_version}; timed/all-day/floating plus COUNT/UNTIL "
-                  "historical series, schema-2-to-3 finite-bound backfill, full event DTOs, detached/cancelled "
+                  "historical series, schema migration and finite-bound backfill, full event DTOs, detached/cancelled "
                   "recurrence, alarm jobs, nine settings, calendar colors/visibility/order/ignored-alerts, "
                   "active ordered set/default, local/CalDAV account continuity, two candidate restarts, "
                   "complete older-backup restore and immutable backup hashes")
@@ -367,7 +386,10 @@ def main() -> None:
     parser.add_argument("--work-dir", type=Path, help="Disk for profiles; only short symlink aliases use /tmp")
     parser.add_argument("--log-dir", type=Path, help="Retain synthetic daemon logs")
     parser.add_argument("--skip-schema-one", action="store_true")
+    parser.add_argument("--previous-schema", type=int, choices=sorted(FIRST_COLUMN_OF_NEXT_SCHEMA),
+                        default=PREVIOUS_SCHEMA, help="Schema the previous artifact creates")
     args = parser.parse_args()
+    globals()["PREVIOUS_SCHEMA"] = args.previous_schema
     previous, candidate = args.previous_bin.resolve(), args.candidate_bin.resolve()
     work = args.work_dir.resolve() if args.work_dir else Path(tempfile.gettempdir())
     work.mkdir(mode=0o700, parents=True, exist_ok=True)
