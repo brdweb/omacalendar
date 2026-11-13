@@ -29,7 +29,7 @@ Pull requests run four checks. Run the local commands below as written. The base
 ```sh
 mapfile -t sources < <(git ls-files '*.cpp' '*.h')
 clang-format --dry-run --Werror "${sources[@]}"
-for script in packaging/arch/*.in packaging/release/*.sh; do
+for script in packaging/arch/*.in packaging/release/*.sh scripts/*.sh; do
   bash -n "${script}"
 done
 packaging/release/test-versioning.sh
@@ -62,7 +62,7 @@ packaging/release/verify-uninstall.sh \
 
 **Gitleaks** (`.github/workflows/secret-scan.yml`) and **Dependency review** (`.github/workflows/dependency-review.yml`) are GitHub Actions. Their workflows invoke no shell command, so there is no local command to copy. Gitleaks scans full history with `.gitleaks.toml`. Dependency review runs on pull requests and fails on severity `moderate` or higher.
 
-The `build` (Clang RelWithDebInfo) and `sanitizers` (ASan and UBSan) jobs in `ci.yml` run when the event is `schedule`, or `workflow_dispatch` with `run_extended` set to true. Tagging, signing, and draft creation belong to `.github/workflows/release.yml` and `docs/RELEASE.md`.
+The `sanitizers` (ASan and UBSan) job runs on every pull request and push without the `performance`-labelled tests, and with the full suite on `schedule` or `workflow_dispatch` with `run_extended` set to true. The `build` (Clang RelWithDebInfo) job runs only on those extended events. Tagging, signing, and draft creation belong to `.github/workflows/release.yml` and `docs/RELEASE.md`.
 
 ## Definition of done
 
