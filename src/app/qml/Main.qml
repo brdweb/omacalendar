@@ -991,6 +991,16 @@ ApplicationWindow {
             undoToast.dismiss()
             window.callApp("redo", [])
         }
+        onSettingsRequested: settingsDrawer.open()
+        onSyncRequested: App.syncAll()
+        onImportRequested: importIcsFileDialog.open()
+        onQuitRequested: Qt.quit()
+        onHelpRequested: shortcutHelp.open()
+    }
+
+    ShortcutHelpDialog {
+        id: shortcutHelp
+        catalog: appShortcuts.catalog
     }
 
     // Screen readers hear the view and period after navigation settles, once

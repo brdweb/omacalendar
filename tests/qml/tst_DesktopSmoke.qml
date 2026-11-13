@@ -1068,6 +1068,164 @@ Item {
             editor.close()
         }
 
+        function test_shortcuts_dispatch() {
+            const shortcuts = createTemporaryObject(shortcutsFactory, scene, {
+                "navigationEnabled": true, "nudgeEnabled": true,
+                "hasSelectedEvent": true, "tasksAvailable": true
+            })
+            verify(shortcuts !== null)
+            scene.forceActiveFocus()
+            const spy = signalName => createTemporaryObject(signalSpyFactory, testCase, {
+                "target": shortcuts, "signalName": signalName})
+            const views = spy("viewRequested")
+            const today = spy("todayRequested")
+            const period = spy("periodRequested")
+            const nudge = spy("nudgeRequested")
+            const undo = spy("undoRequested")
+            const open = spy("openSelectionRequested")
+            const settings = spy("settingsRequested")
+            const sync = spy("syncRequested")
+            const help = spy("helpRequested")
+
+            keySequence("Alt+4")
+            tryCompare(views, "count", 1)
+            compare(views.signalArguments[0][0], "month")
+            keySequence("T")
+            tryCompare(today, "count", 1)
+            keySequence("]")
+            tryCompare(period, "count", 1)
+            compare(period.signalArguments[0][0], 1)
+            keySequence("Alt+Shift+Down")
+            tryCompare(nudge, "count", 1)
+            compare(nudge.signalArguments[0][0], 0)
+            compare(nudge.signalArguments[0][1], 15)
+            compare(nudge.signalArguments[0][2], 0)
+            keySequence("Ctrl+Z")
+            tryCompare(undo, "count", 1)
+            keyClick(Qt.Key_Enter)
+            tryCompare(open, "count", 1)
+            keySequence("Ctrl+,")
+            tryCompare(settings, "count", 1)
+            keySequence("F5")
+            keySequence("Ctrl+R")
+            tryCompare(sync, "count", 2)
+            keySequence("?")
+            tryCompare(help, "count", 1)
+
+            // Single-key navigation is off while typing or in a dialog;
+            // undo is off while the editor is open.
+            shortcuts.navigationEnabled = false
+            shortcuts.editorOpen = true
+            keySequence("T")
+            keySequence("Ctrl+Z")
+            wait(50)
+            compare(today.count, 1)
+            compare(undo.count, 1)
+        }
+
+        function test_editor_escape_confirms_when_dirty() {
+            const editor = createTemporaryObject(editorFactory, scene)
+            verify(editor !== null)
+            const content = scene.Window.window.contentItem
+
+            // Nothing changed: Escape closes at once.
+            editor.openNew(new Date(2026, 8, 28), 540)
+            tryCompare(editor, "opened", true)
+            keyClick(Qt.Key_Escape)
+            tryCompare(editor, "opened", false)
+
+            // Changed notes: the first Escape only asks.
+            editor.openNew(new Date(2026, 8, 28), 540)
+            tryCompare(editor, "opened", true)
+            findChild(content, "eventNotes").text = "Bring the slides"
+            keyClick(Qt.Key_Escape)
+            wait(50)
+            compare(editor.opened, true)
+            compare(editor.discardArmed, true)
+            verify(findChild(content, "eventDiscardPrompt").visible)
+            keyClick(Qt.Key_Escape)
+            tryCompare(editor, "opened", false)
+
+            // The Discard button closes too; reopening starts clean.
+            editor.openNew(new Date(2026, 8, 28), 540)
+            tryCompare(editor, "opened", true)
+            compare(editor.discardArmed, false)
+            findChild(content, "eventNotes").text = "x"
+            editor.requestDismiss()
+            findChild(content, "eventDiscard").clicked()
+            tryCompare(editor, "opened", false)
+        }
+
+        function test_editor_ctrl_enter_saves() {
+            const editor = createTemporaryObject(editorFactory, scene)
+            verify(editor !== null)
+            editorSaveSpy.target = editor
+            editorSaveSpy.clear()
+            editor.openDraft({"title": "Lunch", "location": "", "recurrenceRule": "",
+                              "date": "2026-10-03", "endDate": "", "allDay": false,
+                              "startMinute": 720, "durationMinutes": 60},
+                             new Date(2026, 8, 28))
+            tryCompare(editor, "opened", true)
+            verify(editor.hasUnsavedChanges(), "a quick-add draft counts as unsaved")
+            keySequence("Ctrl+Return")
+            tryCompare(editorSaveSpy, "count", 1)
+            compare(editorSaveSpy.signalArguments[0][0].summary, "Lunch")
+            tryCompare(editor, "opened", false)
+        }
+
+        function test_task_editor_escape_confirms_when_dirty() {
+            const editor = createTemporaryObject(taskEditorFactory, scene, {
+                "taskLists": [{"id": "local-tasks", "name": "Tasks"}]})
+            const saved = createTemporaryObject(signalSpyFactory, testCase, {
+                "target": editor, "signalName": "saveRequested"})
+            const content = scene.Window.window.contentItem
+            editor.openNew("local-tasks", "")
+            tryCompare(editor, "opened", true)
+            findChild(content, "taskTitle").text = "Renew passport"
+            keyClick(Qt.Key_Escape)
+            wait(50)
+            compare(editor.opened, true)
+            verify(findChild(content, "taskDiscardPrompt").visible)
+            keySequence("Ctrl+S")
+            tryCompare(saved, "count", 1)
+            tryCompare(editor, "opened", false)
+
+            editor.openNew("local-tasks", "")
+            tryCompare(editor, "opened", true)
+            keyClick(Qt.Key_Escape)
+            tryCompare(editor, "opened", false)
+        }
+
+        function test_shortcut_cheat_sheet_lists_all() {
+            const shortcuts = createTemporaryObject(shortcutsFactory, scene)
+            verify(shortcuts !== null)
+            const listed = []
+            for (let index = 0; index < shortcuts.catalog.length; ++index) {
+                const keys = String(shortcuts.catalog[index].keys).split(", ")
+                for (let k = 0; k < keys.length; ++k)
+                    listed.push(keys[k])
+            }
+            // Ranges and synonyms the sheet writes once.
+            const range = "Alt+1 … Alt+5"
+            const aliases = {"Alt+1": range, "Alt+2": range, "Alt+3": range,
+                             "Alt+4": range, "Alt+5": range, "Return": "Enter"}
+            let count = 0
+            for (let index = 0; index < shortcuts.data.length; ++index) {
+                const item = shortcuts.data[index]
+                if (item.sequences === undefined)
+                    continue
+                const sequences = item.sequences.length > 0 ? item.sequences
+                                                            : [item.sequence]
+                for (let s = 0; s < sequences.length; ++s) {
+                    const sequence = String(sequences[s])
+                    const name = aliases[sequence] || sequence
+                    verify(listed.indexOf(name) >= 0, "cheat sheet lists " + sequence)
+                    ++count
+                }
+            }
+            verify(count >= 30, "found the shortcuts: " + count)
+        }
+
         function test_notes_fields_are_plain_text() {
             // Provider notes are untrusted; rich text would render markup
             // and fetch remote images.

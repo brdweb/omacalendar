@@ -14,9 +14,13 @@ Dialog {
     width: Math.min(680, Overlay.overlay ? Overlay.overlay.width - 48 : 680)
     height: Math.min(760, Overlay.overlay ? Overlay.overlay.height - 48 : 760)
     padding: 0
-    closePolicy: Popup.CloseOnEscape
+    // Escape is handled by dismissShortcut so unsaved edits are not lost.
+    closePolicy: Popup.NoAutoClose
 
     property var eventData: ({})
+    // The form as it was opened; a different snapshot means unsaved edits.
+    property string cleanSnapshot: ""
+    property bool discardArmed: false
     property bool editing: Boolean(eventData && eventData.id)
     property bool deleteArmed: false
     property string validationError: ""
@@ -97,6 +101,53 @@ Dialog {
             scopeBox.currentIndex = 0
     }
 
+    function formSnapshot() {
+        const reminders = []
+        for (let index = 0; index < reminderModel.count; ++index) {
+            const row = reminderModel.get(index)
+            reminders.push([row.kind, row.minutes, row.method, row.absoluteAt])
+        }
+        return JSON.stringify([
+            titleField.text, locationField.text, urlField.text, notesField.text,
+            meetBox.checked, allDay.checked, timeKindBox.currentIndex,
+            startDateField.text, endDateField.text, startTimeField.text,
+            endTimeField.text, timeZoneBox.currentIndex, calendarBox.currentIndex,
+            availabilityBox.currentIndex, visibilityBox.currentIndex,
+            recurrenceEditor.rule(), attendeeEditor.attendees, reminders
+        ])
+    }
+
+    function markClean() {
+        cleanSnapshot = formSnapshot()
+        discardArmed = false
+    }
+
+    function hasUnsavedChanges() {
+        return opened && !readOnly && cleanSnapshot.length > 0
+                && formSnapshot() !== cleanSnapshot
+    }
+
+    // Escape, Cancel and the close button: close at once when nothing
+    // changed, otherwise ask first.
+    function requestDismiss() {
+        if (discardArmed || !hasUnsavedChanges()) {
+            discardChanges()
+            return
+        }
+        discardArmed = true
+    }
+
+    function discardChanges() {
+        discardArmed = false
+        cleanSnapshot = ""
+        close()
+    }
+
+    function canSave() {
+        return !readOnly && titleField.text.trim().length > 0
+                && calendarBox.currentIndex >= 0
+    }
+
     function openNew(dateValue, startMinute, durationMinutes) {
         eventData = ({})
         editing = false
@@ -136,6 +187,7 @@ Dialog {
                               "method": "popup", "providerDefault": false,
                               "absoluteAt": "", "sourceIndex": -1,
                               "edited": true})
+        markClean()
         open()
         titleField.forceActiveFocus()
     }
@@ -301,6 +353,7 @@ Dialog {
                 "edited": false
             })
         }
+        markClean()
         open()
         titleField.forceActiveFocus()
     }
@@ -362,6 +415,8 @@ Dialog {
         }
 
         editor.saveRequested(value, mutationOptions())
+        cleanSnapshot = ""
+        discardArmed = false
         editor.close()
     }
 
@@ -613,7 +668,7 @@ Dialog {
 
             AppCloseButton {
                 toolTipText: qsTr("Close event editor")
-                onClicked: editor.close()
+                onClicked: editor.requestDismiss()
             }
 
             ColumnLayout {
@@ -648,6 +703,22 @@ Dialog {
 
     contentItem: ColumnLayout {
         spacing: 0
+        // Shortcuts need an Item parent in the window, so they live here.
+        // An open combo box or nested dialog takes Escape first, because popups
+        // accept the shortcut override for it.
+        Shortcut {
+            objectName: "eventEditorDismissShortcut"
+            sequence: "Escape"
+            enabled: editor.opened
+            context: Qt.ApplicationShortcut
+            onActivated: editor.requestDismiss()
+        }
+        Shortcut {
+            sequences: ["Ctrl+Return", "Ctrl+Enter", "Ctrl+S"]
+            enabled: editor.opened && editor.canSave()
+            context: Qt.ApplicationShortcut
+            onActivated: editor.submit()
+        }
 
         ScrollView {
             Layout.fillWidth: true
@@ -1196,6 +1267,35 @@ Dialog {
             color: Theme.divider
         }
         RowLayout {
+            objectName: "eventDiscardPrompt"
+            visible: editor.discardArmed
+            Layout.fillWidth: true
+            Layout.leftMargin: Theme.spacingMD
+            Layout.rightMargin: Theme.spacingMD
+            Layout.topMargin: Theme.spacingSM
+            spacing: Theme.spacingSM
+            Text {
+                textFormat: Text.PlainText
+                Layout.fillWidth: true
+                text: qsTr("Discard your unsaved changes?")
+                color: Theme.warning
+                wrapMode: Text.Wrap
+                Accessible.role: Accessible.AlertMessage
+                Accessible.name: text
+            }
+            AppButton {
+                text: qsTr("Keep editing")
+                quiet: true
+                onClicked: editor.discardArmed = false
+            }
+            AppButton {
+                objectName: "eventDiscard"
+                text: qsTr("Discard")
+                destructive: true
+                onClicked: editor.discardChanges()
+            }
+        }
+        RowLayout {
             Layout.fillWidth: true
             Layout.margins: Theme.spacingMD
             spacing: Theme.spacingSM
@@ -1222,14 +1322,12 @@ Dialog {
             AppButton {
                 text: qsTr("Cancel")
                 quiet: true
-                onClicked: editor.close()
+                onClicked: editor.requestDismiss()
             }
             AppButton {
                 text: editor.editing ? qsTr("Save changes") : qsTr("Add event")
                 primary: true
-                enabled: !editor.readOnly
-                         && titleField.text.trim().length > 0
-                         && calendarBox.currentIndex >= 0
+                enabled: editor.canSave()
                 onClicked: editor.submit()
             }
         }

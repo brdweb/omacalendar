@@ -32,6 +32,40 @@ Item {
     signal deleteSelectionRequested()
     signal undoRequested()
     signal redoRequested()
+    signal settingsRequested()
+    signal syncRequested()
+    signal importRequested()
+    signal quitRequested()
+    signal helpRequested()
+
+    // Every shortcut, for the cheat sheet. Keep it in step with the
+    // Shortcut items below; test_shortcut_cheat_sheet_lists_all checks it.
+    readonly property var catalog: [
+        {"section": qsTr("General"), "keys": "Ctrl+N", "action": qsTr("New event")},
+        {"section": qsTr("General"), "keys": "Q, Ctrl+Shift+N", "action": qsTr("Quick add")},
+        {"section": qsTr("General"), "keys": "Ctrl+F, /", "action": qsTr("Search")},
+        {"section": qsTr("General"), "keys": "Ctrl+Shift+T", "action": qsTr("Show or hide tasks")},
+        {"section": qsTr("General"), "keys": "Ctrl+P", "action": qsTr("Print or save as PDF")},
+        {"section": qsTr("General"), "keys": "Ctrl+O", "action": qsTr("Import an iCalendar file")},
+        {"section": qsTr("General"), "keys": "Ctrl+R, F5", "action": qsTr("Sync now")},
+        {"section": qsTr("General"), "keys": "Ctrl+,", "action": qsTr("Settings")},
+        {"section": qsTr("General"), "keys": "Ctrl+Z", "action": qsTr("Undo")},
+        {"section": qsTr("General"), "keys": "Ctrl+Shift+Z, Ctrl+Y", "action": qsTr("Redo")},
+        {"section": qsTr("General"), "keys": "?", "action": qsTr("Keyboard shortcuts")},
+        {"section": qsTr("General"), "keys": "Ctrl+Q", "action": qsTr("Quit")},
+        {"section": qsTr("Views"), "keys": "Alt+1 … Alt+5", "action": qsTr("Agenda, day, week, month, year")},
+        {"section": qsTr("Views"), "keys": "T", "action": qsTr("Go to today")},
+        {"section": qsTr("Views"), "keys": "[, ]", "action": qsTr("Previous or next period")},
+        {"section": qsTr("Views"), "keys": "Left, Right", "action": qsTr("Previous or next day")},
+        {"section": qsTr("Events"), "keys": "Up, Down", "action": qsTr("Select previous or next event")},
+        {"section": qsTr("Events"), "keys": "Enter", "action": qsTr("Open the selected event")},
+        {"section": qsTr("Events"), "keys": "Delete", "action": qsTr("Delete the selected event")},
+        {"section": qsTr("Events"), "keys": "Alt+Up, Alt+Down", "action": qsTr("Move the selected event 15 minutes")},
+        {"section": qsTr("Events"), "keys": "Alt+Shift+Up, Alt+Shift+Down", "action": qsTr("Change the selected event's end by 15 minutes")},
+        {"section": qsTr("Events"), "keys": "Alt+Left, Alt+Right", "action": qsTr("Move the selected event a day")},
+        {"section": qsTr("Editors"), "keys": "Ctrl+Enter, Ctrl+S", "action": qsTr("Save")},
+        {"section": qsTr("Editors"), "keys": "Escape", "action": qsTr("Close, asking before discarding changes")}
+    ]
 
     Shortcut {
         sequence: "Ctrl+Shift+T"
@@ -175,5 +209,32 @@ Item {
         enabled: !shortcuts.editorOpen
         context: Qt.ApplicationShortcut
         onActivated: shortcuts.redoRequested()
+    }
+    Shortcut {
+        sequence: "Ctrl+,"
+        context: Qt.ApplicationShortcut
+        onActivated: shortcuts.settingsRequested()
+    }
+    Shortcut {
+        sequences: ["Ctrl+R", "F5"]
+        context: Qt.ApplicationShortcut
+        onActivated: shortcuts.syncRequested()
+    }
+    Shortcut {
+        sequence: "Ctrl+O"
+        enabled: !shortcuts.editorOpen
+        context: Qt.ApplicationShortcut
+        onActivated: shortcuts.importRequested()
+    }
+    Shortcut {
+        sequence: "Ctrl+Q"
+        context: Qt.ApplicationShortcut
+        onActivated: shortcuts.quitRequested()
+    }
+    Shortcut {
+        sequence: "?"
+        enabled: shortcuts.navigationEnabled
+        context: Qt.ApplicationShortcut
+        onActivated: shortcuts.helpRequested()
     }
 }
