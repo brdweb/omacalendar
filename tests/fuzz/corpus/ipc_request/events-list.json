@@ -1,0 +1,1 @@
+{"protocolMajor":2,"id":"1","method":"events.list","params":{"start":"2026-11-01T00:00:00Z","end":"2026-11-08T00:00:00Z","calendarIds":["a"],"limit":10}}

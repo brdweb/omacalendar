@@ -364,3 +364,4 @@ if(OMACALENDAR_ENABLE_HARDWARE_PERF_TESTS)
     LABELS "performance;hardware-gate"
   )
 endif()
+add_subdirectory(fuzz)

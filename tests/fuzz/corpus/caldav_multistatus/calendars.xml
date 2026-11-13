@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8"?>
+<d:multistatus xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav" xmlns:cs="http://calendarserver.org/ns/">
+  <d:response>
+    <d:href>/dav/calendars/user/home/</d:href>
+    <d:propstat>
+      <d:prop>
+        <d:displayname>Home</d:displayname>
+        <d:resourcetype><d:collection/><c:calendar/></d:resourcetype>
+        <c:supported-calendar-component-set><c:comp name="VEVENT"/><c:comp name="VTODO"/></c:supported-calendar-component-set>
+        <cs:getctag>ctag-1</cs:getctag>
+        <d:sync-token>https://example.invalid/sync/1</d:sync-token>
+        <d:current-user-privilege-set><d:privilege><d:write/></d:privilege></d:current-user-privilege-set>
+      </d:prop>
+      <d:status>HTTP/1.1 200 OK</d:status>
+    </d:propstat>
+  </d:response>
+  <d:response>
+    <d:href>/dav/calendars/user/home/event-1.ics</d:href>
+    <d:propstat>
+      <d:prop><d:getetag>"etag-1"</d:getetag><c:calendar-data>BEGIN:VCALENDAR
+END:VCALENDAR</c:calendar-data></d:prop>
+      <d:status>HTTP/1.1 200 OK</d:status>
+    </d:propstat>
+  </d:response>
+  <d:response>
+    <d:href>/dav/principals/user/</d:href>
+    <d:propstat>
+      <d:prop>
+        <d:current-user-principal><d:href>/dav/principals/user/</d:href></d:current-user-principal>
+        <c:calendar-home-set><d:href>/dav/calendars/user/</d:href></c:calendar-home-set>
+        <c:schedule-outbox-URL><d:href>/dav/calendars/user/outbox/</d:href></c:schedule-outbox-URL>
+      </d:prop>
+      <d:status>HTTP/1.1 200 OK</d:status>
+    </d:propstat>
+  </d:response>
+</d:multistatus>

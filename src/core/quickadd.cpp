@@ -90,10 +90,17 @@ QRegularExpressionMatch take(QString* text, const QRegularExpression& re) {
   return match;
 }
 
+// Zero (no duration) for amounts beyond a year, which are typos rather than
+// events, and would overflow int.
 int durationMinutes(const QString& amount, const QString& unit) {
+  constexpr double kMaximumMinutes = 366.0 * 24.0 * 60.0;
   const double value = amount.toDouble();
   const bool hours = unit.startsWith(QLatin1Char('h'), Qt::CaseInsensitive);
-  return static_cast<int>(value * (hours ? 60.0 : 1.0) + 0.5);
+  const double minutes = value * (hours ? 60.0 : 1.0);
+  if (!(minutes >= 0.0) || minutes > kMaximumMinutes) {
+    return 0;
+  }
+  return static_cast<int>(minutes + 0.5);
 }
 
 }  // namespace
