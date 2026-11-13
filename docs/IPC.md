@@ -118,6 +118,15 @@ week, fewer shows that many days from the selected date). `firstDayOfWeek`
 (0 follows the system locale, otherwise 1 = Monday to 7 = Sunday) now also
 accepts 6, Saturday, from the settings UI.
 
+App 2.1 also keeps the reminder a new event starts with in three keys, which
+need no daemon change and are ignored by older apps:
+`defaultReminderMinutes` (timed events) and `defaultAllDayReminderMinutes`
+(all-day events, counted back from the start of the day) hold minutes before
+the start, or the string `"none"`, and default to 15; `calendarDefaultReminders`
+is an object mapping a calendar id to minutes or `"none"`, which replaces both
+for new events in that calendar. The daemon stores them as given and does not
+read them.
+
 `calendars.probeThisAndFuture` creates a temporary test resource on the selected
 server, checks that `RANGE=THISANDFUTURE` survives a write and readback, and
 removes the resource before enabling the capability. It does not edit an

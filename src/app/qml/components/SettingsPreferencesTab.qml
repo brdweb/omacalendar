@@ -151,6 +151,38 @@ ScrollView {
                                                         currentValue)
                 }
                 AppComboBox {
+                    objectName: "defaultReminderMinutes"
+                    Layout.fillWidth: true
+                    model: tab.drawer.reminderOptions(
+                               qsTr("Timed event reminder: "),
+                               tab.drawer.preferences.defaultReminderMinutes, "")
+                    textRole: "text"
+                    valueRole: "value"
+                    currentIndex: tab.drawer.reminderOptionIndex(
+                                      model, tab.drawer.preferences.defaultReminderMinutes, 15)
+                    Accessible.name: qsTr("Default reminder for new timed events")
+                    onActivated: tab.drawer.preferenceChanged("defaultReminderMinutes",
+                                                              currentValue)
+                }
+                AppComboBox {
+                    objectName: "defaultAllDayReminderMinutes"
+                    Layout.fillWidth: true
+                    model: tab.drawer.reminderOptions(
+                               qsTr("All-day event reminder: "),
+                               tab.drawer.preferences.defaultAllDayReminderMinutes, "")
+                    textRole: "text"
+                    valueRole: "value"
+                    currentIndex: tab.drawer.reminderOptionIndex(
+                                      model, tab.drawer.preferences.defaultAllDayReminderMinutes,
+                                      15)
+                    Accessible.name: qsTr("Default reminder for new all-day events")
+                    ToolTip.visible: hovered
+                    ToolTip.delay: 600
+                    ToolTip.text: qsTr("All-day reminders count back from midnight at the start of the day")
+                    onActivated: tab.drawer.preferenceChanged("defaultAllDayReminderMinutes",
+                                                              currentValue)
+                }
+                AppComboBox {
                     id: notificationPrivacyBox
                     objectName: "notificationPrivacy"
                     Layout.fillWidth: true

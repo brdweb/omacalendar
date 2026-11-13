@@ -25,8 +25,10 @@ qt_add_qml_module(omacalendar
     qml/CalendarVisibility.js
     qml/DateEntry.js
     qml/DateRange.js
+    qml/EventClipboard.js
     qml/EventIndex.js
     qml/RecurrenceRule.js
+    qml/ReminderDefaults.js
     qml/StatusLabels.js
     qml/TaskGroups.js
     qml/Main.qml

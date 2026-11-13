@@ -129,7 +129,10 @@ AppController::AppController(QObject* parent)
       {QStringLiteral("secondaryTimeZone"), QStringLiteral("")},
       {QStringLiteral("hideWeekends"), false},
       {QStringLiteral("hideDeclined"), false},
-      {QStringLiteral("weekViewDays"), 7}};
+      {QStringLiteral("weekViewDays"), 7},
+      {QStringLiteral("defaultReminderMinutes"), 15},
+      {QStringLiteral("defaultAllDayReminderMinutes"), 15},
+      {QStringLiteral("calendarDefaultReminders"), QVariantMap()}};
   m_client.setAutoReconnect(true);
   connect(&m_client, &ipc::IpcClient::connectedChanged, this, [this]() {
     emit connectedChanged();
@@ -707,14 +710,24 @@ void AppController::refreshParts(const int parts) {
 }
 
 QStringList AppController::preferenceKeys() {
-  return {QStringLiteral("firstDayOfWeek"),    QStringLiteral("workDayStart"),
-          QStringLiteral("workDayEnd"),        QStringLiteral("timeFormat"),
-          QStringLiteral("displayTimeZone"),   QStringLiteral("defaultDuration"),
-          QStringLiteral("defaultCalendarId"), QStringLiteral("notificationPrivacy"),
-          QStringLiteral("currentView"),       QStringLiteral("widgetConsentDecision"),
-          QStringLiteral("showWeekNumbers"),   QStringLiteral("secondaryTimeZone"),
-          QStringLiteral("hideWeekends"),      QStringLiteral("hideDeclined"),
-          QStringLiteral("weekViewDays")};
+  return {QStringLiteral("firstDayOfWeek"),
+          QStringLiteral("workDayStart"),
+          QStringLiteral("workDayEnd"),
+          QStringLiteral("timeFormat"),
+          QStringLiteral("displayTimeZone"),
+          QStringLiteral("defaultDuration"),
+          QStringLiteral("defaultCalendarId"),
+          QStringLiteral("notificationPrivacy"),
+          QStringLiteral("currentView"),
+          QStringLiteral("widgetConsentDecision"),
+          QStringLiteral("showWeekNumbers"),
+          QStringLiteral("secondaryTimeZone"),
+          QStringLiteral("hideWeekends"),
+          QStringLiteral("hideDeclined"),
+          QStringLiteral("weekViewDays"),
+          QStringLiteral("defaultReminderMinutes"),
+          QStringLiteral("defaultAllDayReminderMinutes"),
+          QStringLiteral("calendarDefaultReminders")};
 }
 
 void AppController::markPreferencesLoaded() {

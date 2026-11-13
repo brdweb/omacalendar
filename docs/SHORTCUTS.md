@@ -39,6 +39,19 @@ work when no text field, editor or settings panel has focus.
 | Alt+Up, Alt+Down | Move the selected event 15 minutes |
 | Alt+Shift+Up, Alt+Shift+Down | Change the selected event's end by 15 minutes |
 | Alt+Left, Alt+Right | Move the selected event a day |
+| Ctrl+C | Copy the selected event |
+| Ctrl+X | Cut the selected event: copy it, then delete it as Delete does |
+| Ctrl+V | Paste the copied event on the selected day |
+
+Copy, cut and paste work like the single-key shortcuts: in a text field they
+copy and paste text instead. A pasted event is a new event in the original's
+calendar (or the default calendar when that one cannot be written), on the
+selected day at the original's start time and with its length. It keeps the
+title, location, link, notes, time zone, availability, visibility, relative
+reminders and repeat rule; a repeating event becomes a new series starting on
+the paste day. It leaves out the guests and organizer, conference links,
+reminders tied to a fixed time, and everything that identifies the original
+or its provider copy. Undo (Ctrl+Z) removes a pasted event.
 
 ## Editors
 

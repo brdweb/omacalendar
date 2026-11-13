@@ -413,6 +413,7 @@ class AppControllerTest final : public QObject {
   void notificationsReloadOnlyWhatChanged();
   void activityListsLoadAndRefreshIndependently();
   void preferencesLoadInOneRequest();
+  void defaultReminderPreferencesLoad();
   void preferencesFallBackWithoutGetMany();
   void contactSuggestionsAreRelayed();
   void quickAddTextBecomesAnEditorDraft();
@@ -1460,6 +1461,27 @@ void AppControllerTest::preferencesLoadInOneRequest() {
   QCOMPARE(controller.preferences().value(QStringLiteral("weekViewDays")).toInt(), 7);
 }
 
+void AppControllerTest::defaultReminderPreferencesLoad() {
+  FakeDaemon daemon(0);
+  daemon.setStoredSetting(QStringLiteral("defaultAllDayReminderMinutes"),
+                          QStringLiteral("none"));
+  daemon.setStoredSetting(
+      QStringLiteral("calendarDefaultReminders"),
+      QJsonObject{{QStringLiteral("work"), 30},
+                  {QStringLiteral("home"), QStringLiteral("none")}});
+  QVERIFY(daemon.listen());
+  AppController controller;
+  QTRY_VERIFY(controller.preferencesLoaded());
+  const QVariantMap preferences = controller.preferences();
+  QCOMPARE(preferences.value(QStringLiteral("defaultReminderMinutes")).toInt(), 15);
+  QCOMPARE(preferences.value(QStringLiteral("defaultAllDayReminderMinutes")).toString(),
+           QStringLiteral("none"));
+  const QVariantMap overrides =
+      preferences.value(QStringLiteral("calendarDefaultReminders")).toMap();
+  QCOMPARE(overrides.value(QStringLiteral("work")).toInt(), 30);
+  QCOMPARE(overrides.value(QStringLiteral("home")).toString(), QStringLiteral("none"));
+}
+
 void AppControllerTest::preferencesFallBackWithoutGetMany() {
   FakeDaemon daemon(0);
   daemon.setSettingsGetManySupported(false);
@@ -1470,7 +1492,7 @@ void AppControllerTest::preferencesFallBackWithoutGetMany() {
   QStringList methods = settledMethods(daemon);
   QCOMPARE(methods.count(QStringLiteral("settings.getMany")), 1);
   // One fallback read per preference key.
-  QCOMPARE(methods.count(QStringLiteral("settings.get")), 15);
+  QCOMPARE(methods.count(QStringLiteral("settings.get")), 18);
   QCOMPARE(controller.preferences().value(QStringLiteral("timeFormat")).toString(),
            QStringLiteral("24h"));
   QVERIFY2(controller.lastError().isEmpty(), qPrintable(controller.lastError()));
@@ -1480,7 +1502,7 @@ void AppControllerTest::preferencesFallBackWithoutGetMany() {
   daemon.broadcast(QStringLiteral("calendars.changed"));
   methods = settledMethods(daemon);
   QCOMPARE(methods.count(QStringLiteral("settings.getMany")), 0);
-  QCOMPARE(methods.count(QStringLiteral("settings.get")), 15);
+  QCOMPARE(methods.count(QStringLiteral("settings.get")), 18);
 }
 
 void AppControllerTest::contactSuggestionsAreRelayed() {

@@ -3,6 +3,7 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 import OmaCalendar
+import "../ReminderDefaults.js" as ReminderDefaults
 
 Drawer {
     id: root
@@ -241,6 +242,63 @@ Drawer {
             }
         }
         return result
+    }
+
+    function reminderChoiceText(minutes) {
+        if (minutes === ReminderDefaults.kNone)
+            return qsTr("no reminder")
+        if (minutes === 0)
+            return qsTr("at start time")
+        if (minutes % 1440 === 0)
+            return qsTr("%n day(s) before", "", minutes / 1440)
+        if (minutes % 60 === 0)
+            return qsTr("%n hour(s) before", "", minutes / 60)
+        return qsTr("%n minute(s) before", "", minutes)
+    }
+
+    // "Prefix: choice", or "Choice" capitalized when there is no prefix.
+    function optionText(prefix, choice) {
+        return prefix ? prefix + choice : choice.charAt(0).toUpperCase() + choice.slice(1)
+    }
+
+    // Combo box options for a default reminder: "None", the editor's
+    // offsets, and the stored value when it is none of those. A non-empty
+    // inheritText adds a first "use the app default" option, value "default".
+    function reminderOptions(prefix, storedValue, inheritText) {
+        const result = []
+        if (inheritText)
+            result.push({"text": prefix + inheritText, "value": "default"})
+        result.push({"text": optionText(prefix, reminderChoiceText(ReminderDefaults.kNone)),
+                     "value": "none"})
+        const choices = ReminderDefaults.kChoices.slice()
+        const stored = ReminderDefaults.normalize(storedValue, ReminderDefaults.kNone)
+        if (stored !== ReminderDefaults.kNone && choices.indexOf(stored) < 0) {
+            choices.push(stored)
+            choices.sort(function(left, right) { return left - right })
+        }
+        for (const minutes of choices)
+            result.push({"text": optionText(prefix, reminderChoiceText(minutes)), "value": minutes})
+        return result
+    }
+
+    function reminderOptionIndex(options, storedValue, fallback) {
+        const wanted = storedValue === undefined || storedValue === null
+                ? fallback : storedValue === "none" || storedValue === "default"
+                  ? storedValue : ReminderDefaults.normalize(storedValue, fallback)
+        for (let index = 0; index < options.length; ++index) {
+            const value = options[index].value
+            if (value === wanted || (wanted === ReminderDefaults.kNone && value === "none"))
+                return index
+        }
+        return 0
+    }
+
+    // Sets or, with "default", clears a calendar's own default reminder.
+    function setCalendarDefaultReminder(calendarId, value) {
+        preferenceChanged("calendarDefaultReminders",
+                          ReminderDefaults.withOverride(
+                              preferences.calendarDefaultReminders, String(calendarId),
+                              value === "default" ? null : value))
     }
 
     function defaultCalendarIndex() {

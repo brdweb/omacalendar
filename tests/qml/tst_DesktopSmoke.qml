@@ -5,6 +5,7 @@ import QtTest
 import OmaCalendar
 import "../../src/app/qml/views" as Views
 import "../../src/app/qml/components" as Components
+import "../../src/app/qml/EventClipboard.js" as EventClipboard
 
 Item {
     id: scene
@@ -1528,6 +1529,189 @@ Item {
             wait(50)
             compare(today.count, 1)
             compare(undo.count, 1)
+        }
+
+        function test_new_event_uses_default_reminder_per_calendar() {
+            const editor = createTemporaryObject(editorFactory, scene, {
+                "defaultCalendarId": "calendar-writable",
+                "reminderPreferences": {
+                    "defaultReminderMinutes": 30,
+                    "defaultAllDayReminderMinutes": "none",
+                    "calendarDefaultReminders": {"calendar-google": 60,
+                                                 "calendar-future-scope": "none"}
+                }
+            })
+            verify(editor !== null)
+            const content = scene.Window.window.contentItem
+            const allDayBox = findChild(content, "eventAllDay")
+            const calendarBox = findChild(content, "eventCalendar")
+            const minutes = () => editor.reminderValues().map(value => value.minutes)
+            const indexOf = id => editor.writableCalendars.findIndex(
+                              calendar => calendar.id === id)
+
+            editor.openNew(new Date(2026, 8, 28), 540)
+            tryCompare(editor, "opened", true)
+            compare(minutes(), [30], "the timed default")
+            verify(!editor.hasUnsavedChanges(), "a default reminder is not an edit")
+
+            allDayBox.checked = true
+            compare(minutes(), [], "all-day events default to no reminder")
+            allDayBox.checked = false
+            compare(minutes(), [30])
+            verify(!editor.hasUnsavedChanges(), "toggling back restores the clean form")
+
+            calendarBox.currentIndex = indexOf("calendar-google")
+            compare(minutes(), [60], "the calendar's own default wins")
+            allDayBox.checked = true
+            compare(minutes(), [60], "and applies to all-day events too")
+            allDayBox.checked = false
+            calendarBox.currentIndex = indexOf("calendar-future-scope")
+            compare(minutes(), [], "a calendar can default to none")
+            calendarBox.currentIndex = indexOf("calendar-writable")
+            compare(minutes(), [30])
+            verify(!editor.hasUnsavedChanges())
+
+            // Once the user changes the reminders they are left alone.
+            findChild(content, "removeReminder-0").clicked()
+            compare(minutes(), [])
+            verify(editor.hasUnsavedChanges())
+            calendarBox.currentIndex = indexOf("calendar-google")
+            allDayBox.checked = true
+            compare(minutes(), [], "edited reminders do not follow the defaults")
+            editor.discardChanges()
+            tryCompare(editor, "opened", false)
+
+            // A quick-add all-day draft starts with the all-day default.
+            editor.openDraft({"title": "Trip", "location": "", "recurrenceRule": "",
+                              "date": "2026-10-03", "endDate": "", "allDay": true,
+                              "startMinute": -1, "durationMinutes": 0},
+                             new Date(2026, 8, 28))
+            tryCompare(editor, "opened", true)
+            compare(minutes(), [])
+            editor.discardChanges()
+            tryCompare(editor, "opened", false)
+
+            // An existing event keeps its own reminders.
+            editor.openExisting(representativeEvents()[0])
+            tryCompare(editor, "opened", true)
+            compare(minutes(), [15])
+            allDayBox.checked = true
+            compare(minutes(), [15])
+            editor.discardChanges()
+            tryCompare(editor, "opened", false)
+
+            // No preferences at all: the old fixed 15 minutes.
+            editor.reminderPreferences = ({})
+            editor.openNew(new Date(2026, 8, 28), 540)
+            tryCompare(editor, "opened", true)
+            compare(minutes(), [15])
+            allDayBox.checked = true
+            compare(minutes(), [15])
+            editor.discardChanges()
+            tryCompare(editor, "opened", false)
+        }
+
+        function test_copy_paste_creates_clean_draft() {
+            const shortcuts = createTemporaryObject(shortcutsFactory, scene, {
+                "navigationEnabled": true, "hasSelectedEvent": true,
+                "canCutSelection": true, "hasClipboardEvent": true
+            })
+            verify(shortcuts !== null)
+            scene.forceActiveFocus()
+            const spy = signalName => createTemporaryObject(signalSpyFactory, testCase, {
+                "target": shortcuts, "signalName": signalName})
+            const copied = spy("copyRequested")
+            const cut = spy("cutRequested")
+            const pasted = spy("pasteRequested")
+            keySequence("Ctrl+C")
+            tryCompare(copied, "count", 1)
+            keySequence("Ctrl+X")
+            tryCompare(cut, "count", 1)
+            keySequence("Ctrl+V")
+            tryCompare(pasted, "count", 1)
+            // Not while typing or in a dialog, and not without something to act on.
+            shortcuts.navigationEnabled = false
+            keySequence("Ctrl+C")
+            keySequence("Ctrl+X")
+            keySequence("Ctrl+V")
+            shortcuts.navigationEnabled = true
+            shortcuts.canCutSelection = false
+            shortcuts.hasClipboardEvent = false
+            keySequence("Ctrl+X")
+            keySequence("Ctrl+V")
+            wait(50)
+            compare(copied.count, 1)
+            compare(cut.count, 1)
+            compare(pasted.count, 1)
+
+            const source = Object.assign({}, representativeEvents()[0], {
+                "recurrenceId": "2026-08-17T13:00:00Z",
+                "recurrenceRule": "FREQ=WEEKLY;BYDAY=MO",
+                "remoteId": "remote-1", "uid": "uid-1", "etag": "\"42\"",
+                "rawPayload": "BEGIN:VEVENT", "rawFormat": "ical",
+                "conferenceUrl": "https://meet.example.com/abc",
+                "localRevision": 7, "dirty": true, "conflict": true,
+                "syncState": "pending", "sequence": 3, "status": "cancelled",
+                "url": "https://example.com/agenda",
+                "reminders": [{"method": "popup", "minutes": 15},
+                              {"method": "email", "minutesBefore": 60, "extra": "x"},
+                              {"method": "popup", "at": "2026-08-16T12:00:00Z"},
+                              {"method": "popup", "minutes": 10, "providerDefault": true}]
+            })
+            const clip = EventClipboard.copy(source)
+            verify(clip !== null)
+            const toUtc = (dateValue, timeKind) => {
+                compare(timeKind, "zoned")
+                return new Date(Date.UTC(dateValue.getFullYear(), dateValue.getMonth(),
+                                         dateValue.getDate(), dateValue.getHours(),
+                                         dateValue.getMinutes())).toISOString()
+            }
+            const draft = EventClipboard.paste(clip, new Date(2026, 8, 2), "calendar-google",
+                                               toUtc)
+            verify(draft !== null)
+            for (const key of ["id", "recurrenceId", "remoteId", "uid", "etag", "rawPayload",
+                               "rawFormat", "conferenceUrl", "localRevision", "dirty",
+                               "conflict", "syncState", "sequence", "status", "organizer",
+                               "sourceCalendarId", "displayStartLocal", "calendarColor"])
+                verify(draft[key] === undefined, "the paste drops " + key)
+            compare(draft.attendees, [])
+            compare(draft.calendarId, "calendar-google")
+            compare(draft.summary, "Design review")
+            compare(draft.description, "Representative timed event")
+            compare(draft.location, "Studio")
+            compare(draft.url, "https://example.com/agenda")
+            compare(draft.recurrenceRule, "FREQ=WEEKLY;BYDAY=MO", "the repeat rule is kept")
+            compare(draft.startTimeZone, "America/New_York")
+            compare(draft.allDay, false)
+            compare(draft.reminders, [{"method": "popup", "minutes": 15},
+                                      {"method": "email", "minutes": 60}])
+            compare(draft.startUtc, "2026-09-02T09:00:00.000Z", "the copied start time")
+            compare((Date.parse(draft.endUtc) - Date.parse(draft.startUtc)) / 60000, 60)
+
+            // The clipboard does not change when the original does.
+            source.summary = "Renamed"
+            compare(EventClipboard.paste(clip, new Date(2026, 8, 3), "calendar-writable",
+                                         toUtc).summary, "Design review")
+
+            // An all-day event keeps its length in days.
+            const trip = EventClipboard.copy({"id": "trip", "calendarId": "calendar-writable",
+                                              "summary": "Trip", "allDay": true,
+                                              "timeKind": "all_day",
+                                              "startDate": "2026-08-17",
+                                              "endDate": "2026-08-20",
+                                              "attendees": [{"email": "sam@example.com"}]})
+            const tripDraft = EventClipboard.paste(trip, new Date(2026, 9, 30),
+                                                   "calendar-writable", toUtc)
+            compare(tripDraft.allDay, true)
+            compare(tripDraft.startDate, "2026-10-30")
+            compare(tripDraft.endDate, "2026-11-02")
+            compare(tripDraft.startUtc, "")
+            compare(tripDraft.attendees, [])
+            verify(tripDraft.startTimeZone === undefined)
+
+            compare(EventClipboard.copy(null), null)
+            compare(EventClipboard.paste(clip, new Date(2026, 8, 2), "", toUtc), null,
+                    "a paste needs a calendar")
         }
 
         function test_editor_escape_confirms_when_dirty() {
