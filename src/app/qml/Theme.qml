@@ -16,6 +16,7 @@ QtObject {
     readonly property color success: OmarchyTheme.success
     readonly property color warning: OmarchyTheme.warning
     readonly property color info: OmarchyTheme.info
+    readonly property string sourceName: OmarchyTheme.sourceName
     readonly property color border: alpha(text, 0.11)
     readonly property color divider: alpha(text, 0.075)
     readonly property color focus: alpha(accent, 0.72)
@@ -62,6 +63,124 @@ QtObject {
 
     function alpha(colorValue, opacity) {
         return Qt.rgba(colorValue.r, colorValue.g, colorValue.b, opacity)
+    }
+
+    // ---- Calendar palette ---------------------------------------------
+    // Swatches offered for calendar colours. They follow the active Omarchy
+    // theme: its accent, info, success, warning and danger colours first, then
+    // hue rotations of those, topped up from the Tokyo Night set when the
+    // theme is too monochrome to give ten distinct colours. With no theme
+    // file (sourceName "fallback") the Tokyo Night set is used as is. Entries
+    // are "#rrggbb" strings because calendar colours are stored as hex.
+    readonly property var fallbackCalendarPalette: [
+        "#7aa2f7", "#bb9af7", "#f7768e", "#ff9e64", "#e0af68",
+        "#9ece6a", "#73daca", "#2ac3de", "#7dcfff", "#c0caf5"
+    ]
+    readonly property var calendarPalette: calendarPaletteFrom(
+        sourceName, [accent, info, success, warning, danger])
+
+    function hexColor(colorValue) {
+        const value = Qt.color(colorValue)
+        function part(channel) {
+            const digits = Math.round(Math.max(0, Math.min(1, channel)) * 255).toString(16)
+            return digits.length < 2 ? "0" + digits : digits
+        }
+        return "#" + part(value.r) + part(value.g) + part(value.b)
+    }
+
+    function calendarPaletteFrom(themeSourceName, baseColors) {
+        const size = fallbackCalendarPalette.length
+        if (themeSourceName === "fallback" || !baseColors || baseColors.length === 0)
+            return fallbackCalendarPalette.slice()
+
+        const result = []
+        function distance(first, second) {
+            const a = Qt.color(first)
+            const b = Qt.color(second)
+            return Math.sqrt(Math.pow(a.r - b.r, 2) + Math.pow(a.g - b.g, 2)
+                             + Math.pow(a.b - b.b, 2))
+        }
+        function add(colorValue) {
+            if (result.length >= size)
+                return
+            const hex = hexColor(colorValue)
+            for (let index = 0; index < result.length; ++index) {
+                if (distance(result[index], hex) < 0.12)
+                    return
+            }
+            result.push(hex)
+        }
+
+        // Greys make poor calendar colours and cannot be hue-rotated.
+        const seeds = []
+        for (let index = 0; index < baseColors.length; ++index) {
+            const value = Qt.color(baseColors[index])
+            if (value.hslHue >= 0 && value.hslSaturation >= 0.15)
+                seeds.push(value)
+        }
+        for (let index = 0; index < seeds.length; ++index)
+            add(seeds[index])
+
+        const rotations = [0.5, 0.25, 0.75, 0.125, 0.375, 0.625, 0.875]
+        for (let step = 0; step < rotations.length && result.length < size; ++step) {
+            for (let index = 0; index < seeds.length && result.length < size; ++index) {
+                const seed = seeds[index]
+                const rotated = Qt.hsla((seed.hslHue + rotations[step]) % 1,
+                                        Math.max(seed.hslSaturation, 0.45),
+                                        Math.min(Math.max(seed.hslLightness, 0.45), 0.8), 1)
+                // Keep derived swatches visible on the theme background.
+                if (contrastRatio(rotated, background) >= 3)
+                    add(rotated)
+            }
+        }
+        for (let index = 0; index < size && result.length < size; ++index)
+            add(fallbackCalendarPalette[index])
+        // Near-duplicates of the fallback set can leave gaps; fill them
+        // unconditionally so the palette always has the same size.
+        for (let index = 0; result.length < size; ++index)
+            result.push(fallbackCalendarPalette[index % size])
+        return result
+    }
+
+    // A short human name for a colour, for screen readers: "Blue", "Teal",
+    // "Light Blue". The buckets give the ten fallback swatches distinct names.
+    function colorName(colorValue) {
+        const value = Qt.color(colorValue)
+        const lightness = value.hslLightness
+        if (value.hslHue < 0 || value.hslSaturation < 0.12) {
+            if (lightness < 0.15)
+                return qsTr("Black")
+            if (lightness > 0.9)
+                return qsTr("White")
+            return qsTr("Gray")
+        }
+        const hue = value.hslHue * 360
+        let name = qsTr("Pink")
+        if (hue < 12 || hue >= 345)
+            name = qsTr("Red")
+        else if (hue < 33)
+            name = qsTr("Orange")
+        else if (hue < 65)
+            name = qsTr("Yellow")
+        else if (hue < 80)
+            name = qsTr("Lime")
+        else if (hue < 150)
+            name = qsTr("Green")
+        else if (hue < 180)
+            name = qsTr("Teal")
+        else if (hue < 195)
+            name = qsTr("Cyan")
+        else if (hue < 210)
+            name = qsTr("Sky blue")
+        else if (hue < 255)
+            name = qsTr("Blue")
+        else if (hue < 315)
+            name = qsTr("Purple")
+        if (lightness > 0.8)
+            return qsTr("Light %1").arg(name)
+        if (lightness < 0.3)
+            return qsTr("Dark %1").arg(name)
+        return name
     }
 
     // ---- Contrast -----------------------------------------------------

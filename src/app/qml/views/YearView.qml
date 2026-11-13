@@ -88,7 +88,12 @@ ScrollView {
                             Layout.fillWidth: true
                             implicitHeight: 28
                             padding: 0
+                            objectName: "yearMonthHeader-" + monthCard.index
                             onClicked: root.monthSelected(monthCard.monthDate)
+                            Accessible.role: Accessible.Heading
+                            Accessible.name: Qt.formatDate(monthCard.monthDate, "MMMM yyyy")
+                            Accessible.description: qsTr("Open this month")
+                            Accessible.onPressAction: monthHeader.clicked()
                             background: Rectangle {
                                 radius: Theme.radiusSM
                                 color: monthHeader.hovered

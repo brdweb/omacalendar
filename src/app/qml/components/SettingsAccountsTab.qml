@@ -244,6 +244,8 @@ ScrollView {
                 }
                 AppTextField {
                     id: caldavEndpoint
+                    objectName: "caldavEndpointField"
+                    accessibleName: qsTr("CalDAV server URL")
                     Layout.fillWidth: true
                     placeholderText: qsTr("https://caldav.example.com/")
                     inputMethodHints: Qt.ImhUrlCharactersOnly | Qt.ImhNoAutoUppercase
@@ -327,6 +329,8 @@ ScrollView {
                 }
                 AppTextField {
                     id: icsUrl
+                    objectName: "icsUrlField"
+                    accessibleName: qsTr("Calendar feed URL")
                     Layout.fillWidth: true
                     placeholderText: qsTr("https://example.com/calendar.ics")
                     inputMethodHints: Qt.ImhUrlCharactersOnly | Qt.ImhNoAutoUppercase

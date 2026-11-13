@@ -726,7 +726,7 @@ Drawer {
             AppColorPicker {
                 id: localCalendarColor
                 Layout.fillWidth: true
-                selectedColor: "#7aa2f7"
+                selectedColor: Theme.calendarPalette[0]
             }
             AppCheckBox {
                 id: localCalendarMuteAlerts
