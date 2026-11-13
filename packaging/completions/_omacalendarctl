@@ -1,0 +1,34 @@
+#compdef omacalendarctl
+# zsh completion for omacalendarctl
+
+_omacalendarctl() {
+  local -a commands
+  commands=(
+    'today:list today'"'"'s events'
+    'agenda:list upcoming events'
+    'add:create an event from quick-add text'
+    'sync:sync every account'
+    'methods:list IPC methods'
+  )
+  _arguments -C \
+    '(-h --help)'{-h,--help}'[show help]' \
+    '--version[show the version]' \
+    '--timeout[seconds to wait]:seconds:' \
+    '--params-stdin[read JSON params from stdin]' \
+    '--watch[print notifications after the response]' \
+    '--json[print results as JSON]' \
+    '--days[days for agenda]:days:' \
+    '--calendar[calendar for add]:calendar id:' \
+    '1:command:->command' \
+    '*::argument:->argument'
+  case ${state} in
+    command)
+      _describe 'command' commands
+      local -a methods
+      methods=(${(f)"$(omacalendarctl methods 2>/dev/null)"})
+      (( ${#methods} )) && compadd -a methods
+      ;;
+  esac
+}
+
+_omacalendarctl "$@"

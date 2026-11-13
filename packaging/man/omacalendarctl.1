@@ -1,0 +1,96 @@
+.TH OMACALENDARCTL 1 "2026" "OmaCalendar" "User Commands"
+.SH NAME
+omacalendarctl \- command-line client for the OmaCalendar service
+.SH SYNOPSIS
+.B omacalendarctl
+.RI [ options ]
+.I method
+.RI [ json_params " | " \- ]
+.br
+.B omacalendarctl
+.RI [ options ]
+.BR today " | " agenda " [" \-\-days
+.IR N "] | " add
+.IR TEXT " | " sync " | " methods
+.SH DESCRIPTION
+.B omacalendarctl
+talks to
+.BR omacalendard (1),
+the OmaCalendar background service, over its user-local socket at
+.IR $XDG_RUNTIME_DIR/omacalendar/daemon.sock .
+.PP
+In raw mode it sends one IPC method with optional JSON parameters and prints
+the response as one line of JSON on standard output. Errors are printed as JSON
+on standard error and the exit status is 1. The methods are documented in
+.IR /usr/share/doc/OmaCalendar/docs/IPC.md .
+.SH COMMANDS
+.TP
+.B today
+List today's events in the display time zone.
+.TP
+.B agenda
+List events from today for
+.B \-\-days
+days (default 7).
+.TP
+.BI add " TEXT"
+Create an event from quick-add text such as
+.IR "Lunch with Sam fri 12:30 @ Cafe" .
+Text without a time creates an all-day event. The event goes to the default
+calendar unless
+.B \-\-calendar
+names one.
+.TP
+.B sync
+Sync every account and wait for it to finish (default timeout 120 seconds).
+.TP
+.B methods
+List the IPC methods the running service supports.
+.SH OPTIONS
+.TP
+.BR \- ", " \-\-params\-stdin
+Read the JSON parameters from standard input. Use this for passwords and
+client secrets, which would otherwise be visible to other local users in the
+process list and saved in shell history.
+.TP
+.BI \-\-timeout " SECONDS"
+Wait up to SECONDS (1 to 3600) for each response. The default is 5, or 120 for
+.BR sync .
+.TP
+.B \-\-watch
+After the response, keep the connection open and print notifications as JSON
+lines on standard output. Use it with
+.BR system.subscribe .
+Without it, notifications go to standard error.
+.TP
+.B \-\-json
+Print a command's result as JSON instead of text.
+.TP
+.BI \-\-days " N"
+Number of days for
+.B agenda
+(1 to 366).
+.TP
+.BI \-\-calendar " ID"
+Calendar for
+.BR add .
+.TP
+.B \-\-version
+Print the version.
+.TP
+.BR \-h ", " \-\-help
+Print a usage summary.
+.SH EXAMPLES
+.nf
+omacalendarctl today
+omacalendarctl agenda \-\-days 14
+omacalendarctl add "Dentist tue 9:30 for 45 min"
+omacalendarctl system.info
+omacalendarctl \-\-watch system.subscribe '{"topics":["events"]}'
+printf '%s' "$params" | omacalendarctl accounts.addCalDav \-
+.fi
+.SH EXIT STATUS
+0 on success, 1 on any error, including a timeout or an unreachable service.
+.SH SEE ALSO
+.BR omacalendar (1),
+.BR systemctl (1)

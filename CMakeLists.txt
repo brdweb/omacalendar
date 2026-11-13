@@ -262,6 +262,19 @@ install(TARGETS omacalendard omacalendarctl
 install(PROGRAMS scripts/omacalendar-widgetctl
   DESTINATION ${CMAKE_INSTALL_BINDIR}
 )
+install(FILES packaging/man/omacalendarctl.1
+  DESTINATION ${CMAKE_INSTALL_MANDIR}/man1
+)
+install(FILES packaging/completions/omacalendarctl.bash
+  DESTINATION ${CMAKE_INSTALL_DATADIR}/bash-completion/completions
+  RENAME omacalendarctl
+)
+install(FILES packaging/completions/_omacalendarctl
+  DESTINATION ${CMAKE_INSTALL_DATADIR}/zsh/site-functions
+)
+install(FILES packaging/completions/omacalendarctl.fish
+  DESTINATION ${CMAKE_INSTALL_DATADIR}/fish/vendor_completions.d
+)
 
 configure_file(
   packaging/systemd/omacalendard.service.in
