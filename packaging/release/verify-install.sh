@@ -66,6 +66,15 @@ desktop-file-validate \
   "${staged_root}/usr/share/applications/org.omacalendar.OmaCalendar.desktop"
 appstreamcli validate --no-net \
   "${staged_root}/usr/share/metainfo/org.omacalendar.OmaCalendar.metainfo.xml"
+for directive in 'SystemCallFilter=@system-service' 'SystemCallErrorNumber=EPERM' \
+  'MemoryDenyWriteExecute=true' 'ProtectSystem=full' 'NoNewPrivileges=true'; do
+  if ! grep -Fxq "${directive}" \
+    "${staged_root}/usr/lib/systemd/user/omacalendard.service"; then
+    echo "systemd unit lost hardening directive: ${directive}" >&2
+    exit 1
+  fi
+done
+
 if command -v systemd-analyze >/dev/null; then
   systemd-analyze security --offline=yes \
     "${staged_root}/usr/lib/systemd/user/omacalendard.service" >/dev/null

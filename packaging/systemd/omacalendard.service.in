@@ -28,3 +28,10 @@ RestrictNamespaces=true
 RestrictRealtime=true
 RestrictSUIDSGID=true
 SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+MemoryDenyWriteExecute=true
+# The service writes exports wherever the user saves them, so the home
+# directory stays writable; ProtectSystem=full makes /usr, /boot and /etc
+# read-only.
+ProtectSystem=full
