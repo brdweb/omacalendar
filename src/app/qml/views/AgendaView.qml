@@ -67,8 +67,7 @@ Item {
                     Layout.preferredHeight: 42
                     radius: Theme.radiusMD
                     activeFocusOnTab: true
-                    Accessible.name: Qt.formatDate(daySection.dateValue,
-                                                   "dddd, MMMM d")
+                    Accessible.name: Theme.longDate(daySection.dateValue)
                     Accessible.role: Accessible.Button
                     color: root.sameDate(daySection.dateValue, new Date())
                            ? Theme.accent : Theme.surface
@@ -126,7 +125,7 @@ Item {
                     }
                     Text {
                         textFormat: Text.PlainText
-                        text: Qt.formatDate(daySection.dateValue, "MMMM d")
+                        text: Theme.monthDay(daySection.dateValue)
                         color: Theme.mutedText
                         font.pixelSize: Theme.smallFontSize
                     }
@@ -137,7 +136,7 @@ Item {
                     quiet: true
                     compact: true
                     toolTipText: qsTr("New event on ")
-                                 + Qt.formatDate(daySection.dateValue, "MMMM d")
+                                 + Theme.monthDay(daySection.dateValue)
                     onClicked: root.createRequested(daySection.dateValue)
                 }
             }

@@ -32,7 +32,7 @@ Item {
         id: colorButton
         anchors.fill: parent
         hoverEnabled: true
-        Accessible.name: qsTr("Choose ") + root.buttonText.toLowerCase()
+        Accessible.name: qsTr("Choose %1").arg(root.buttonText.toLowerCase())
         onClicked: palettePopup.open()
 
         contentItem: RowLayout {

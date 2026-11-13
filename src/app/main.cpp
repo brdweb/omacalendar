@@ -7,6 +7,7 @@
 
 #include "appcontroller.h"
 #include "applicationinstance.h"
+#include "core/translations.h"
 #include "startuprequest.h"
 #include "themebridge.h"
 
@@ -29,6 +30,7 @@ int main(int argc, char* argv[]) {
   QGuiApplication application(argc, argv);
   QGuiApplication::setDesktopFileName(QStringLiteral("org.omacalendar.OmaCalendar"));
   QQuickStyle::setStyle(QStringLiteral("Basic"));
+  omacalendar::translations::installForSystemLocale();
 
   const omacalendar::StartupRequest startupRequest =
       omacalendar::startupRequestFromArguments(application.arguments());

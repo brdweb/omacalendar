@@ -2,6 +2,7 @@
 
 #include <QDateTime>
 #include <QHash>
+#include <QLocale>
 #include <QObject>
 #include <QSet>
 #include <QStringList>
@@ -156,6 +157,14 @@ class AppController final : public QObject {
       const QString& code, const QString& fallbackMessage,
       const QString& provider = {}) const;
   Q_INVOKABLE void dismissError();
+  // A Qt.formatDate pattern for `kind` in the system locale: "monthDay"
+  // ("MMMM d"), "shortMonthDay" ("MMM d"), "weekdayMonthDay" ("dddd, MMMM d")
+  // or "shortWeekdayMonthDay" ("ddd, MMM d"), shown here as the C-locale
+  // patterns. Other locales derive theirs from the long date format without
+  // the year.
+  Q_INVOKABLE [[nodiscard]] QString datePattern(const QString& kind) const;
+  [[nodiscard]] static QString datePatternForLocale(const QLocale& locale,
+                                                    const QString& kind);
   // Stops the browser sign-in in progress (googleSignInAccountId).
   Q_INVOKABLE void cancelGoogleSignIn();
   Q_INVOKABLE void loadRange(const QDate& firstDate, const QDate& lastDate);

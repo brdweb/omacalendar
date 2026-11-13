@@ -14,7 +14,7 @@ ItemDelegate {
     // keeps the dots.
     property int heatLevel: -1
 
-    Accessible.name: Qt.formatDate(date, "dddd, MMMM d")
+    Accessible.name: Theme.longDate(date)
                      + (eventCount > 0 ? ", " + qsTr("%n event(s)", "", eventCount) : "")
 
     background: Rectangle {

@@ -221,7 +221,7 @@ Rectangle {
                 padding: 0
                 hoverEnabled: true
                 Accessible.name: (root.calendarIsVisible(modelData.id)
-                                  ? qsTr("Hide ") : qsTr("Show ")) + modelData.name
+                                  ? qsTr("Hide %1") : qsTr("Show %1")).arg(modelData.name)
                 onClicked: root.calendarVisibilityRequested(
                                modelData.id,
                                !root.calendarIsVisible(modelData.id))
@@ -372,8 +372,9 @@ Rectangle {
                 Layout.fillWidth: true
                 implicitHeight: 38
                 onClicked: root.panelRequested(root.conflictCount > 0 ? "conflicts" : "sync")
-                Accessible.name: qsTr("Needs attention: %1 conflict(s), %2 stuck change(s)")
-                                 .arg(root.conflictCount).arg(root.failedOperationCount)
+                Accessible.name: qsTr("Needs attention: %1, %2")
+                                 .arg(qsTr("%n conflict(s)", "", root.conflictCount))
+                                 .arg(qsTr("%n stuck change(s)", "", root.failedOperationCount))
                 contentItem: RowLayout {
                     Text { textFormat: Text.PlainText; text: "!"; color: Theme.warning }
                     Text {
@@ -479,7 +480,7 @@ Rectangle {
                                                                 : qsTr("Checking…"),
                     "detail": "", "action": ""}
         const when = sameDate(last, new Date())
-                ? Qt.formatTime(last, "HH:mm") : Qt.formatDate(last, "MMM d")
+                ? Qt.formatTime(last, "HH:mm") : Theme.shortMonthDay(last)
         return {"tone": "success", "text": qsTr("Synced %1").arg(when),
                 "detail": Qt.formatDateTime(last, "yyyy-MM-dd HH:mm"), "action": ""}
     }

@@ -237,6 +237,13 @@ target_link_libraries(omacalendar-appcontroller-test
     omacalendar_core
     omacalendar_ipc
 )
+if(DEFINED OMACALENDAR_QM_DIR)
+  # pluralFormsRenderSingularAndPlural loads the compiled English catalogue.
+  target_compile_definitions(omacalendar-appcontroller-test PRIVATE
+    OMACALENDAR_TEST_QM_DIR="${OMACALENDAR_QM_DIR}"
+  )
+  add_dependencies(omacalendar-appcontroller-test omacalendar_lrelease)
+endif()
 add_test(NAME appcontroller_test COMMAND omacalendar-appcontroller-test)
 
 add_executable(omacalendar-presentation-list-model-test

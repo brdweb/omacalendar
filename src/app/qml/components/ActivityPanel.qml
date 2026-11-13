@@ -718,7 +718,7 @@ Drawer {
                                     + Theme.formatTime(start, timeFormat)
         const organizer = value.organizer && (value.organizer.displayName
                                               || value.organizer.email)
-        return when + (organizer ? qsTr("\nFrom ") + organizer : "")
+        return when + (organizer ? "\n" + qsTr("From %1").arg(organizer) : "")
     }
 
     function calendarForId(calendarId) {

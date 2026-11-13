@@ -7,6 +7,7 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonParseError>
+#include <QLocale>
 #include <QProcess>
 #include <QRegularExpression>
 #include <QSaveFile>
@@ -92,6 +93,128 @@ QString normalizedRecurrenceScope(const QString& value) {
 
 QString normalizedGuestPolicy(const QString& value) {
   return value == QStringLiteral("changed") ? QStringLiteral("all") : value;
+}
+
+// A date pattern split into format fields ("dddd", "MMMM", "d", "yyyy") and
+// the literal text between them (quoted or not).
+struct DatePatternToken {
+  QString text;
+  QChar field;  // 'd', 'M' or 'y'; null for literal text
+};
+
+QList<DatePatternToken> tokenizeDatePattern(const QString& pattern) {
+  QList<DatePatternToken> tokens;
+  const auto appendLiteral = [&tokens](const QString& text) {
+    if (!tokens.isEmpty() && tokens.constLast().field.isNull()) {
+      tokens.last().text += text;
+    } else {
+      tokens.append({text, QChar()});
+    }
+  };
+  const QChar quote = QLatin1Char('\'');
+  qsizetype index = 0;
+  while (index < pattern.size()) {
+    const QChar character = pattern.at(index);
+    if (character == quote) {
+      qsizetype end = index + 1;
+      while (end < pattern.size()) {
+        if (pattern.at(end) == quote) {
+          if (end + 1 < pattern.size() && pattern.at(end + 1) == quote) {
+            end += 2;
+            continue;
+          }
+          ++end;
+          break;
+        }
+        ++end;
+      }
+      appendLiteral(pattern.mid(index, end - index));
+      index = end;
+    } else if (character == QLatin1Char('d') || character == QLatin1Char('M') ||
+               character == QLatin1Char('y')) {
+      qsizetype end = index + 1;
+      while (end < pattern.size() && pattern.at(end) == character) {
+        ++end;
+      }
+      tokens.append({pattern.mid(index, end - index), character});
+      index = end;
+    } else {
+      appendLiteral(QString(character));
+      ++index;
+    }
+  }
+  return tokens;
+}
+
+bool isWeekdayField(const DatePatternToken& token) {
+  return token.field == QLatin1Char('d') && token.text.size() >= 3;
+}
+
+bool isYearField(const DatePatternToken& token) {
+  return token.field == QLatin1Char('y');
+}
+
+// Only spaces and punctuation, or a word set off by spaces (" 'de' "), so it
+// separates two fields rather than belonging to one ("日", "'г'.").
+bool isSeparatorLiteral(const QString& text) {
+  if (text.isEmpty() || (text.front().isSpace() && text.back().isSpace())) {
+    return true;
+  }
+  return std::all_of(text.cbegin(), text.cend(), [](const QChar character) {
+    return character.isSpace() || character.isPunct();
+  });
+}
+
+// Drops each field `matches` selects together with the literal that joined
+// it to the rest of the date. A leading year also takes its suffix ("2026年"),
+// and a trailing year everything after it ("2026 'г'.").
+template <typename Predicate>
+void removeDateFields(QList<DatePatternToken>* tokens, Predicate matches) {
+  const auto isField = [](const DatePatternToken& token) {
+    return !token.field.isNull();
+  };
+  for (qsizetype index = 0; index < tokens->size();) {
+    if (!matches(tokens->at(index))) {
+      ++index;
+      continue;
+    }
+    const bool year = isYearField(tokens->at(index));
+    const bool first =
+        std::none_of(tokens->cbegin(), tokens->cbegin() + index, isField);
+    const bool last =
+        std::none_of(tokens->cbegin() + index + 1, tokens->cend(), isField);
+    qsizetype from = index;
+    qsizetype to = index + 1;
+    if (first) {
+      if (to < tokens->size() && tokens->at(to).field.isNull() &&
+          (year || isSeparatorLiteral(tokens->at(to).text))) {
+        ++to;
+      }
+    } else {
+      if (last && year) {
+        to = tokens->size();
+      }
+      if (tokens->at(from - 1).field.isNull() &&
+          isSeparatorLiteral(tokens->at(from - 1).text)) {
+        --from;
+      }
+    }
+    tokens->remove(from, to - from);
+    index = from;
+  }
+}
+
+QString joinDatePattern(const QList<DatePatternToken>& tokens, const bool shortNames) {
+  QString pattern;
+  for (const DatePatternToken& token : tokens) {
+    if (shortNames && !token.field.isNull() && token.text.size() == 4 &&
+        token.field != QLatin1Char('y')) {
+      pattern += QString(3, token.field);
+    } else {
+      pattern += token.text;
+    }
+  }
+  return pattern.trimmed();
 }
 
 }  // namespace
@@ -1335,9 +1458,12 @@ void AppController::previewIcsImport(const QUrl& file,
         {QStringLiteral("destinationCalendarId"), destinationCalendarId}},
        [this](const QJsonValue& value) {
          const QVariantMap preview = value.toObject().toVariantMap();
-         setStatus(tr("Import preview: %1 event(s), %2 duplicate(s)")
-                       .arg(preview.value(QStringLiteral("count")).toInt())
-                       .arg(preview.value(QStringLiteral("duplicateCount")).toInt()));
+         setStatus(
+             tr("Import preview: %1, %2")
+                 .arg(tr("%n event(s)", nullptr,
+                         preview.value(QStringLiteral("count")).toInt()),
+                      tr("%n duplicate(s)", nullptr,
+                         preview.value(QStringLiteral("duplicateCount")).toInt())));
          emit icsImportPreviewReady(preview);
        });
 }
@@ -1356,8 +1482,8 @@ void AppController::commitIcsImport(const QUrl& file,
         {QStringLiteral("duplicatePolicy"), duplicatePolicy}},
        [this](const QJsonValue& value) {
          const QVariantMap result = value.toObject().toVariantMap();
-         setStatus(tr("Imported %1 event(s); skipped %2; replaced %3")
-                       .arg(result.value(QStringLiteral("imported")).toInt())
+         setStatus(tr("Imported %n event(s); skipped %1; replaced %2", nullptr,
+                      result.value(QStringLiteral("imported")).toInt())
                        .arg(result.value(QStringLiteral("skipped")).toInt())
                        .arg(result.value(QStringLiteral("replaced")).toInt()));
          emit icsImportCompleted(result);
@@ -1380,8 +1506,8 @@ void AppController::exportIcs(const QVariantMap& scope, const QUrl& destination)
   params.insert(QStringLiteral("overwrite"), true);
   send(QStringLiteral("export.run"), params, [this](const QJsonValue& value) {
     const QVariantMap result = value.toObject().toVariantMap();
-    setStatus(tr("Exported %1 event(s) to %2")
-                  .arg(result.value(QStringLiteral("count")).toInt())
+    setStatus(tr("Exported %n event(s) to %1", nullptr,
+                 result.value(QStringLiteral("count")).toInt())
                   .arg(result.value(QStringLiteral("path")).toString()));
     emit icsExportCompleted(result);
   });
@@ -2860,6 +2986,51 @@ void AppController::setStatus(const QString& message) {
 void AppController::setBusy(const bool busyValue) {
   Q_UNUSED(busyValue)
   emit busyChanged();
+}
+
+QString AppController::datePattern(const QString& kind) const {
+  return datePatternForLocale(QLocale(), kind);
+}
+
+QString AppController::datePatternForLocale(const QLocale& locale,
+                                            const QString& kind) {
+  const bool weekday = kind == QStringLiteral("weekdayMonthDay") ||
+                       kind == QStringLiteral("shortWeekdayMonthDay");
+  const bool shortNames = kind == QStringLiteral("shortMonthDay") ||
+                          kind == QStringLiteral("shortWeekdayMonthDay");
+  // The C locale keeps the US patterns the app has always used (and that the
+  // tests, which run under LC_ALL=C.UTF-8, expect).
+  QString fallback =
+      weekday ? QStringLiteral("dddd, MMMM d") : QStringLiteral("MMMM d");
+  if (shortNames) {
+    fallback = weekday ? QStringLiteral("ddd, MMM d") : QStringLiteral("MMM d");
+  }
+  if (locale.language() == QLocale::C) {
+    return fallback;
+  }
+
+  QList<DatePatternToken> tokens =
+      tokenizeDatePattern(locale.dateFormat(QLocale::LongFormat));
+  removeDateFields(&tokens, isYearField);
+  const bool hasWeekday = std::any_of(tokens.cbegin(), tokens.cend(), isWeekdayField);
+  if (!weekday) {
+    removeDateFields(&tokens, isWeekdayField);
+  }
+  const bool hasDay =
+      std::any_of(tokens.cbegin(), tokens.cend(), [](const DatePatternToken& token) {
+        return token.field == QLatin1Char('d') && token.text.size() <= 2;
+      });
+  const bool hasMonth = std::any_of(
+      tokens.cbegin(), tokens.cend(),
+      [](const DatePatternToken& token) { return token.field == QLatin1Char('M'); });
+  if (!hasDay || !hasMonth) {
+    return fallback;
+  }
+  QString pattern = joinDatePattern(tokens, shortNames);
+  if (weekday && !hasWeekday) {
+    pattern.prepend(shortNames ? QStringLiteral("ddd, ") : QStringLiteral("dddd, "));
+  }
+  return pattern;
 }
 
 }  // namespace omacalendar

@@ -47,12 +47,12 @@ Dialog {
         const parts = [value.title || qsTr("Untitled event")]
         if (value.date) {
             const first = new Date(value.date + "T00:00:00")
-            let dateText = Qt.formatDate(first, "ddd MMM d")
+            let dateText = Theme.shortDate(first)
             if (value.allDay && value.endDate) {
                 const last = new Date(value.endDate + "T00:00:00")
                 last.setDate(last.getDate() - 1)
                 if (last > first)
-                    dateText += " – " + Qt.formatDate(last, "ddd MMM d")
+                    dateText += " – " + Theme.shortDate(last)
             }
             parts.push(dateText)
         }

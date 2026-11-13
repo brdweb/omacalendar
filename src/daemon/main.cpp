@@ -4,6 +4,7 @@
 #include <QDateTime>
 #include <QTextStream>
 
+#include "core/translations.h"
 #include "daemon.h"
 
 namespace {
@@ -38,6 +39,8 @@ int main(int argc, char* argv[]) {
   QCoreApplication::setOrganizationName(QStringLiteral("OmaCalendar"));
   QCoreApplication::setOrganizationDomain(QStringLiteral("omacalendar.app"));
   QCoreApplication::setApplicationName(QStringLiteral("omacalendard"));
+  // Notification texts follow the session locale; English otherwise.
+  omacalendar::translations::installForSystemLocale();
 
   omacalendar::Daemon daemon;
   QString error;

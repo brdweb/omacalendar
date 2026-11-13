@@ -9,6 +9,7 @@
 #include <QSqlQuery>
 #include <QTemporaryDir>
 #include <QTimeZone>
+#include <QTranslator>
 #include <QUrlQuery>
 #include <QUuid>
 #include <QtTest/QtTest>
@@ -65,6 +66,22 @@ class FakeNotificationBackend final : public NotificationBackend {
 
  private:
   uint m_nextId = 1;
+};
+
+// Marks every ReminderScheduler string it translates, so a test can tell the
+// translated labels from the untranslated action keys.
+class MarkingTranslator final : public QTranslator {
+ public:
+  bool isEmpty() const override { return false; }
+  QString translate(const char* context, const char* sourceText,
+                    const char* disambiguation = nullptr, int n = -1) const override {
+    Q_UNUSED(disambiguation)
+    Q_UNUSED(n)
+    if (QByteArrayView(context) != QByteArrayView("omacalendar::ReminderScheduler")) {
+      return {};
+    }
+    return QStringLiteral("[") + QString::fromUtf8(sourceText) + QStringLiteral("]");
+  }
 };
 
 class ScopedTimeZone final {
@@ -408,6 +425,66 @@ class ReminderSchedulerTest final : public QObject {
       return job.state == QStringLiteral("delivered") && job.deliveredAt.isValid();
     }));
     QVERIFY(opened.isEmpty());
+  }
+
+  void translatedActionLabelsKeepTheirActionKeys() {
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    Database database;
+    QString error;
+    QVERIFY2(database.open(directory.filePath(QStringLiteral("store.sqlite")), &error),
+             qPrintable(error));
+    QDateTime current(QDate(2027, 2, 3), QTime(9, 0), QTimeZone::UTC);
+    FakeNotificationBackend backend;
+    QList<QUrl> opened;
+    ReminderScheduler scheduler(
+        &database, &backend, [&current]() { return current; },
+        [&opened](const QUrl& url) {
+          opened.append(url);
+          return true;
+        });
+    MarkingTranslator translator;
+    QVERIFY(QCoreApplication::installTranslator(&translator));
+    const auto uninstall = qScopeGuard(
+        [&translator]() { QCoreApplication::removeTranslator(&translator); });
+
+    const QDateTime start = current.addSecs(10 * 60);
+    Event meeting = reminderEvent(QStringLiteral("Standup"), start, QJsonArray{10});
+    meeting.conferenceUrl = QStringLiteral("https://meet.example.com/abc-defg");
+    QVERIFY2(database.saveLocalEvent(&meeting, OutboxOperation::Create, &error),
+             qPrintable(error));
+    scheduler.checkNow();
+    QCOMPARE(backend.sent.size(), 1);
+    const CalendarNotification& sent = backend.sent.constLast();
+    QCOMPARE(sent.summary, QStringLiteral("[Calendar reminder]"));
+    QCOMPARE(sent.body, QStringLiteral("[An event is starting soon]"));
+
+    const QStringList expectedKeys{
+        QStringLiteral("default"),     QStringLiteral("join"),
+        QStringLiteral("snooze5"),     QStringLiteral("snooze10"),
+        QStringLiteral("snoozeStart"), QStringLiteral("snooze30"),
+        QStringLiteral("snooze60"),    QStringLiteral("dismiss")};
+    const QStringList expectedLabels{QStringLiteral("[Open]"),
+                                     QStringLiteral("[Join meeting]"),
+                                     QStringLiteral("[Snooze 5 min]"),
+                                     QStringLiteral("[Snooze 10 min]"),
+                                     QStringLiteral("[Remind at start]"),
+                                     QStringLiteral("[Snooze 30 min]"),
+                                     QStringLiteral("[Snooze 1 hour]"),
+                                     QStringLiteral("[Dismiss]")};
+    QStringList keys;
+    QStringList labels;
+    for (qsizetype index = 0; index + 1 < sent.actions.size(); index += 2) {
+      keys.append(sent.actions.at(index));
+      labels.append(sent.actions.at(index + 1));
+    }
+    QCOMPARE(sent.actions.size() % 2, 0);
+    QCOMPARE(keys, expectedKeys);
+    QCOMPARE(labels, expectedLabels);
+
+    // The translated label does not leak into the key ActionInvoked reports.
+    backend.invoke(backend.ids.constLast(), QStringLiteral("join"));
+    QCOMPARE(opened, QList<QUrl>{QUrl(meeting.conferenceUrl)});
   }
 
   void joinAndSnoozeUntilStartActions() {

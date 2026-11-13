@@ -31,7 +31,7 @@ jobs:
         run: |
           pacman -Syu --noconfirm --needed \
             appstream cmake desktop-file-utils git github-cli libical libsecret \
-            ninja pkgconf python qt6-base qt6-declarative qt6-networkauth systemd zstd
+            ninja pkgconf python qt6-base qt6-declarative qt6-networkauth qt6-tools systemd zstd
 
       - name: Check out source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7

@@ -201,7 +201,7 @@ Drawer {
     }
 
     function buildTimeZoneOptions() {
-        const result = [{"text": qsTr("System default — ") + systemTimeZoneId,
+        const result = [{"text": qsTr("System default — %1").arg(systemTimeZoneId),
                          "value": ""}]
         for (let index = 0; index < availableTimeZoneIds.length; ++index) {
             const id = String(availableTimeZoneIds[index])
@@ -515,10 +515,10 @@ Drawer {
                 const value = localCalendarRemoveConfirm.calendarData
                 const provider = String((value.capabilities || {}).provider
                                         || root.accountProvider(value.accountId))
-                const location = provider === "google"
-                        ? qsTr(" from Google Calendar") : qsTr(" from this device")
-                return qsTr("Permanently delete ") + (value.name || qsTr("this calendar"))
-                        + location + qsTr(" and all of its events? This cannot be undone.")
+                const name = value.name || qsTr("this calendar")
+                return provider === "google"
+                        ? qsTr("Permanently delete %1 from Google Calendar and all of its events? This cannot be undone.").arg(name)
+                        : qsTr("Permanently delete %1 from this device and all of its events? This cannot be undone.").arg(name)
             }
             color: Theme.text
             wrapMode: Text.Wrap
@@ -806,9 +806,9 @@ Drawer {
             Text {
                 textFormat: Text.PlainText
                 Layout.fillWidth: true
-                text: qsTr("Disconnect ") + (removeConfirm.accountData.displayName
-                                        || removeConfirm.accountData.principal
-                                        || qsTr("this account")) + qsTr("?")
+                text: qsTr("Disconnect %1?").arg(removeConfirm.accountData.displayName
+                                                 || removeConfirm.accountData.principal
+                                                 || qsTr("this account"))
                 color: Theme.text
                 wrapMode: Text.Wrap
             }

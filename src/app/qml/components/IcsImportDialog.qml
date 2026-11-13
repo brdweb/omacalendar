@@ -59,9 +59,10 @@ Dialog {
             Layout.fillWidth: true
             text: icsImportDialog.preview.count === undefined
                   ? qsTr("Preview the file before importing.")
-                  : Number(icsImportDialog.preview.count) + qsTr(" event(s), ")
-                    + Number(icsImportDialog.preview.duplicateCount || 0)
-                    + qsTr(" matching UID(s)")
+                  : qsTr("%1, %2")
+                    .arg(qsTr("%n event(s)", "", Number(icsImportDialog.preview.count)))
+                    .arg(qsTr("%n matching UID(s)", "",
+                              Number(icsImportDialog.preview.duplicateCount || 0)))
             color: Theme.mutedText
             font.pixelSize: Theme.smallFontSize
         }

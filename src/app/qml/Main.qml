@@ -272,7 +272,8 @@ ApplicationWindow {
                             compact: true
                             quiet: window.currentView !== modelData.id
                             primary: window.currentView === modelData.id
-                            toolTipText: modelData.label + qsTr(" view  Alt+") + modelData.key
+                            toolTipText: qsTr("%1 view  Alt+%2").arg(modelData.label)
+                                         .arg(modelData.key)
                             onClicked: window.setView(modelData.id)
                         }
                     }
@@ -652,7 +653,7 @@ ApplicationWindow {
                         }
                         Text {
                             textFormat: Text.PlainText
-                            text: window.visibleEvents.length + qsTr(" events loaded")
+                            text: qsTr("%n event(s) loaded", "", window.visibleEvents.length)
                             color: Theme.mutedText
                             font.pixelSize: Theme.microFontSize
                         }
@@ -1158,7 +1159,7 @@ ApplicationWindow {
         const latest = latestSyncDate
         if (latest === null)
             return qsTr("Cached · never synced")
-        return qsTr("Cached · synced ") + Theme.relativeSince(latest, new Date())
+        return qsTr("Cached · synced %1").arg(Theme.relativeSince(latest, new Date()))
     }
 
     function appValue(name, fallbackValue) {
@@ -1507,14 +1508,17 @@ ApplicationWindow {
 
     function periodTitle() {
         if (currentView === "day")
-            return Qt.formatDate(App.selectedDate, "dddd, MMMM d")
+            return Theme.longDate(App.selectedDate)
         if (currentView === "week") {
             const days = weekViewDates(App.selectedDate)
             const start = days[0]
             const end = days[days.length - 1]
-            return start.getMonth() === end.getMonth()
-                    ? Qt.formatDate(start, "MMMM d") + "–" + end.getDate()
-                    : Qt.formatDate(start, "MMM d") + " – " + Qt.formatDate(end, "MMM d")
+            // "September 7–13" only where the month comes first; other
+            // locales get both dates in their own month-day order.
+            if (start.getMonth() === end.getMonth() && Theme.monthDayPattern === "MMMM d")
+                return Theme.monthDay(start) + "–" + end.getDate()
+            return qsTr("%1 – %2", "date range").arg(Theme.shortMonthDay(start))
+                    .arg(Theme.shortMonthDay(end))
         }
         if (currentView === "year")
             return String(App.selectedDate.getFullYear())
@@ -1525,7 +1529,7 @@ ApplicationWindow {
         if (currentView === "agenda")
             return qsTr("Upcoming agenda")
         if (currentView === "month")
-            return Qt.formatDate(App.selectedDate, "dddd, MMMM d")
+            return Theme.longDate(App.selectedDate)
         if (currentView === "year")
             return qsTr("Year overview")
         if (currentView === "week")
@@ -1627,7 +1631,7 @@ ApplicationWindow {
         delete copy.uid
         delete copy.etag
         delete copy.recurrenceId
-        copy.summary = (copy.summary || qsTr("Untitled event")) + qsTr(" copy")
+        copy.summary = qsTr("%1 copy").arg(copy.summary || qsTr("Untitled event"))
         copy.dirty = false
         copy.conflict = false
         editor.openExisting(copy)
@@ -1813,7 +1817,7 @@ ApplicationWindow {
             draft.recurrenceRule = ""
         saveEvent(draft, {"recurrenceScope": "series", "guestNotificationPolicy": "none"})
         announce(qsTr("Pasted %1 on %2").arg(draft.summary || qsTr("Untitled event"))
-                 .arg(Qt.formatDate(App.selectedDate, "dddd, MMMM d")))
+                 .arg(Theme.longDate(App.selectedDate)))
     }
 
     function futureScopeSupportedForEvent(value) {
@@ -1869,7 +1873,7 @@ ApplicationWindow {
                 weekView.revealMinute(minute)
         }
         announce(qsTr("Showing %1, %2").arg(value.summary || qsTr("Untitled event"))
-                 .arg(Qt.formatDate(start, "dddd, MMMM d")))
+                 .arg(Theme.longDate(start)))
     }
 
     // The daemon searches every cached event; without it, only the events
@@ -2016,9 +2020,9 @@ ApplicationWindow {
                         "week": weekViewName, "month": qsTr("Month view"),
                         "year": qsTr("Year view")}
         const period = currentView === "agenda"
-                ? qsTr("from %1").arg(Qt.formatDate(bounds.start, "dddd, MMMM d"))
+                ? qsTr("from %1").arg(Theme.longDate(bounds.start))
                 : currentView === "day"
-                  ? Qt.formatDate(bounds.start, "dddd, MMMM d") : periodTitle()
+                  ? Theme.longDate(bounds.start) : periodTitle()
         return qsTr("%1, %2, %n event(s)", "", count).arg(labels[currentView] || "")
                 .arg(period)
     }
@@ -2045,7 +2049,7 @@ ApplicationWindow {
                                     start.getDate() + days)
             moveEventToDate(value, target)
             announce(qsTr("%1 moved to %2").arg(title)
-                     .arg(Qt.formatDate(target, "dddd, MMMM d")))
+                     .arg(Theme.longDate(target)))
             return
         }
         const duration = Math.round((end - start) / 60000)
@@ -2063,7 +2067,7 @@ ApplicationWindow {
                                                             || "system"))))
         } else {
             announce(qsTr("%1 moved to %2").arg(title)
-                     .arg(Qt.formatDate(moved, "ddd MMM d") + " "
+                     .arg(Theme.shortDate(moved) + " "
                           + Theme.formatTime(moved, String(preferences.timeFormat
                                                            || "system"))))
         }
