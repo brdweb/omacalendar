@@ -30,6 +30,11 @@ constexpr int kInvitationDigestThreshold = 5;
 // silently (fingerprint recorded, no notification). Covers historical
 // invitation backfill after adding a calendar with past invites.
 constexpr int kInvitationPastCutoffHours = 48;
+// Reminder bookkeeping kept in the database metadata table.
+constexpr auto kReminderTimeZoneKey = "reminder_time_zone";
+constexpr auto kHorizonRefreshedAtKey = "reminder_horizon_refreshed_at";
+constexpr int kHorizonStartDelayMs = 60 * 1000;
+constexpr int kHorizonCheckIntervalMs = 24 * 60 * 60 * 1000;
 
 QString notificationPrivacy(const Database* database) {
   return database == nullptr ? QStringLiteral("generic")
@@ -208,6 +213,11 @@ ReminderScheduler::ReminderScheduler(Database* database, NotificationBackend* ba
       m_linkOpener(std::move(linkOpener)) {
   m_timer.setInterval(30000);
   connect(&m_timer, &QTimer::timeout, this, &ReminderScheduler::checkNow);
+  connect(&m_horizonTimer, &QTimer::timeout, this, [this]() {
+    // The first refresh runs shortly after start; later ones daily.
+    m_horizonTimer.start(kHorizonCheckIntervalMs);
+    refreshReminderHorizons();
+  });
   initializeBackend();
 }
 
@@ -256,17 +266,107 @@ void ReminderScheduler::start() {
       scanInvitations(calendarIds);
     }
   }
+  checkTimeZone();
   m_timer.start();
+  m_horizonTimer.start(kHorizonStartDelayMs);
   QTimer::singleShot(0, this, &ReminderScheduler::checkNow);
 }
 
-void ReminderScheduler::stop() { m_timer.stop(); }
+void ReminderScheduler::stop() {
+  m_timer.stop();
+  m_horizonTimer.stop();
+}
+
+void ReminderScheduler::checkTimeZone() {
+  if (m_database == nullptr || !m_database->isOpen()) {
+    return;
+  }
+  const QByteArray zone = QTimeZone::systemTimeZoneId();
+  if (!m_reminderTimeZone.isEmpty() && zone == m_reminderTimeZone) {
+    return;
+  }
+  QString error;
+  const QString stored =
+      m_database->metadataValue(QString::fromLatin1(kReminderTimeZoneKey), &error);
+  if (!error.isEmpty()) {
+    emit notificationError(QStringLiteral("time-zone"), error);
+    return;
+  }
+  if (stored != QString::fromUtf8(zone)) {
+    // All-day reminders fire relative to local midnight; their stored UTC fire
+    // times were computed under the previous zone.
+    bool changed = false;
+    if (!m_database->rebaseAllDayReminderJobs(now(), &changed, &error) ||
+        !m_database->setMetadataValue(QString::fromLatin1(kReminderTimeZoneKey),
+                                      QString::fromUtf8(zone), &error)) {
+      emit notificationError(QStringLiteral("time-zone"), error);
+      return;
+    }
+    if (changed) {
+      emit reminderStateChanged();
+    }
+  }
+  m_reminderTimeZone = zone;
+}
+
+void ReminderScheduler::refreshReminderHorizons() {
+  if (m_horizonRunning || m_database == nullptr || !m_database->isOpen()) {
+    return;
+  }
+  QString error;
+  const QDateTime last = dateTimeFromIso(
+      m_database->metadataValue(QString::fromLatin1(kHorizonRefreshedAtKey), &error));
+  if (!error.isEmpty()) {
+    emit notificationError(QStringLiteral("reminder-horizon"), error);
+    return;
+  }
+  const QDateTime current = now();
+  if (last.isValid() && last <= current &&
+      last.addDays(kHorizonRefreshDays) > current) {
+    return;
+  }
+  m_horizonRunning = true;
+  m_horizonCursor.clear();
+  extendHorizonChunk();
+}
+
+void ReminderScheduler::extendHorizonChunk() {
+  if (m_database == nullptr || !m_database->isOpen()) {
+    m_horizonRunning = false;
+    return;
+  }
+  const QDateTime current = now();
+  QString error;
+  QString last;
+  const qsizetype processed = m_database->extendReminderHorizons(
+      current, m_horizonCursor, kHorizonChunkSize, &last, &error);
+  if (processed < 0) {
+    m_horizonRunning = false;
+    emit notificationError(QStringLiteral("reminder-horizon"), error);
+    return;
+  }
+  if (processed >= kHorizonChunkSize) {
+    // Yield to the event loop between chunks so IPC stays responsive.
+    m_horizonCursor = last;
+    QTimer::singleShot(0, this, &ReminderScheduler::extendHorizonChunk);
+    return;
+  }
+  m_horizonRunning = false;
+  m_horizonCursor.clear();
+  if (!m_database->setMetadataValue(QString::fromLatin1(kHorizonRefreshedAtKey),
+                                    isoUtc(current), &error)) {
+    emit notificationError(QStringLiteral("reminder-horizon"), error);
+    return;
+  }
+  emit reminderStateChanged();
+}
 
 void ReminderScheduler::checkNow() {
   if (m_sleeping || m_database == nullptr || !m_database->isOpen() ||
       m_backend == nullptr) {
     return;
   }
+  checkTimeZone();
   const QDateTime current = now();
   QString error;
   if (!m_database->recoverExpiredReminderDeliveries(current, &error)) {

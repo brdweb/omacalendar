@@ -84,6 +84,16 @@ class ReminderScheduler final : public QObject {
   void eventsChanged(const QStringList& calendarIds);
   void syncCompleted(const QString& accountId);
   void handlePrepareForSleep(bool sleeping);
+  // Rebases pending all-day reminders when the system time zone differs from
+  // the one they were scheduled under. Runs on start and on every tick.
+  void checkTimeZone();
+  // Starts a chunked pass that re-expands long-lived series' reminders, unless
+  // one completed within the last kHorizonRefreshDays. Runs a minute after
+  // start and then daily.
+  void refreshReminderHorizons();
+
+  static constexpr int kHorizonRefreshDays = 7;
+  static constexpr int kHorizonChunkSize = 100;
 
  signals:
   void reminderStateChanged();
@@ -133,12 +143,17 @@ class ReminderScheduler final : public QObject {
   [[nodiscard]] bool finishDigestMembers(const PendingDelivery& digest,
                                          QString* errorMessage);
   [[nodiscard]] QUrl eventDeepLink(const PendingDelivery& delivery) const;
+  void extendHorizonChunk();
 
   Database* m_database = nullptr;
   NotificationBackend* m_backend = nullptr;
   NowProvider m_nowProvider;
   LinkOpener m_linkOpener;
   QTimer m_timer;
+  QTimer m_horizonTimer;
+  QString m_horizonCursor;
+  bool m_horizonRunning = false;
+  QByteArray m_reminderTimeZone;
   QHash<QString, PendingDelivery> m_pending;
   QHash<uint, PendingDelivery> m_active;
   QHash<QString, QString> m_invitationBaseline;

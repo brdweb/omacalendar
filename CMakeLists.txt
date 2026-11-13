@@ -70,6 +70,16 @@ file(CHMOD
   PERMISSIONS OWNER_READ OWNER_WRITE
 )
 
+option(OMACALENDAR_BUILD_FUZZERS
+       "Build libFuzzer targets under tests/fuzz (Clang; enables sanitizers)" OFF)
+if(OMACALENDAR_BUILD_FUZZERS)
+  if(NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+    message(FATAL_ERROR "OMACALENDAR_BUILD_FUZZERS requires Clang")
+  endif()
+  set(OMACALENDAR_ENABLE_SANITIZERS ON)
+  add_compile_options(-fsanitize=fuzzer-no-link)
+endif()
+
 if(OMACALENDAR_ENABLE_SANITIZERS)
   if(NOT CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
     message(FATAL_ERROR "OMACALENDAR_ENABLE_SANITIZERS requires GCC or Clang")

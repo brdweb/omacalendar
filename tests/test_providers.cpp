@@ -98,7 +98,30 @@ class ProviderTest final : public QObject {
   void retryBackoffAndRetryAfter();
   void attachmentsAndConferenceRequests();
   void googleTasksRequestsAndMapping();
+  void calDavAlarmOffsetBeyondAYearIsNotScheduled();
 };
+
+void ProviderTest::calDavAlarmOffsetBeyondAYearIsNotScheduled() {
+  const QByteArray payload =
+      "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\n"
+      "UID:far-alarm@example.test\r\nDTSTART:20261011T120000Z\r\n"
+      "DTEND:20261011T130000Z\r\nSUMMARY:Far alarm\r\n"
+      // INT_MAX minutes would previously be accepted as a valid offset.
+      "BEGIN:VALARM\r\nACTION:DISPLAY\r\nTRIGGER:-PT2147483647M\r\n"
+      "DESCRIPTION:Reminder\r\nEND:VALARM\r\n"
+      "BEGIN:VALARM\r\nACTION:DISPLAY\r\nTRIGGER:-P367D\r\n"
+      "DESCRIPTION:Reminder\r\nEND:VALARM\r\n"
+      "BEGIN:VALARM\r\nACTION:DISPLAY\r\nTRIGGER:-P366D\r\n"
+      "DESCRIPTION:Reminder\r\nEND:VALARM\r\n"
+      "END:VEVENT\r\nEND:VCALENDAR\r\n";
+  const caldav::ICalendarParseResult parsed = caldav::ICalendarCodec::parse(payload);
+  QVERIFY2(parsed.ok(), qPrintable(parsed.error.message));
+  QCOMPARE(parsed.events.size(), 1);
+  const QJsonArray reminders = parsed.events.first().reminders;
+  QCOMPARE(reminders.size(), 1);
+  QCOMPARE(reminders.first().toObject().value(QStringLiteral("minutes")).toInteger(),
+           kMaximumReminderOffsetMinutes);
+}
 
 void ProviderTest::googleTasksRequestsAndMapping() {
   const QUrl lists = google::taskListsRequestUrl(QStringLiteral("next page"));

@@ -10,6 +10,10 @@ CheckBox {
     implicitHeight: 34
     font.pixelSize: Theme.fontSize
     hoverEnabled: true
+    Accessible.role: Accessible.CheckBox
+    Accessible.name: text
+    Accessible.checkable: true
+    Accessible.checked: checked
 
     indicator: Rectangle {
         x: control.leftPadding

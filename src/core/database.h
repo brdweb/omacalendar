@@ -302,6 +302,25 @@ class Database final {
   [[nodiscard]] qint64 dismissStaleReminders(const QDateTime& now, int graceSeconds,
                                              QString* errorMessage = nullptr);
   bool markReminderDelivered(qint64 id, QString* errorMessage = nullptr);
+  // Recomputes pending reminder jobs of all-day events against the current
+  // local zone (their fire time is local midnight). Snoozed jobs are kept, and
+  // a slot that was already delivered or dismissed is never scheduled again.
+  bool rebaseAllDayReminderJobs(const QDateTime& now, bool* changed = nullptr,
+                                QString* errorMessage = nullptr);
+  // Re-expands instances and reminder jobs, anchored at `now`, for up to
+  // `limit` non-deleted recurring masters with reminders whose series has not
+  // ended, ordered by id after `afterEventId`. Settled slots are kept as for
+  // rebaseAllDayReminderJobs. Returns how many masters were processed (fewer
+  // than `limit` means the pass is complete) and the last id via lastEventId,
+  // or -1 on error.
+  qsizetype extendReminderHorizons(const QDateTime& now, const QString& afterEventId,
+                                   int limit, QString* lastEventId,
+                                   QString* errorMessage = nullptr);
+  // Daemon-private bookkeeping in the metadata table. Missing keys read empty.
+  [[nodiscard]] QString metadataValue(const QString& key,
+                                      QString* errorMessage = nullptr) const;
+  bool setMetadataValue(const QString& key, const QString& value,
+                        QString* errorMessage = nullptr);
   [[nodiscard]] QList<Event> notificationEventsForCalendars(
       const QStringList& calendarIds, QString* errorMessage = nullptr) const;
   bool claimNotificationDelivery(const QString& fingerprint, const QString& kind,
@@ -450,8 +469,20 @@ class Database final {
                                 const QJsonObject& remoteSnapshot,
                                 const QString& remotePayload,
                                 const QDateTime& createdAt, QString* errorMessage);
-  bool rebuildEventInstances(const Event& event, QString* errorMessage);
-  bool rebuildReminderJobs(const Event& event, QString* errorMessage);
+  // `now` anchors the expansion windows; an invalid value means the clock.
+  bool rebuildEventInstances(const Event& event, QString* errorMessage,
+                             const QDateTime& now = {});
+  // Replace drops the event's pending/snoozed jobs and schedules afresh (an
+  // edit). Reconcile keeps pending jobs whose fingerprint is unchanged, drops
+  // the rest, and never re-creates a slot that is already settled.
+  enum class ReminderRebuildMode { Replace, Reconcile };
+  bool rebuildReminderJobs(const Event& event, QString* errorMessage,
+                           const QDateTime& now = {},
+                           ReminderRebuildMode mode = ReminderRebuildMode::Replace,
+                           bool* changed = nullptr);
+  bool reconcileReminderJobs(QList<Event> events, const QDateTime& now,
+                             bool rebuildInstances, bool* changed,
+                             QString* errorMessage);
   bool removeRemoteEventInternal(const QString& calendarId, const QString& remoteId,
                                  const QString& remotePayload, QString* errorMessage,
                                  bool* conflicted, bool manageTransaction);

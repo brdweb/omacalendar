@@ -5,7 +5,10 @@ import OmaCalendar
 
 TextField {
     id: control
-    property string accessibleName: placeholderText
+    // A visible or screen-reader label for the field. When set it names the
+    // field, so an example placeholder ("https://…") is never read as the name.
+    property string label: ""
+    property string accessibleName: label.length > 0 ? label : placeholderText
 
     implicitHeight: 42
     leftPadding: 12
@@ -17,6 +20,7 @@ TextField {
     font.pixelSize: Theme.fontSize
     selectByMouse: true
     Accessible.name: accessibleName
+    Accessible.description: accessibleName !== placeholderText ? placeholderText : ""
     Accessible.role: Accessible.EditableText
 
     background: Rectangle {

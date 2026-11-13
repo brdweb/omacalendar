@@ -14,10 +14,8 @@ Item {
     readonly property bool paletteVisible: palettePopup.opened
     signal colorSelected(string colorValue)
 
-    readonly property var colorChoices: [
-        "#7aa2f7", "#bb9af7", "#f7768e", "#ff9e64", "#e0af68",
-        "#9ece6a", "#73daca", "#2ac3de", "#7dcfff", "#c0caf5"
-    ]
+    // Follows the active theme; see Theme.calendarPalette.
+    readonly property var colorChoices: Theme.calendarPalette
 
     implicitWidth: 132
     implicitHeight: Theme.controlHeight
@@ -94,11 +92,17 @@ Item {
                     delegate: Button {
                         id: swatch
                         required property string modelData
+                        required property int index
+                        objectName: "colorSwatch-" + index
                         Layout.fillWidth: true
                         Layout.preferredHeight: 36
                         padding: 0
                         hoverEnabled: true
-                        Accessible.name: qsTr("Choose calendar color ") + modelData
+                        // Announce a colour name; the hex value stays as the
+                        // description for users who want the exact colour.
+                        Accessible.name: qsTr("%1 calendar color")
+                                         .arg(Theme.colorName(swatch.modelData))
+                        Accessible.description: swatch.modelData
                         onClicked: {
                             root.selectedColor = modelData
                             root.colorSelected(modelData)

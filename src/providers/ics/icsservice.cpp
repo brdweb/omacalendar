@@ -279,6 +279,9 @@ bool IcsService::addSubscription(const QString& url, const QString& displayName,
   calendar.name = created.displayName;
   calendar.readOnly = true;
   calendar.enabled = true;
+  // A public feed's alarms are chosen by its publisher, not the user, so new
+  // subscriptions start muted. Settings -> Calendars can turn alerts on.
+  calendar.ignoreAlerts = true;
   calendar.capabilities = {
       {QStringLiteral("provider"), QStringLiteral("ics")},
       {QStringLiteral("createEvent"), false},
@@ -942,6 +945,9 @@ bool IcsService::prepareFeed(const IcsSubscription& subscription,
     event.etag = etag;
     event.rawPayload.clear();
     event.rawFormat = QStringLiteral("text/calendar");
+    // Feeds are read-only, so no alarm needs to round-trip: keep only distinct
+    // triggers, at most kMaximumRemindersPerEvent of them.
+    event.reminders = boundedReminders(event.reminders);
     event.timeKind = event.allDay ? TimeKind::AllDay
                                   : (event.startTimeZone.isEmpty() ? TimeKind::Floating
                                                                    : TimeKind::Zoned);

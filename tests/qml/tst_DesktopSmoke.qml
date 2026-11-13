@@ -37,6 +37,11 @@ Item {
     Component { id: tasksPanelFactory; Components.TasksPanel {} }
     Component { id: taskEditorFactory; Components.TaskEditor {} }
     Component { id: shortcutsFactory; Components.AppShortcuts {} }
+    Component { id: textFieldFactory; Components.AppTextField {} }
+    Component { id: colorPickerFactory; Components.AppColorPicker {} }
+    Component { id: checkBoxFactory; Components.AppCheckBox {} }
+    Component { id: spinBoxFactory; Components.AppSpinBox {} }
+    Component { id: comboBoxFactory; Components.AppComboBox {} }
     // Dialogs hand focus back through the window's content item, so the
     // focus test runs in an ApplicationWindow like the app's.
     Component {
@@ -518,6 +523,22 @@ Item {
             compare(Theme.readableText(Theme.background, Theme.text), Theme.text,
                     "a readable preferred colour is kept")
 
+            // Every calendar palette swatch stands out from the theme
+            // background (WCAG non-text 3:1) and carries readable event text.
+            for (let p = 0; p < Theme.calendarPalette.length; ++p) {
+                const swatch = Qt.color(Theme.calendarPalette[p])
+                const swatchRatio = Theme.contrastRatio(swatch, Theme.background)
+                verify(swatchRatio >= 3, "palette " + Theme.calendarPalette[p]
+                       + " on background: " + swatchRatio.toFixed(2))
+                for (let o = 0; o < opacities.length; ++o) {
+                    const fill = Theme.blend(swatch, opacities[o], Theme.background)
+                    const ratio = Theme.contrastRatio(Theme.readableText(fill, Theme.text),
+                                                      fill)
+                    verify(ratio >= 4.5, "palette " + Theme.calendarPalette[p] + " at "
+                           + opacities[o] + ": " + ratio.toFixed(2))
+                }
+            }
+
             const chip = createTemporaryObject(eventChipFactory, scene, {
                 "width": 200, "selected": true, "showTime": true, "timeText": "09:00",
                 "eventData": Object.assign({}, representativeEvents()[0],
@@ -530,6 +551,114 @@ Item {
                                            {"calendarColor": "#ffffff"})})
             verify(Theme.contrastRatio(findChild(block, "timelineEventSummary").color,
                                        block.fillColor) >= 4.5)
+        }
+
+        function test_palette_follows_theme_and_falls_back() {
+            const hex = /^#[0-9a-f]{6}$/
+
+            // No theme file: the Tokyo Night set, unchanged.
+            compare(Theme.calendarPaletteFrom("fallback", ["#ff0000"]),
+                    Theme.fallbackCalendarPalette)
+            compare(Theme.fallbackCalendarPalette.length, 10)
+
+            // A theme: its accent, info, success, warning and danger come
+            // first, then hue rotations fill the palette.
+            const base = ["#e06c75", "#61afef", "#98c379", "#e5c07b", "#c678dd"]
+            const derived = Theme.calendarPaletteFrom("omarchy", base)
+            compare(derived.length, 10)
+            compare(derived.slice(0, 5), base)
+            for (let index = 0; index < derived.length; ++index) {
+                verify(hex.test(derived[index]), "stored as hex: " + derived[index])
+                compare(derived.indexOf(derived[index]), index, "distinct swatches")
+            }
+            verify(derived.join() !== Theme.fallbackCalendarPalette.join())
+
+            // Near-identical theme colours are merged rather than repeated.
+            const close = Theme.calendarPaletteFrom(
+                        "omarchy", ["#7aa2f7", "#7ba3f7", "#7aa2f6", "#9ece6a", "#9ecf6a"])
+            compare(close.length, 10)
+            compare(close.slice(0, 2), ["#7aa2f7", "#9ece6a"])
+
+            // A monochrome theme cannot be rotated: fall back to Tokyo Night.
+            compare(Theme.calendarPaletteFrom(
+                        "omarchy", ["#808080", "#eeeeee", "#111111", "#999999", "#555555"]),
+                    Theme.fallbackCalendarPalette)
+
+            // The live palette follows the active theme and feeds the picker.
+            compare(Theme.calendarPalette[0], Theme.hexColor(Theme.accent))
+            compare(Theme.calendarPalette,
+                    Theme.calendarPaletteFrom(Theme.sourceName,
+                                              [Theme.accent, Theme.info, Theme.success,
+                                               Theme.warning, Theme.danger]))
+            const picker = createTemporaryObject(colorPickerFactory, scene)
+            compare(picker.colorChoices, Theme.calendarPalette)
+        }
+
+        function test_controls_expose_accessible_names() {
+            // A labelled field is named by its label, not its example text.
+            const field = createTemporaryObject(textFieldFactory, scene, {
+                "placeholderText": "https://caldav.example.com/",
+                "label": "Server URL"})
+            compare(field.Accessible.name, "Server URL")
+            compare(field.Accessible.description, "https://caldav.example.com/")
+            const named = createTemporaryObject(textFieldFactory, scene, {
+                "placeholderText": "https://example.com/feed.ics",
+                "accessibleName": "Feed URL"})
+            compare(named.Accessible.name, "Feed URL")
+            const plain = createTemporaryObject(textFieldFactory, scene, {
+                "placeholderText": "Calendar name"})
+            compare(plain.Accessible.name, "Calendar name")
+
+            const settings = createTemporaryObject(settingsFactory, scene, {
+                "accounts": [], "calendars": [], "connected": true})
+            compare(findChild(settings, "caldavEndpointField").Accessible.name,
+                    "CalDAV server URL")
+            compare(findChild(settings, "icsUrlField").Accessible.name,
+                    "Calendar feed URL")
+
+            // Swatches are announced by colour name, not hex.
+            const names = Theme.fallbackCalendarPalette.map(Theme.colorName)
+            compare(names, ["Blue", "Purple", "Red", "Orange", "Yellow", "Green",
+                            "Teal", "Cyan", "Sky blue", "Light Blue"])
+            compare(Theme.colorName("#808080"), "Gray")
+            compare(Theme.colorName("#0a0a0a"), "Black")
+            compare(Theme.colorName("#1a1b26"), "Dark Blue")
+            const picker = createTemporaryObject(colorPickerFactory, scene)
+            picker.openPalette()
+            tryCompare(picker, "paletteVisible", true)
+            // Popup content is reparented to the window overlay when open.
+            const swatch = findChild(picker.Overlay.overlay, "colorSwatch-0")
+            verify(swatch !== null)
+            compare(swatch.Accessible.name,
+                    Theme.colorName(Theme.calendarPalette[0]) + " calendar color")
+            verify(swatch.Accessible.name.indexOf("#") < 0)
+            picker.closePalette()
+            tryCompare(picker, "paletteVisible", false)
+
+            // Year view month headers are headings named with month and year.
+            const year = createTemporaryObject(yearFactory, scene, {
+                "width": 1100, "height": 800, "currentDate": scene.referenceDate,
+                "events": [], "visible": true})
+            wait(0)
+            const header = findChild(year, "yearMonthHeader-7")
+            verify(header !== null)
+            compare(header.Accessible.role, Accessible.Heading)
+            compare(header.Accessible.name,
+                    Qt.formatDate(new Date(2026, 7, 1), "MMMM yyyy"))
+
+            const check = createTemporaryObject(checkBoxFactory, scene, {
+                "text": "Mute alerts"})
+            compare(check.Accessible.role, Accessible.CheckBox)
+            compare(check.Accessible.name, "Mute alerts")
+            const spin = createTemporaryObject(spinBoxFactory, scene, {
+                "accessibleName": "Reminder minutes"})
+            compare(spin.Accessible.role, Accessible.SpinBox)
+            compare(spin.Accessible.name, "Reminder minutes")
+            const combo = createTemporaryObject(comboBoxFactory, scene, {
+                "model": ["12-hour", "24-hour"], "accessibleName": "Time format"})
+            compare(combo.Accessible.role, Accessible.ComboBox)
+            compare(combo.Accessible.name, "Time format")
+            compare(combo.Accessible.description, "12-hour")
         }
 
         function test_dialogs_trap_and_restore_focus() {

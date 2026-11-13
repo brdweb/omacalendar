@@ -14,6 +14,12 @@ ComboBox {
     bottomPadding: 0
     font.pixelSize: Theme.fontSize
     hoverEnabled: true
+    // Callers name the choice ("Time format"); the current option is the
+    // description so a screen reader announces both.
+    property string accessibleName: ""
+    Accessible.role: Accessible.ComboBox
+    Accessible.name: accessibleName.length > 0 ? accessibleName : displayText
+    Accessible.description: control.Accessible.name !== displayText ? displayText : ""
 
     delegate: ItemDelegate {
         id: optionDelegate

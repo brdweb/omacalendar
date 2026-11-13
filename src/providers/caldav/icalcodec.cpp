@@ -616,8 +616,10 @@ std::optional<QJsonObject> reminderFromAlarm(icalcomponent* alarm) {
       return std::nullopt;
     }
     const qint64 minutes = -seconds / 60;
-    if (minutes < std::numeric_limits<int>::min() ||
-        minutes > std::numeric_limits<int>::max()) {
+    // Offsets beyond a year are not scheduled. Such an alarm stays a retained,
+    // non-editable VALARM in the provider resource like end-relative ones.
+    if (minutes < -kMaximumReminderOffsetMinutes ||
+        minutes > kMaximumReminderOffsetMinutes) {
       return std::nullopt;
     }
     result.insert(QStringLiteral("minutes"), static_cast<int>(minutes));

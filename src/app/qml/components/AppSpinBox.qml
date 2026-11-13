@@ -10,6 +10,10 @@ SpinBox {
     implicitHeight: Theme.controlHeight
     font.pixelSize: Theme.fontSize
     hoverEnabled: true
+    // Callers name the value ("Reminder minutes"); the role is a spin box.
+    property string accessibleName: ""
+    Accessible.role: Accessible.SpinBox
+    Accessible.name: accessibleName
 
     contentItem: TextInput {
         z: 2

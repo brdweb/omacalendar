@@ -6,6 +6,7 @@
 #include <QJsonObject>
 #include <QString>
 #include <QStringList>
+#include <optional>
 
 namespace omacalendar {
 
@@ -219,6 +220,32 @@ QDateTime dateTimeFromIso(const QString& value);
 // delivered unless their occurrence is still upcoming. Shared by the due
 // query and the stale sweep; changing it changes both consistently.
 inline constexpr int kStaleReminderGraceSeconds = 2 * 3600;
+
+// Bounds on reminder work. A feed or provider can publish any number of
+// alarms with any offset; scheduling expands each alarm across every
+// occurrence, so both the alarm count and the offset are capped before any
+// job is generated.
+inline constexpr int kMaximumRemindersPerEvent = 10;
+// 366 days, in minutes. Offsets beyond this are clamped when scheduling and
+// ignored when parsing provider alarms.
+inline constexpr qint64 kMaximumReminderOffsetMinutes = 366LL * 24 * 60;
+// Upper bound on pending/snoozed reminder jobs generated for one calendar.
+inline constexpr int kMaximumPendingReminderJobsPerCalendar = 20000;
+
+// Clamps a reminder offset (minutes before the start; negative means after)
+// to +/-kMaximumReminderOffsetMinutes.
+qint64 clampedReminderOffsetMinutes(qint64 minutes);
+// The clamped relative offset of a reminder, read from a bare number or from
+// an object's minutesBefore/offsetMinutes/minutes member. Empty for absolute
+// ("at") reminders and for values that are not finite numbers.
+std::optional<qint64> reminderOffsetMinutes(const QJsonValue& reminder);
+// A stable key for a reminder's trigger ("m:<minutes>" for a relative offset,
+// "a:<UTC ISO time>" for an absolute one) so alarms that would fire at the
+// same instant collapse. Empty when the reminder has no usable trigger.
+QString reminderTriggerKey(const QJsonValue& reminder);
+// Drops reminders with duplicate or unusable triggers and keeps at most
+// kMaximumRemindersPerEvent, preserving order.
+QJsonArray boundedReminders(const QJsonArray& reminders);
 
 // Canonical change-detection fingerprint for invitation notifications: a SHA-256
 // over the invitation content (attendee local RSVP state excluded, attendees
