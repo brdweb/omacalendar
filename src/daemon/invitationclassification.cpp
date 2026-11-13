@@ -19,6 +19,24 @@ QString normalizedInvitationResponse(QString response) {
 }  // namespace
 
 bool invitationNeedsResponse(const Event& event, const QString& accountPrincipal) {
+  // The organizer has nothing to answer, even when listed as an attendee
+  // without a participation state. Google and CalDAV sync mark the account's
+  // own organizer entry with self; the principal covers anything else.
+  if (event.organizer.value(QStringLiteral("self")).toBool()) {
+    return false;
+  }
+  if (!accountPrincipal.isEmpty()) {
+    QString organizer = event.organizer.value(QStringLiteral("email")).toString();
+    if (organizer.isEmpty()) {
+      organizer = event.organizer.value(QStringLiteral("uri")).toString().trimmed();
+      if (organizer.startsWith(QStringLiteral("mailto:"), Qt::CaseInsensitive)) {
+        organizer.remove(0, 7);
+      }
+    }
+    if (organizer.compare(accountPrincipal, Qt::CaseInsensitive) == 0) {
+      return false;
+    }
+  }
   for (const QJsonValue& value : event.attendees) {
     const QJsonObject attendee = value.toObject();
     const QString email = attendee.value(QStringLiteral("email")).toString();

@@ -13,7 +13,8 @@ struct InvitationBucketTotals {
 };
 
 // True when the account's own attendee entry (Google's self flag, or the
-// account principal's address) has not answered yet.
+// account principal's address) has not answered yet. Never true when the
+// account organizes the event.
 [[nodiscard]] bool invitationNeedsResponse(const Event& event,
                                            const QString& accountPrincipal);
 [[nodiscard]] QDateTime invitationStartBoundary(const Event& event);

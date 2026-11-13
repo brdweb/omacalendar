@@ -247,12 +247,23 @@ class GoogleMapperTest final : public QObject {
                             "RDATE;VALUE=DATE:20261021"));
     const QJsonArray written =
         google::eventToGoogleJson(event).value(QStringLiteral("recurrence")).toArray();
-    QEXPECT_FAIL("",
-                 "Bug: recurrenceLines() in googlemapper.cpp compares the text before "
-                 "the first ':' to \"EXDATE:\"/\"RDATE:\", so lines with parameters "
-                 "(;TZID=, ;VALUE=DATE) are dropped from the write body",
-                 Continue);
     QCOMPARE(written, recurrence);
+
+    // Names match in any case and are written in upper case; parameters and
+    // values stay verbatim. Lookalike names are still dropped.
+    Event local = event;
+    local.recurrenceRule = QStringLiteral(
+        "rrule:FREQ=DAILY;COUNT=5\n"
+        "exdate;value=date:20261020\n"
+        "EXRULE;X-PARAM=a:FREQ=WEEKLY\n"
+        "EXDATEX;TZID=UTC:20261021T000000\n"
+        "X-EXDATE:20261022\n"
+        "RDATE");
+    QCOMPARE(
+        google::eventToGoogleJson(local).value(QStringLiteral("recurrence")).toArray(),
+        QJsonArray({QStringLiteral("RRULE:FREQ=DAILY;COUNT=5"),
+                    QStringLiteral("EXDATE;value=date:20261020"),
+                    QStringLiteral("EXRULE;X-PARAM=a:FREQ=WEEKLY")}));
   }
 
   void occurrenceIdentityAndTargeting() {

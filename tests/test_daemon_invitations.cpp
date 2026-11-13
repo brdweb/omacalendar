@@ -213,12 +213,23 @@ class DaemonInvitationTest final : public QObject {
     own.attendees = {attendee(kPrincipal, {}, true),
                      attendee(QStringLiteral("guest@example.invalid"),
                               QStringLiteral("needsAction"))};
-    QEXPECT_FAIL("",
-                 "Bug: invitationNeedsResponse() never looks at the organizer, so the "
-                 "account's own event appears in the invitation list when its own "
-                 "attendee entry has no answer",
-                 Continue);
     QVERIFY(!invitationNeedsResponse(own, kPrincipal));
+
+    // Without Google's self flag, the account principal is the organizer by
+    // address, in either the email or a mailto: uri form, ignoring case.
+    own.organizer =
+        QJsonObject{{QStringLiteral("email"), QStringLiteral("Me@Example.Invalid")}};
+    QVERIFY(!invitationNeedsResponse(own, kPrincipal));
+    own.organizer = QJsonObject{
+        {QStringLiteral("uri"), QStringLiteral("mailto:me@example.invalid")}};
+    QVERIFY(!invitationNeedsResponse(own, kPrincipal));
+    // Someone else organizing still leaves the account's answer open.
+    own.organizer =
+        QJsonObject{{QStringLiteral("email"), QStringLiteral("boss@example.invalid")}};
+    QVERIFY(invitationNeedsResponse(own, kPrincipal));
+    // An unknown principal never matches an organizer by address.
+    own.organizer = QJsonObject{{QStringLiteral("email"), QString()}};
+    QVERIFY(invitationNeedsResponse(own, {}));
   }
 
   void fingerprintSeparatesChangedFromUnchanged() {
