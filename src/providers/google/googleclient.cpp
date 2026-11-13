@@ -129,6 +129,26 @@ QUrl taskListsRequestUrl(const QString& pageToken) {
   return url;
 }
 
+QNetworkRequest googleApiRequest(const QUrl& url, const QString& accessToken,
+                                 const QString& etag) {
+  QNetworkRequest networkRequest(url);
+  networkRequest.setAttribute(QNetworkRequest::RedirectPolicyAttribute,
+                              QNetworkRequest::SameOriginRedirectPolicy);
+  networkRequest.setMaximumRedirectsAllowed(3);
+  networkRequest.setTransferTimeout(kTransferTimeoutMs);
+  networkRequest.setHeader(QNetworkRequest::ContentTypeHeader,
+                           QStringLiteral("application/json; charset=utf-8"));
+  networkRequest.setRawHeader(QByteArrayLiteral("Authorization"),
+                              QByteArrayLiteral("Bearer ") + accessToken.toUtf8());
+  networkRequest.setRawHeader(
+      QByteArrayLiteral("User-Agent"),
+      QByteArrayLiteral("OmaCalendar/") + QByteArrayLiteral(OMACALENDAR_VERSION));
+  if (!etag.isEmpty()) {
+    networkRequest.setRawHeader(QByteArrayLiteral("If-Match"), etag.toUtf8());
+  }
+  return networkRequest;
+}
+
 QUrl taskResourceUrl(const QString& taskListId, const QString& taskId) {
   QString path = QString::fromLatin1(kTasksApiBase) + QStringLiteral("/lists/") +
                  pathSegment(taskListId) + QStringLiteral("/tasks");
@@ -481,22 +501,8 @@ void GoogleClient::request(const QString& accountId, const QByteArray& verb, QUr
     });
     return;
   }
-  QNetworkRequest networkRequest(url);
-  networkRequest.setAttribute(QNetworkRequest::RedirectPolicyAttribute,
-                              QNetworkRequest::NoLessSafeRedirectPolicy);
-  networkRequest.setMaximumRedirectsAllowed(3);
-  networkRequest.setTransferTimeout(kTransferTimeoutMs);
-  networkRequest.setHeader(QNetworkRequest::ContentTypeHeader,
-                           QStringLiteral("application/json; charset=utf-8"));
-  networkRequest.setRawHeader(
-      QByteArrayLiteral("Authorization"),
-      QByteArrayLiteral("Bearer ") + m_auth->accessToken(accountId).toUtf8());
-  networkRequest.setRawHeader(
-      QByteArrayLiteral("User-Agent"),
-      QByteArrayLiteral("OmaCalendar/") + QByteArrayLiteral(OMACALENDAR_VERSION));
-  if (!etag.isEmpty()) {
-    networkRequest.setRawHeader(QByteArrayLiteral("If-Match"), etag.toUtf8());
-  }
+  const QNetworkRequest networkRequest =
+      googleApiRequest(url, m_auth->accessToken(accountId), etag);
   const QByteArray payload = body.isEmpty()
                                  ? QByteArray()
                                  : QJsonDocument(body).toJson(QJsonDocument::Compact);

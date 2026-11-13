@@ -142,6 +142,11 @@ struct GoogleAuthManager::PendingForget final {
 
 GoogleAuthManager::GoogleAuthManager(QObject* parent) : QObject(parent) {}
 
+void GoogleAuthManager::setInteractiveTimeout(const int milliseconds) {
+  m_interactiveTimeoutMs =
+      milliseconds > 0 ? milliseconds : defaultInteractiveTimeoutMs();
+}
+
 GoogleAuthManager::~GoogleAuthManager() {
   ++m_clientSecretGeneration;
   m_clientSecretOperation = kInvalidSecretStoreOperationId;
@@ -373,6 +378,23 @@ GoogleAuthManager::Session* GoogleAuthManager::createSession(const QString& acco
       delete session;
       return nullptr;
     }
+    // An abandoned browser sign-in must not leave a loopback port open for
+    // the life of the daemon. The timer belongs to the reply handler, so it
+    // goes away with the session.
+    auto* listenerDeadline = new QTimer(replyHandler);
+    listenerDeadline->setSingleShot(true);
+    connect(listenerDeadline, &QTimer::timeout, this,
+            [this, sessionAccountId, sessionGeneration]() {
+              Session* active = activeSession(sessionAccountId, sessionGeneration);
+              if (active == nullptr || active->grantObserved ||
+                  active->replyHandler == nullptr ||
+                  !active->replyHandler->isListening()) {
+                return;
+              }
+              fail(active, QStringLiteral("authorization_timeout"),
+                   QStringLiteral("Google sign-in was not completed in time"));
+            });
+    listenerDeadline->start(m_interactiveTimeoutMs);
     replyHandler->setTokenErrorObserver(
         [this, sessionAccountId, sessionGeneration](const QString& code,
                                                     const QString& description) {

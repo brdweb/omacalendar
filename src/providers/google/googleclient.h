@@ -4,6 +4,7 @@
 #include <QDateTime>
 #include <QJsonObject>
 #include <QNetworkAccessManager>
+#include <QNetworkRequest>
 #include <QObject>
 #include <QUrl>
 #include <functional>
@@ -53,6 +54,11 @@ struct ApiResponse {
 [[nodiscard]] QUrl tasksRequestUrl(const QString& taskListId, const QString& pageToken);
 [[nodiscard]] QUrl taskResourceUrl(const QString& taskListId,
                                    const QString& taskId = {});
+// Every authenticated API request. The bearer token must never follow a
+// redirect to another origin, so only same-origin redirects are allowed.
+[[nodiscard]] QNetworkRequest googleApiRequest(const QUrl& url,
+                                               const QString& accessToken,
+                                               const QString& etag = {});
 [[nodiscard]] ApiResponse parseGoogleApiResponse(
     int httpStatus, int networkError, const QByteArray& body,
     const QByteArray& etag = {}, const QByteArray& retryAfter = {},

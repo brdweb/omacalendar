@@ -26,6 +26,12 @@ class IpcServer final : public QObject {
   [[nodiscard]] bool isListening() const;
   [[nodiscard]] QString path() const;
   [[nodiscard]] int clientCount() const;
+  // A client that stops reading is disconnected once this many bytes of
+  // responses and notifications are queued for it, so one stalled subscriber
+  // cannot grow the daemon's memory without bound.
+  [[nodiscard]] static constexpr qint64 maximumClientBacklogBytes() {
+    return 8 * 1024 * 1024;
+  }
 
   void broadcast(const QString& event, const QJsonObject& data);
 
@@ -48,6 +54,8 @@ class IpcServer final : public QObject {
   void read(QLocalSocket* socket);
   void detach(QLocalSocket* socket);
   void send(QLocalSocket* socket, const QJsonObject& message);
+  bool writeFrame(QLocalSocket* socket, const QByteArray& bytes);
+  void dropClient(QLocalSocket* socket, const QString& reason);
   void applySubscription(QLocalSocket* socket, const QJsonObject& request,
                          const QJsonObject& response);
   [[nodiscard]] static bool topicMatches(const QSet<QString>& topics,

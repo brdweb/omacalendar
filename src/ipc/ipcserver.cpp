@@ -4,6 +4,7 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
+#include <QDebug>
 #include <QFile>
 #include <QFileInfo>
 #include <QJsonArray>
@@ -253,16 +254,45 @@ void IpcServer::detach(QLocalSocket* socket) {
 }
 
 void IpcServer::send(QLocalSocket* socket, const QJsonObject& message) {
-  const QByteArray bytes = frame(message);
-  if (bytes.size() > kMaximumFrameBytes) {
-    socket->write(frame(errorResponse(
-        message.value(QStringLiteral("id")),
-        {QStringLiteral("response_too_large"),
-         QStringLiteral("Response must be requested in smaller pages"), false})));
+  if (!m_clients.contains(socket)) {
     return;
   }
+  const QByteArray bytes = frame(message);
+  if (bytes.size() > kMaximumFrameBytes) {
+    writeFrame(
+        socket,
+        frame(errorResponse(
+            message.value(QStringLiteral("id")),
+            {QStringLiteral("response_too_large"),
+             QStringLiteral("Response must be requested in smaller pages"), false})));
+    return;
+  }
+  writeFrame(socket, bytes);
+}
+
+bool IpcServer::writeFrame(QLocalSocket* socket, const QByteArray& bytes) {
   socket->write(bytes);
   socket->flush();
+  if (socket->bytesToWrite() > maximumClientBacklogBytes()) {
+    dropClient(socket, QStringLiteral("Client stopped reading; outbound backlog "
+                                      "exceeded the size limit"));
+    return false;
+  }
+  return true;
+}
+
+void IpcServer::dropClient(QLocalSocket* socket, const QString& reason) {
+  if (m_clients.remove(socket) == 0) {
+    return;
+  }
+  qWarning().noquote() << "Disconnecting IPC client:" << reason;
+  // disconnectFromServer() would wait for the backlog to drain, which a
+  // stalled peer never allows. Abort discards it and closes immediately.
+  socket->disconnect(this);
+  socket->abort();
+  socket->deleteLater();
+  emit clientCountChanged();
+  emit protocolViolation(reason);
 }
 
 void IpcServer::broadcast(const QString& event, const QJsonObject& data) {
@@ -277,8 +307,7 @@ void IpcServer::broadcast(const QString& event, const QJsonObject& data) {
         !topicMatches(iterator->topics, event)) {
       continue;
     }
-    socket->write(bytes);
-    socket->flush();
+    writeFrame(socket, bytes);
   }
 }
 

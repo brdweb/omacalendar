@@ -1,7 +1,10 @@
 #include <QFile>
+#include <QHostAddress>
 #include <QSignalSpy>
+#include <QTcpSocket>
 #include <QTemporaryDir>
 #include <QTimer>
+#include <QUrlQuery>
 #include <QtTest>
 
 #include "core/database.h"
@@ -22,6 +25,7 @@ class GoogleAuthAsyncTest final : public QObject {
   void delayedClientSecretStoreKeepsEventLoopResponsive();
   void clientSecretStoreFailureIsSanitized();
   void cancellationAndDestructionSuppressLateAuthorization();
+  void interactiveAuthorizationTimesOut();
   void absentRefreshTokenRemovalIsIdempotent();
   void delayedDisconnectCommitsOnlyAfterCredentialRemoval();
 
@@ -236,6 +240,44 @@ void GoogleAuthAsyncTest::cancellationAndDestructionSuppressLateAuthorization() 
   QTimer::singleShot(25, temporary, [temporary]() { delete temporary; });
   QTest::qWait(400);
   QVERIFY(!lateSignal);
+}
+
+void GoogleAuthAsyncTest::interactiveAuthorizationTimesOut() {
+  setHelper(QByteArrayLiteral("success"), QByteArrayLiteral("unused"));
+  GoogleAuthManager auth;
+  QCOMPARE(auth.interactiveTimeout(), GoogleAuthManager::defaultInteractiveTimeoutMs());
+  QCOMPARE(GoogleAuthManager::defaultInteractiveTimeoutMs(), 10 * 60 * 1000);
+  auth.setInteractiveTimeout(300);
+  QString error;
+  QVERIFY2(
+      auth.configureClient(QStringLiteral("client-id.example.invalid"), {}, &error),
+      qPrintable(error));
+  QSignalSpy authorizationUrl(&auth, &GoogleAuthManager::authorizationUrlReady);
+  QSignalSpy failed(&auth, &GoogleAuthManager::authorizationFailed);
+  QVERIFY2(auth.startAuthorization(QStringLiteral("abandoned-account"), &error),
+           qPrintable(error));
+  QTRY_COMPARE_WITH_TIMEOUT(authorizationUrl.count(), 1, 2000);
+
+  const QUrl url = authorizationUrl.first().at(1).toUrl();
+  const QUrl callback(QUrlQuery(url).queryItemValue(QStringLiteral("redirect_uri"),
+                                                    QUrl::FullyDecoded));
+  QCOMPARE(callback.host(), QStringLiteral("127.0.0.1"));
+  QVERIFY(callback.port() > 0);
+  {
+    QTcpSocket probe;
+    probe.connectToHost(QHostAddress::LocalHost, static_cast<quint16>(callback.port()));
+    QVERIFY2(probe.waitForConnected(1000), "the loopback listener should be open");
+    probe.abort();
+  }
+
+  QTRY_COMPARE_WITH_TIMEOUT(failed.count(), 1, 3000);
+  QCOMPARE(failed.first().at(0).toString(), QStringLiteral("abandoned-account"));
+  QCOMPARE(failed.first().at(1).toString(), QStringLiteral("authorization_timeout"));
+
+  QTcpSocket probe;
+  probe.connectToHost(QHostAddress::LocalHost, static_cast<quint16>(callback.port()));
+  QVERIFY2(!probe.waitForConnected(500), "the loopback listener should be closed");
+  auth.cancel(QStringLiteral("abandoned-account"));
 }
 
 void GoogleAuthAsyncTest::absentRefreshTokenRemovalIsIdempotent() {

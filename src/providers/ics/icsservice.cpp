@@ -3,6 +3,7 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QHostAddress>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QNetworkReply>
@@ -130,6 +131,40 @@ bool IcsService::normalizeSubscriptionUrl(const QString& input, QUrl* normalized
     *normalized = url.adjusted(QUrl::NormalizePathSegments);
   }
   return true;
+}
+
+bool IcsService::isPrivateNetworkHost(const QUrl& url) {
+  const QString host = url.host().toLower();
+  if (host.isEmpty()) {
+    return false;
+  }
+  if (host == QStringLiteral("localhost") ||
+      host.endsWith(QStringLiteral(".localhost"))) {
+    return true;
+  }
+  QHostAddress address;
+  if (!address.setAddress(host)) {
+    return false;
+  }
+  bool mapped = false;
+  const quint32 ipv4 = address.toIPv4Address(&mapped);
+  if (mapped && address.protocol() == QAbstractSocket::IPv6Protocol) {
+    address = QHostAddress(ipv4);
+  }
+  // 100.64.0.0/10 is carrier-grade NAT and VPN overlay space (RFC 6598).
+  const bool sharedAddressSpace =
+      address.protocol() == QAbstractSocket::IPv4Protocol &&
+      address.isInSubnet(QHostAddress(QStringLiteral("100.64.0.0")), 10);
+  return address.isLoopback() || address.isPrivateUse() || address.isLinkLocal() ||
+         address.isSiteLocal() || address.isUniqueLocalUnicast() ||
+         address == QHostAddress(QHostAddress::AnyIPv4) ||
+         address == QHostAddress(QHostAddress::AnyIPv6) || sharedAddressSpace;
+}
+
+bool IcsService::isPrivateNetworkFeed(const QString& input) {
+  QUrl normalized;
+  return normalizeSubscriptionUrl(input, &normalized) &&
+         isPrivateNetworkHost(normalized);
 }
 
 bool IcsService::payloadFromRequest(const QJsonObject& request, QByteArray* payload,
@@ -606,6 +641,10 @@ QString IcsService::redirectErrorCode(const QUrl& origin, const QUrl& target,
   if (sameOrigin(origin, target)) {
     return {};
   }
+  if (isPrivateNetworkHost(target)) {
+    // A public feed must not be able to point the daemon at the user's LAN.
+    return QStringLiteral("private_network_redirect_blocked");
+  }
   return includeCredentials ? QStringLiteral("credential_redirect_blocked")
                             : QStringLiteral("cross_origin_redirect_blocked");
 }
@@ -729,8 +768,12 @@ void IcsService::beginFetch(const std::shared_ptr<FetchContext>& context,
           const QString redirectError =
               redirectErrorCode(url, normalized, includeCredentials);
           if (!redirectError.isEmpty()) {
-            finishFetch(context, redirectError,
-                        QStringLiteral("A calendar feed redirected to another origin"));
+            finishFetch(
+                context, redirectError,
+                redirectError == QStringLiteral("private_network_redirect_blocked")
+                    ? QStringLiteral(
+                          "A calendar feed redirected to a private network address")
+                    : QStringLiteral("A calendar feed redirected to another origin"));
             return;
           }
           context->body.clear();
@@ -948,6 +991,7 @@ QJsonObject IcsService::subscriptionStatus(const IcsSubscription& subscription) 
       {QStringLiteral("stale"), stale},
       {QStringLiteral("errorCode"), subscription.lastErrorCode},
       {QStringLiteral("errorMessage"), subscription.lastErrorMessage},
+      {QStringLiteral("privateNetwork"), isPrivateNetworkHost(QUrl(subscription.url))},
   };
 }
 

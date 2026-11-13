@@ -642,6 +642,69 @@ class IpcTest final : public QObject {
     calendarClient.disconnectFromServer();
     server.close();
   }
+
+  void slowSubscriberIsDisconnected() {
+    RequestRouter router;
+    router.registerHandler(QStringLiteral("system.subscribe"), subscribeHandler);
+    IpcServer server(&router);
+    QSignalSpy violations(&server, &IpcServer::protocolViolation);
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const QString path = directory.filePath(QStringLiteral("daemon.sock"));
+    QString error;
+    QVERIFY2(server.listen(path, &error), qPrintable(error));
+
+    // The stalled subscriber is a raw socket: it subscribes once and then
+    // never reads, so everything the daemon sends it piles up server-side.
+    const QByteArray encodedPath = QFile::encodeName(path);
+    const int stalled = ::socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
+    QVERIFY(stalled >= 0);
+    sockaddr_un address{};
+    QVERIFY(encodedPath.size() < static_cast<qsizetype>(sizeof(address.sun_path)));
+    address.sun_family = AF_UNIX;
+    std::copy(encodedPath.cbegin(), encodedPath.cend(), address.sun_path);
+    QVERIFY(::connect(stalled, reinterpret_cast<sockaddr*>(&address),
+                      sizeof(address)) == 0);
+    const QByteArray subscribe = frame(
+        QJsonObject{{QStringLiteral("id"), 1},
+                    {QStringLiteral("protocolMajor"), kIpcProtocolMajor},
+                    {QStringLiteral("method"), QStringLiteral("system.subscribe")},
+                    {QStringLiteral("params"), QJsonObject{}}});
+    QCOMPARE(
+        ::write(stalled, subscribe.constData(), static_cast<size_t>(subscribe.size())),
+        static_cast<ssize_t>(subscribe.size()));
+    QTRY_COMPARE(server.clientCount(), 1);
+
+    IpcClient healthy;
+    healthy.setAutoReconnect(false);
+    QSignalSpy notifications(&healthy, &IpcClient::notificationReceived);
+    QSignalSpy responses(&healthy, &IpcClient::responseReceived);
+    healthy.connectTo(path);
+    QTRY_VERIFY(healthy.isConnected());
+    QTRY_COMPARE(server.clientCount(), 2);
+    QVERIFY(!healthy.request(QStringLiteral("system.subscribe"), {}).isEmpty());
+    QTRY_COMPARE(responses.count(), 1);
+    // Let the stalled socket's subscription be routed too.
+    QTest::qWait(50);
+
+    const QString padding(256 * 1024, QLatin1Char('x'));
+    constexpr int kBroadcasts = 48;  // 12 MiB, well past the 8 MiB cap.
+    for (int index = 0; index < kBroadcasts; ++index) {
+      server.broadcast(
+          QStringLiteral("events.changed"),
+          {{QStringLiteral("revision"), index}, {QStringLiteral("padding"), padding}});
+      // A reading client drains each notification and is never at risk.
+      QTRY_COMPARE(notifications.count(), index + 1);
+    }
+
+    QTRY_COMPARE(server.clientCount(), 1);
+    QCOMPARE(violations.count(), 1);
+    QVERIFY(healthy.isConnected());
+
+    ::close(stalled);
+    healthy.disconnectFromServer();
+    server.close();
+  }
 };
 
 QTEST_MAIN(IpcTest)
