@@ -89,6 +89,8 @@ class AppController final : public QObject {
   Q_PROPERTY(bool bundledGoogleOAuthAvailable READ bundledGoogleOAuthAvailable CONSTANT)
   Q_PROPERTY(bool googleOAuthConfigured READ googleOAuthConfigured NOTIFY
                  googleOAuthConfiguredChanged)
+  // Where the last "Back up now" saved the database; empty until one succeeds.
+  Q_PROPERTY(QString lastBackupPath READ lastBackupPath NOTIFY lastBackupPathChanged)
 
  public:
   explicit AppController(QObject* parent = nullptr);
@@ -107,6 +109,7 @@ class AppController final : public QObject {
   [[nodiscard]] QString lastErrorAccountId() const;
   [[nodiscard]] QString googleSignInState() const;
   [[nodiscard]] QString googleSignInAccountId() const;
+  [[nodiscard]] QString lastBackupPath() const;
   [[nodiscard]] QVariantList accounts() const;
   [[nodiscard]] QVariantMap freeBusy() const;
   [[nodiscard]] QVariantMap eventAttachments() const;
@@ -256,6 +259,8 @@ class AppController final : public QObject {
   Q_INVOKABLE void installWidget();
   Q_INVOKABLE void restoreOmarchyClock();
   Q_INVOKABLE void previewDiagnostics();
+  // Asks the daemon for a database backup (system.backup).
+  Q_INVOKABLE void backupDatabase();
   Q_INVOKABLE void handleDeepLink(const QUrl& url);
   Q_INVOKABLE void handleIcsImportFile(const QUrl& file);
   // For a secondary time-zone gutter: each display-zone hour 0..24 of
@@ -281,6 +286,7 @@ class AppController final : public QObject {
   void statusTextChanged();
   void lastErrorChanged();
   void googleSignInChanged();
+  void lastBackupPathChanged();
   void accountsChanged();
   void accountSyncStatesChanged();
   void calendarsChanged();
@@ -460,6 +466,7 @@ class AppController final : public QObject {
   QString m_lastErrorAccountId;
   QString m_googleSignInState;
   QString m_googleSignInAccountId;
+  QString m_lastBackupPath;
   int m_activeRequests = 0;
   qint64 m_subscriptionRevision = -1;
   bool m_daemonStartAttempted = false;

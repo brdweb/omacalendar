@@ -3043,6 +3043,32 @@ Item {
             wait(0)
         }
 
+        function test_settings_back_up_now_reports_the_path() {
+            const settings = createTemporaryObject(settingsFactory, scene, {
+                "accounts": [], "calendars": [], "connected": true})
+            verify(settings !== null)
+            settings.open()
+            tryCompare(settings, "opened", true)
+            const button = findChild(scene.Window.window.contentItem, "backupNowButton")
+            const result = findChild(scene.Window.window.contentItem, "backupResultText")
+            verify(button !== null && result !== null)
+            compare(button.text, "Back up now")
+            verify(button.enabled)
+            verify(!result.visible, "no path is shown before a backup")
+            const spy = createTemporaryObject(signalSpyFactory, scene, {
+                "target": settings, "signalName": "backupRequested"})
+            button.clicked()
+            compare(spy.count, 1)
+            settings.lastBackupPath = "/home/me/.local/share/omacalendar/backups/"
+                    + "calendar-20261113T101502Z.sqlite3"
+            // Shown whenever the button is (the Preferences tab is current).
+            compare(result.visible, button.visible)
+            compare(result.text, "Saved to " + settings.lastBackupPath)
+            settings.connected = false
+            verify(!button.enabled, "backing up needs the service")
+            settings.close()
+        }
+
         function test_device_scale_is_valid() {
             verify(scene.Window.window !== null)
             verify(scene.Screen.devicePixelRatio >= 1.0)

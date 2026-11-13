@@ -42,6 +42,8 @@ Drawer {
     property int submissionAccountCount: 0
     // Set between confirming a calendar deletion and the model catching up.
     property string deletingCalendarId: ""
+    // Where the last "Back up now" saved the database.
+    property string lastBackupPath: ""
 
     // Dialogs the tab components open.
     readonly property var credentialDialogRef: credentialDialog
@@ -69,6 +71,7 @@ Drawer {
     signal calendarPreferenceChanged(string calendarId, string key, var value)
     signal preferenceChanged(string key, var value)
     signal diagnosticsRequested()
+    signal backupRequested()
     signal importIcsRequested()
     signal exportIcsRequested()
     signal upsertCalendarSetRequested(var calendarSet)

@@ -253,6 +253,33 @@ ScrollView {
             text: qsTr("Preview diagnostics")
             onClicked: tab.drawer.diagnosticsRequested()
         }
+        AppButton {
+            objectName: "backupNowButton"
+            Layout.fillWidth: true
+            text: qsTr("Back up now")
+            enabled: tab.drawer.connected
+            onClicked: tab.drawer.backupRequested()
+        }
+        Text {
+            objectName: "backupResultText"
+            Layout.fillWidth: true
+            visible: tab.drawer.lastBackupPath.length > 0
+            textFormat: Text.PlainText
+            wrapMode: Text.WrapAnywhere
+            color: Theme.mutedText
+            font.pixelSize: Theme.smallFontSize
+            text: qsTr("Saved to %1").arg(tab.drawer.lastBackupPath)
+        }
+        Text {
+            Layout.fillWidth: true
+            textFormat: Text.PlainText
+            wrapMode: Text.WordWrap
+            color: Theme.mutedText
+            font.pixelSize: Theme.smallFontSize
+            text: qsTr("Backups do not include account passwords or sign-in tokens; "
+                       + "after restoring on another computer, sign in to each "
+                       + "account again.")
+        }
         Item { Layout.preferredHeight: 12 }
     }
 }

@@ -158,6 +158,124 @@ class DatabaseTest final : public QObject {
     QCOMPARE(db.setting("missing", 123, &error).toInt(), 123);
   }
 
+  void backupProducesOpenableConsistentCopy() {
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    QString error;
+    Database db;
+    QVERIFY2(db.open(directory.filePath(QStringLiteral("store.sqlite")), &error),
+             qPrintable(error));
+    const Account account =
+        makeAccount(QStringLiteral("acc-backup"), QStringLiteral("Backup"));
+    QVERIFY2(db.upsertAccount(account, &error), qPrintable(error));
+    const Calendar calendar = makeCalendar(QStringLiteral("cal-backup"), account.id);
+    QVERIFY2(db.upsertCalendar(calendar, &error), qPrintable(error));
+    for (int index = 0; index < 3; ++index) {
+      QVERIFY2(
+          db.applyRemoteEvent(
+              makeRemoteEvent(calendar.id, QStringLiteral("bk-%1").arg(index), index),
+              &error),
+          qPrintable(error));
+    }
+    QVERIFY2(db.setSetting(QStringLiteral("timezone"), QStringLiteral("Europe/Oslo"),
+                           &error),
+             qPrintable(error));
+
+    const QString backupDirectory = directory.filePath(QStringLiteral("backups"));
+    const QDateTime first(QDate(2026, 11, 13), QTime(10, 15, 2), QTimeZone::utc());
+    DatabaseBackup backup;
+    QVERIFY2(db.createBackup(backupDirectory, 3, first, &backup, &error),
+             qPrintable(error));
+    QCOMPARE(backup.path,
+             QDir(backupDirectory)
+                 .filePath(QStringLiteral("calendar-20261113T101502Z.sqlite3")));
+    QCOMPARE(backup.createdAt, first);
+    QVERIFY(backup.sizeBytes > 0);
+    QCOMPARE(backup.sizeBytes, QFileInfo(backup.path).size());
+    QCOMPARE(QFile::permissions(backup.path),
+             QFileDevice::ReadOwner | QFileDevice::WriteOwner | QFileDevice::ReadUser |
+                 QFileDevice::WriteUser);
+    QCOMPARE(QFile::permissions(backupDirectory),
+             QFileDevice::ReadOwner | QFileDevice::WriteOwner | QFileDevice::ExeOwner |
+                 QFileDevice::ReadUser | QFileDevice::WriteUser | QFileDevice::ExeUser);
+    // Nothing but the finished backup is left behind.
+    QCOMPARE(QDir(backupDirectory).entryList(QDir::Files | QDir::Hidden | QDir::System),
+             QStringList{QStringLiteral("calendar-20261113T101502Z.sqlite3")});
+
+    // Changes after the snapshot are not in it.
+    QVERIFY2(db.applyRemoteEvent(
+                 makeRemoteEvent(calendar.id, QStringLiteral("after"), 4), &error),
+             qPrintable(error));
+
+    {
+      Database copy;
+      QVERIFY2(copy.open(backup.path, &error), qPrintable(error));
+      QCOMPARE(copy.schemaVersion(), db.schemaVersion());
+      QCOMPARE(copy.accounts(&error).size(), db.accounts(&error).size());
+      QCOMPARE(copy.account(account.id, &error).id, account.id);
+      QCOMPARE(copy.calendars(account.id, &error).size(), 1);
+      QCOMPARE(copy.setting(QStringLiteral("timezone"), {}, &error).toString(),
+               QStringLiteral("Europe/Oslo"));
+      QCOMPARE(copy.event(QStringLiteral("bk-2"), &error).id, QStringLiteral("bk-2"));
+      QVERIFY(copy.event(QStringLiteral("after"), &error).id.isEmpty());
+    }
+    {
+      const QString connection = QStringLiteral("backup-integrity");
+      {
+        QSqlDatabase raw =
+            QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), connection);
+        raw.setDatabaseName(backup.path);
+        QVERIFY(raw.open());
+        QSqlQuery query(raw);
+        QVERIFY(query.exec(QStringLiteral("PRAGMA integrity_check")) && query.next());
+        QCOMPARE(query.value(0).toString(), QStringLiteral("ok"));
+        QVERIFY(query.exec(QStringLiteral("SELECT COUNT(*) FROM events WHERE "
+                                          "calendar_id='cal-backup'")) &&
+                query.next());
+        QCOMPARE(query.value(0).toInt(), 3);
+        raw.close();
+      }
+      QSqlDatabase::removeDatabase(connection);
+    }
+
+    // Same second: a sequence suffix instead of an overwrite.
+    DatabaseBackup second;
+    QVERIFY2(db.createBackup(backupDirectory, 3, first, &second, &error),
+             qPrintable(error));
+    QCOMPARE(QFileInfo(second.path).fileName(),
+             QStringLiteral("calendar-20261113T101502Z-2.sqlite3"));
+
+    // Retention keeps the newest three, ordered by time then sequence.
+    for (int minute = 1; minute <= 3; ++minute) {
+      QVERIFY2(db.createBackup(backupDirectory, 3, first.addSecs(minute * 60), nullptr,
+                               &error),
+               qPrintable(error));
+    }
+    // Unrelated files in the directory are never touched.
+    QFile unrelated(QDir(backupDirectory).filePath(QStringLiteral("notes.txt")));
+    QVERIFY(unrelated.open(QIODevice::WriteOnly));
+    unrelated.close();
+    QVERIFY2(
+        db.createBackup(backupDirectory, 3, first.addSecs(4 * 60), nullptr, &error),
+        qPrintable(error));
+    QStringList remaining =
+        QDir(backupDirectory).entryList(QDir::Files | QDir::Hidden, QDir::Name);
+    QCOMPARE(remaining,
+             (QStringList{QStringLiteral("calendar-20261113T101702Z.sqlite3"),
+                          QStringLiteral("calendar-20261113T101802Z.sqlite3"),
+                          QStringLiteral("calendar-20261113T101902Z.sqlite3"),
+                          QStringLiteral("notes.txt")}));
+
+    // A backup made while the clock is behind the newest one is still kept.
+    DatabaseBackup older;
+    QVERIFY2(db.createBackup(backupDirectory, 3, first, &older, &error),
+             qPrintable(error));
+    QVERIFY(QFileInfo::exists(older.path));
+    remaining = QDir(backupDirectory).entryList(QDir::Files, QDir::Name);
+    QCOMPARE(remaining.size(), 4);
+    QVERIFY(!remaining.contains(QStringLiteral("calendar-20261113T101702Z.sqlite3")));
+  }
+
   void contactSuggestionsComeFromCachedGuests() {
     QTemporaryDir directory;
     QVERIFY(directory.isValid());

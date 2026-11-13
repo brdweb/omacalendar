@@ -30,6 +30,13 @@ struct IcsSubscription {
   QString lastErrorMessage;
 };
 
+// A point-in-time copy of the database written by Database::createBackup.
+struct DatabaseBackup {
+  QString path;
+  qint64 sizeBytes = 0;
+  QDateTime createdAt;
+};
+
 // A completed provider fetch window. Coverage is daemon-private state used to
 // distinguish "there are no events here" from "this range has not been
 // hydrated yet". Rows are normalized to UTC and merged when they overlap.
@@ -94,6 +101,12 @@ class Database final {
   [[nodiscard]] bool isOpen() const;
   [[nodiscard]] int schemaVersion() const;
   [[nodiscard]] qint64 changeRevision() const;
+  // Writes a consistent copy of the open database with VACUUM INTO to
+  // `directory`/calendar-<UTC timestamp>.sqlite3. The directory is created
+  // owner-only (0700) and the copy is owner-only (0600) from its first byte.
+  // Afterwards only the newest `keep` backups in the directory are kept.
+  bool createBackup(const QString& directory, int keep, const QDateTime& now,
+                    DatabaseBackup* backup, QString* errorMessage = nullptr);
 
   bool upsertAccount(Account account, QString* errorMessage = nullptr);
   [[nodiscard]] QList<Account> accounts(QString* errorMessage = nullptr) const;

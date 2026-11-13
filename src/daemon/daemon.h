@@ -39,6 +39,7 @@ class Daemon final : public QObject {
                                           ipc::Error* error) const;
   [[nodiscard]] QJsonValue onSystemSubscribe(const QJsonObject& params,
                                              ipc::Error* error) const;
+  [[nodiscard]] QJsonValue onSystemBackup(const QJsonObject& params, ipc::Error* error);
 
   [[nodiscard]] QJsonValue onAccountsList(const QJsonObject& params, ipc::Error* error);
   [[nodiscard]] QJsonValue onAccountsReauthorize(const QJsonObject& params,

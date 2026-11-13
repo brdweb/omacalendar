@@ -283,6 +283,14 @@ class FakeDaemon final : public QObject {
       } else if (method == QStringLiteral("sync.status")) {
         response.insert(QStringLiteral("result"),
                         m_syncStatuses.value(params.value("accountId").toString()));
+      } else if (method == QStringLiteral("system.backup")) {
+        response.insert(
+            QStringLiteral("result"),
+            QJsonObject{
+                {QStringLiteral("path"),
+                 QStringLiteral("/data/backups/calendar-20261113T101502Z.sqlite3")},
+                {QStringLiteral("sizeBytes"), 4096},
+                {QStringLiteral("createdAt"), QStringLiteral("2026-11-13T10:15:02Z")}});
       } else if (method == QStringLiteral("contacts.suggest")) {
         response.insert(QStringLiteral("result"),
                         QJsonObject{{QStringLiteral("prefix"), params.value("prefix")},
@@ -416,6 +424,7 @@ class AppControllerTest final : public QObject {
   void defaultReminderPreferencesLoad();
   void preferencesFallBackWithoutGetMany();
   void contactSuggestionsAreRelayed();
+  void backupReportsThePath();
   void quickAddTextBecomesAnEditorDraft();
   void accountSyncStatesFollowTheDaemon();
   void undoAndRedoWalkTheHistory();
@@ -1525,6 +1534,21 @@ void AppControllerTest::contactSuggestionsAreRelayed() {
   controller.suggestContacts(QStringLiteral("   "));
   QTest::qWait(200);
   QCOMPARE(ready.count(), 1);
+}
+
+void AppControllerTest::backupReportsThePath() {
+  FakeDaemon daemon(0);
+  QVERIFY(daemon.listen());
+  AppController controller;
+  QTRY_VERIFY(controller.connected());
+  QVERIFY(controller.lastBackupPath().isEmpty());
+  QSignalSpy changed(&controller, &AppController::lastBackupPathChanged);
+  controller.backupDatabase();
+  QTRY_COMPARE(changed.count(), 1);
+  QVERIFY(daemon.methods().contains(QStringLiteral("system.backup")));
+  QCOMPARE(controller.lastBackupPath(),
+           QStringLiteral("/data/backups/calendar-20261113T101502Z.sqlite3"));
+  QVERIFY(controller.lastError().isEmpty());
 }
 
 void AppControllerTest::quickAddTextBecomesAnEditorDraft() {

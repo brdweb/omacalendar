@@ -1,10 +1,15 @@
+#include <fcntl.h>
+#include <unistd.h>
+
 #include <QCommandLineOption>
 #include <QCommandLineParser>
 #include <QCoreApplication>
 #include <QDate>
 #include <QDateTime>
+#include <QDir>
 #include <QEventLoop>
 #include <QFile>
+#include <QFileInfo>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -15,6 +20,7 @@
 #include <QTimer>
 #include <QUuid>
 #include <algorithm>
+#include <cerrno>
 #include <optional>
 
 #include "core/paths.h"
@@ -27,12 +33,14 @@ namespace {
 
 constexpr int kDefaultTimeoutSeconds = 5;
 constexpr int kSyncTimeoutSeconds = 120;
+constexpr int kBackupTimeoutSeconds = 120;
 constexpr int kAgendaLimit = 500;
 
 const char* const kUsage =
     "Usage:\n"
     "  omacalendarctl [options] <method> [json_params | -]\n"
     "  omacalendarctl [options] today | agenda [--days N] | add TEXT | sync | methods\n"
+    "  omacalendarctl [options] backup [--copy-to PATH]\n"
     "\n"
     "Raw mode sends one IPC method (see docs/IPC.md) and prints the response\n"
     "as JSON on stdout. Pass '-' (or --params-stdin) to read the JSON params\n"
@@ -46,6 +54,9 @@ const char* const kUsage =
     "                   \"Lunch with Sam fri 12:30 @ Cafe\".\n"
     "  sync             Sync every account and wait for the result.\n"
     "  methods          List the IPC methods the service supports.\n"
+    "  backup           Save a copy of the calendar database in the data\n"
+    "                   directory's backups folder (the newest 5 are kept);\n"
+    "                   --copy-to PATH also copies it to PATH.\n"
     "\n"
     "Examples:\n"
     "  omacalendarctl system.info\n"
@@ -439,6 +450,82 @@ int runSync(Session& session, const bool json, const int timeoutMs, QTextStream&
   return 0;
 }
 
+// Copies `source` to `target` (or into it, when it is a directory) as a new
+// owner-only file. An existing file is never replaced.
+bool copyBackup(const QString& source, const QString& target, QString* copiedTo,
+                QTextStream& err) {
+  QString destination = target;
+  if (QFileInfo(target).isDir()) {
+    destination = QDir(target).filePath(QFileInfo(source).fileName());
+  }
+  QFile input(source);
+  if (!input.open(QIODevice::ReadOnly)) {
+    err << "Could not read the backup " << source << ": " << input.errorString()
+        << Qt::endl;
+    return false;
+  }
+  const int fd = ::open(QFile::encodeName(destination).constData(),
+                        O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0600);
+  if (fd < 0) {
+    err << "Could not create " << destination << ": " << qt_error_string(errno)
+        << Qt::endl;
+    return false;
+  }
+  QFile output;
+  if (!output.open(fd, QIODevice::WriteOnly, QFileDevice::AutoCloseHandle)) {
+    ::close(fd);
+    err << "Could not write " << destination << Qt::endl;
+    return false;
+  }
+  bool ok = true;
+  while (ok && !input.atEnd()) {
+    const QByteArray chunk = input.read(1 << 20);
+    ok = !chunk.isEmpty() && output.write(chunk) == chunk.size();
+  }
+  ok = ok && output.flush() && ::fsync(fd) == 0;
+  output.close();
+  if (!ok) {
+    QFile::remove(destination);
+    err << "Could not write " << destination << Qt::endl;
+    return false;
+  }
+  *copiedTo = QFileInfo(destination).absoluteFilePath();
+  return true;
+}
+
+int runBackup(Session& session, const QString& copyTo, const bool json,
+              const int timeoutMs, QTextStream& out, QTextStream& err) {
+  QJsonObject error;
+  const auto result =
+      session.call(QStringLiteral("system.backup"), {}, timeoutMs, nullptr, &error);
+  if (!result) {
+    if (!error.isEmpty()) {
+      printError(error, err);
+    }
+    return 1;
+  }
+  QJsonObject backup = result->toObject();
+  const QString path = backup.value(QStringLiteral("path")).toString();
+  QString copiedTo;
+  if (!copyTo.isEmpty()) {
+    if (!copyBackup(path, copyTo, &copiedTo, err)) {
+      return 1;
+    }
+    backup.insert(QStringLiteral("copiedTo"), copiedTo);
+  }
+  if (json) {
+    printJson(backup, out);
+    return 0;
+  }
+  out << "Backup saved to " << path << " ("
+      << backup.value(QStringLiteral("sizeBytes")).toInteger() << " bytes)."
+      << Qt::endl;
+  if (!copiedTo.isEmpty()) {
+    out << "Copied to " << copiedTo << "." << Qt::endl;
+  }
+  return 0;
+}
+
 int runMethods(Session& session, const bool json, const int timeoutMs, QTextStream& out,
                QTextStream& err) {
   QJsonObject error;
@@ -480,7 +567,8 @@ int main(int argc, char* argv[]) {
                                          QStringLiteral("Show the version."));
   const QCommandLineOption timeoutOption(
       QStringLiteral("timeout"),
-      QStringLiteral("Seconds to wait for a response (default 5; 120 for sync)."),
+      QStringLiteral(
+          "Seconds to wait for a response (default 5; 120 for sync and backup)."),
       QStringLiteral("seconds"));
   const QCommandLineOption stdinOption(
       QStringLiteral("params-stdin"),
@@ -498,8 +586,12 @@ int main(int argc, char* argv[]) {
       QStringLiteral("calendar"),
       QStringLiteral("Calendar ID for add (default: the default calendar)."),
       QStringLiteral("id"));
+  const QCommandLineOption copyToOption(
+      QStringLiteral("copy-to"),
+      QStringLiteral("For backup: also copy the backup to this file or directory."),
+      QStringLiteral("path"));
   parser.addOptions({helpOption, versionOption, timeoutOption, stdinOption, watchOption,
-                     jsonOption, daysOption, calendarOption});
+                     jsonOption, daysOption, calendarOption, copyToOption});
   // JSON params may start with '-' only as the lone '-'; anything else that
   // looks like an option is rejected rather than silently sent.
   if (!parser.parse(app.arguments())) {
@@ -519,8 +611,12 @@ int main(int argc, char* argv[]) {
 
   const QString command = positional.constFirst();
   const bool json = parser.isSet(jsonOption);
-  int timeoutSeconds =
-      command == QStringLiteral("sync") ? kSyncTimeoutSeconds : kDefaultTimeoutSeconds;
+  int timeoutSeconds = kDefaultTimeoutSeconds;
+  if (command == QStringLiteral("sync")) {
+    timeoutSeconds = kSyncTimeoutSeconds;
+  } else if (command == QStringLiteral("backup")) {
+    timeoutSeconds = kBackupTimeoutSeconds;
+  }
   if (parser.isSet(timeoutOption)) {
     bool ok = false;
     timeoutSeconds = parser.value(timeoutOption).toInt(&ok);
@@ -567,7 +663,8 @@ int main(int argc, char* argv[]) {
   } else if (command != QStringLiteral("today") &&
              command != QStringLiteral("agenda") && command != QStringLiteral("add") &&
              command != QStringLiteral("sync") &&
-             command != QStringLiteral("methods")) {
+             command != QStringLiteral("methods") &&
+             command != QStringLiteral("backup")) {
     err << "Unknown command: " << command << Qt::endl << Qt::endl << kUsage;
     return 1;
   }
@@ -587,6 +684,13 @@ int main(int argc, char* argv[]) {
     return 1;
   }
 
+  const QString copyTo = parser.value(copyToOption);
+  if (parser.isSet(copyToOption) &&
+      (command != QStringLiteral("backup") || copyTo.isEmpty())) {
+    err << "--copy-to takes a path and works only with backup" << Qt::endl;
+    return 1;
+  }
+
   Session session(out, err);
   session.setWatch(parser.isSet(watchOption));
   if (!session.connect(3000)) {
@@ -601,6 +705,8 @@ int main(int argc, char* argv[]) {
                       out, err);
   } else if (command == QStringLiteral("sync")) {
     exitCode = runSync(session, json, timeoutMs, out, err);
+  } else if (command == QStringLiteral("backup")) {
+    exitCode = runBackup(session, copyTo, json, timeoutMs, out, err);
   } else if (command == QStringLiteral("methods")) {
     exitCode = runMethods(session, json, timeoutMs, out, err);
   } else {

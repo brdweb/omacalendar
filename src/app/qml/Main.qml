@@ -821,6 +821,7 @@ ApplicationWindow {
         googleSignInState: String(window.appValue("googleSignInState", ""))
         onCancelGoogleSignInRequested: window.callApp("cancelGoogleSignIn", [])
         onDismissErrorRequested: window.callApp("dismissError", [])
+        lastBackupPath: window.appValue("lastBackupPath", "")
         preferences: window.preferences
         systemTimeZoneId: String(window.appValue("systemTimeZoneId", "UTC"))
         availableTimeZoneIds: window.appValue("availableTimeZoneIds", ["UTC"])
@@ -873,6 +874,7 @@ ApplicationWindow {
         onPreferenceChanged: (key, value) =>
                                      window.callApp("setPreference", [key, value])
         onDiagnosticsRequested: window.callApp("previewDiagnostics", [])
+        onBackupRequested: window.callApp("backupDatabase", [])
         onImportIcsRequested: importIcsFileDialog.open()
         onExportIcsRequested: icsExportDialog.openForSelection()
         onUpsertCalendarSetRequested: value => App.upsertCalendarSet(value)

@@ -118,6 +118,7 @@ qt_standard_project_setup(REQUIRES 6.9)
 
 add_library(omacalendar_core STATIC
   src/core/database.cpp
+  src/core/database_backup.cpp
   src/core/database_ics_settings.cpp
   src/core/database_migrations.cpp
   src/core/database_outbox.cpp

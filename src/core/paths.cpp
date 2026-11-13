@@ -54,6 +54,10 @@ QString databaseFile() {
   return QDir(dataDirectory()).filePath(QStringLiteral("calendar.sqlite3"));
 }
 
+QString backupDirectory() {
+  return QDir(dataDirectory()).filePath(QStringLiteral("backups"));
+}
+
 QString socketFile() {
   return QDir(runtimeDirectory()).filePath(QStringLiteral("daemon.sock"));
 }

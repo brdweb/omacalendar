@@ -16,9 +16,53 @@ Default locations follow the XDG base-directory convention:
 | Runtime socket | `$XDG_RUNTIME_DIR/omacalendar/daemon.sock` |
 | Provider credentials | Desktop Secret Service, not the database |
 
-## Create a consistent backup
+## Back up while running
 
-Close the desktop and widget, then stop both the socket and daemon so another
+The quickest backup needs no shutdown. Run
+
+```bash
+omacalendarctl backup
+omacalendarctl backup --copy-to /media/usb/   # also copy it somewhere else
+```
+
+or open **Settings → Preferences** in the app and choose **Back up now** under
+Support; the path of the new backup is shown below the button. Both ask
+the running service to write a consistent snapshot of the database (SQLite
+`VACUUM INTO`) to
+`$XDG_DATA_HOME/omacalendar/backups/calendar-<UTC time>.sqlite3`
+(`~/.local/share/omacalendar/backups/` by default). The `backups` directory is
+mode `0700` and each backup is mode `0600`. The newest 5 backups are kept; older
+ones are deleted when a new one is made. Copy a backup somewhere else (or use
+`--copy-to`) if it should survive the loss of this disk.
+
+A backup contains calendars, cached events, tasks, calendar sets, settings and
+pending local changes. It does **not** contain passwords, OAuth tokens or the
+Google client secret: those live only in the desktop keyring (Secret Service)
+and are never copied into the database or the backup. They do not move to a new
+machine with the backup. After restoring there, every Google and CalDAV account
+must sign in again, and ICS subscriptions that use a username and password need
+the password entered again. Device-only calendars need nothing.
+
+To restore one of these backups:
+
+```bash
+systemctl --user stop omacalendard.socket omacalendard.service
+data_root="${XDG_DATA_HOME:-$HOME/.local/share}/omacalendar"
+mkdir -m 700 "$data_root/replaced-$(date +%Y%m%d-%H%M%S)"
+mv "$data_root"/calendar.sqlite3* "$data_root"/replaced-*/
+install -m 600 "$data_root/backups/calendar-<UTC time>.sqlite3" \
+  "$data_root/calendar.sqlite3"
+systemctl --user start omacalendard.socket
+omacalendarctl system.health
+```
+
+The same rule as below applies: never restore a backup made by a newer version
+into an older one.
+
+## Create a consistent offline backup
+
+To copy the whole data and configuration directories instead, close the desktop
+and widget, then stop both the socket and daemon so another
 client cannot reactivate SQLite while its database/WAL files are being copied:
 
 ```bash
@@ -40,7 +84,7 @@ systemctl --user start omacalendard.socket
 ```
 
 Protect the backup like calendar data. Secret Service credentials are not
-included; reconnecting accounts may be required on a new installation.
+included; on a new installation every account must sign in again.
 
 ## Restore
 
