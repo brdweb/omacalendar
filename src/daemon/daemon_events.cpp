@@ -254,6 +254,345 @@ namespace omacalendar {
 
 using namespace detail;
 
+namespace {
+
+// Records a non-retryable IPC error; returns false so callers can bail out.
+bool setError(ipc::Error* error, const QString& code, const QString& message) {
+  if (error != nullptr) {
+    *error = {code, message, false};
+  }
+  return false;
+}
+
+// Reads params.recurrenceScope, accepting the long aliases.
+bool parseRecurrenceScope(const QJsonObject& params, QString* recurrenceScope,
+                          ipc::Error* error) {
+  *recurrenceScope = normalizedRecurrenceScope(
+      params.value(QStringLiteral("recurrenceScope")).toString());
+  if (!QStringList{QStringLiteral("series"), QStringLiteral("occurrence"),
+                   QStringLiteral("future")}
+           .contains(*recurrenceScope)) {
+    return setError(error, QStringLiteral("invalid_recurrence_scope"),
+                    QStringLiteral("Unknown recurrence scope"));
+  }
+  return true;
+}
+
+// A change that affects guests needs an explicit notification choice; anything
+// else defaults to not notifying them.
+bool resolveGuestPolicy(const QJsonObject& params, bool guestsAffected,
+                        QString* guestPolicy, ipc::Error* error) {
+  *guestPolicy = params.value(QStringLiteral("guestNotificationPolicy")).toString();
+  if (guestsAffected && guestPolicy->isEmpty()) {
+    return setError(error, QStringLiteral("guest_notification_policy_required"),
+                    QStringLiteral("Choose whether guests should be notified"));
+  }
+  if (guestPolicy->isEmpty()) {
+    *guestPolicy = QStringLiteral("none");
+  }
+  return true;
+}
+
+// A recurrence identity is part of the event reference, never an editable
+// draft field.  In particular, an untrusted draft must not be able to turn a
+// non-recurring event into an occurrence mutation.  Persisted detached
+// exceptions retain their own identity, while generated master occurrences
+// require it on eventRef.
+bool bindUpdateRecurrenceIdentity(const QJsonObject& params,
+                                  const QString& recurrenceScope,
+                                  const Event& currentEvent, Event* event,
+                                  ipc::Error* error) {
+  const QString referencedRecurrenceId = recurrenceReference(params).trimmed();
+  const bool storedDetachedException = !currentEvent.recurrenceId.isEmpty();
+  const bool storedRecurringMaster =
+      !currentEvent.recurrenceRule.isEmpty() && !storedDetachedException;
+  if (recurrenceScope == QStringLiteral("series")) {
+    event->recurrenceId =
+        storedDetachedException ? currentEvent.recurrenceId : QString();
+    return true;
+  }
+  if (!storedDetachedException && !storedRecurringMaster) {
+    return setError(error, QStringLiteral("recurrence_scope_requires_recurring_event"),
+                    QStringLiteral("This recurrence scope requires a recurring event"));
+  }
+  if (storedDetachedException) {
+    if (!referencedRecurrenceId.isEmpty() &&
+        !occurrenceReferenceMatches(referencedRecurrenceId, currentEvent)) {
+      return setError(
+          error, QStringLiteral("occurrence_identity_mismatch"),
+          QStringLiteral("eventRef does not match this detached occurrence"));
+    }
+    event->recurrenceId = currentEvent.recurrenceId;
+    return true;
+  }
+  if (referencedRecurrenceId.isEmpty()) {
+    return setError(error, QStringLiteral("occurrence_identity_required"),
+                    QStringLiteral("This recurrence scope requires an occurrence ID"));
+  }
+  event->recurrenceId = referencedRecurrenceId;
+  return true;
+}
+
+// The stored rows an events.update applies against.
+struct UpdateTarget final {
+  // The row whose daemon-owned fields the update keeps.
+  Event current;
+  // The row whose guests and local revision the client edited.
+  Event providerSource;
+  // The update creates the first detached exception of a generated occurrence.
+  bool newDetachedException = false;
+};
+
+// Points an update at the row it really changes: a series-scope edit made from
+// an occurrence is rebased onto the series master, and the first edit of a
+// generated occurrence becomes a new detached exception.
+bool retargetUpdate(const Database& database, const QString& recurrenceScope,
+                    Event* event, UpdateTarget* target, ipc::Error* error) {
+  const Event& currentEvent = target->current;
+  const bool generatedOccurrence = !currentEvent.recurrenceRule.isEmpty() &&
+                                   currentEvent.recurrenceId.isEmpty() &&
+                                   !event->recurrenceId.isEmpty();
+  if ((generatedOccurrence || !currentEvent.recurrenceId.isEmpty()) &&
+      recurrenceScope == QStringLiteral("series")) {
+    const Event master =
+        currentEvent.recurrenceId.isEmpty()
+            ? currentEvent
+            : database.eventByUid(currentEvent.calendarId, currentEvent.uid);
+    QString rebaseError;
+    if (master.id.isEmpty() ||
+        !rebaseOccurrenceDraftOntoMaster(event, master, &rebaseError)) {
+      return setError(error, QStringLiteral("series_rebase_unsupported"),
+                      rebaseError.isEmpty()
+                          ? QStringLiteral("The recurring master could not be loaded")
+                          : rebaseError);
+    }
+    target->current = master;
+    target->providerSource = master;
+    return true;
+  }
+  if (generatedOccurrence) {
+    const QString recurrenceId = event->recurrenceId;
+    event->id = newUuid();
+    event->calendarId = currentEvent.calendarId;
+    event->remoteId = resourceRemoteId(currentEvent.remoteId);
+    if (!event->remoteId.isEmpty()) {
+      event->remoteId += QLatin1Char('#') + recurrenceId;
+    }
+    event->uid = currentEvent.uid;
+    event->etag = currentEvent.etag;
+    event->recurrenceId = recurrenceId;
+    event->recurrenceRule.clear();
+    event->rawPayload = currentEvent.rawPayload;
+    event->rawFormat = currentEvent.rawFormat;
+    event->createdAt = {};
+    event->localRevision = 0;
+    target->providerSource = currentEvent;
+    target->newDetachedException = true;
+    return true;
+  }
+  if (recurrenceScope != QStringLiteral("series") && event->recurrenceId.isEmpty()) {
+    return setError(error, QStringLiteral("occurrence_identity_required"),
+                    QStringLiteral("This recurrence scope requires an occurrence ID"));
+  }
+  return true;
+}
+
+// Provider identity and retained lossless payload are daemon-owned. Clients
+// can edit canonical fields but cannot redirect an update to a different
+// remote object or erase metadata required for a safe round trip.
+bool keepDaemonOwnedFields(const UpdateTarget& target, Event* event,
+                           ipc::Error* error) {
+  const Event& currentEvent = target.current;
+  if (event->calendarId.trimmed().isEmpty()) {
+    event->calendarId = currentEvent.calendarId;
+  } else if (event->calendarId != currentEvent.calendarId) {
+    return setError(
+        error, QStringLiteral("calendar_move_not_supported"),
+        QStringLiteral(
+            "Moving an existing event between calendars is not available yet"));
+  }
+  if (!target.newDetachedException) {
+    event->remoteId = currentEvent.remoteId;
+    event->uid = currentEvent.uid;
+    event->etag = currentEvent.etag;
+    event->rawPayload = currentEvent.rawPayload;
+    event->rawFormat = currentEvent.rawFormat;
+    event->createdAt = currentEvent.createdAt;
+  }
+  return true;
+}
+
+bool calendarAcceptsUpdate(const Calendar& targetCalendar,
+                           const QString& recurrenceScope, ipc::Error* error) {
+  if (targetCalendar.id.isEmpty()) {
+    return setError(error, QStringLiteral("not_found"),
+                    QStringLiteral("Calendar not found"));
+  }
+  if (recurrenceScope == QStringLiteral("future") &&
+      !targetCalendar.capabilities.value(QStringLiteral("thisAndFuture")).toBool()) {
+    return setError(error, QStringLiteral("recurrence_scope_unsupported"),
+                    QStringLiteral("This calendar cannot safely apply this-and-future "
+                                   "changes"));
+  }
+  if (targetCalendar.readOnly) {
+    return setError(error, QStringLiteral("calendar_read_only"),
+                    QStringLiteral("This calendar is read-only"));
+  }
+  return true;
+}
+
+// The client's expected revision, defaulting to the stored one. A new detached
+// exception is saved as a fresh row (revision 0), but only while the series is
+// still at the revision the client opened.
+bool updateExpectedRevision(const QJsonObject& params, const UpdateTarget& target,
+                            qint64* expectedLocalRevision, ipc::Error* error) {
+  const qint64 requestedLocalRevision =
+      params.value(QStringLiteral("expectedLocalRevision"))
+          .toInteger(target.current.localRevision);
+  if (target.newDetachedException &&
+      requestedLocalRevision != target.providerSource.localRevision) {
+    return setError(error, QStringLiteral("revision_mismatch"),
+                    QStringLiteral("The recurring series changed since it was opened"));
+  }
+  *expectedLocalRevision = target.newDetachedException ? 0 : requestedLocalRevision;
+  return true;
+}
+
+// Resolves the stored row a move takes: the series master for a series move
+// from a detached occurrence, or for an occurrence move the existing exception
+// or a detached copy of the generated occurrence. `revisionSource` is the row
+// whose local revision the client must have seen.
+bool resolveMoveSource(const Database& database, const QString& recurrenceScope,
+                       const QString& requestedRecurrenceId, Event* source,
+                       Event* revisionSource, QString* dbError, ipc::Error* error) {
+  if (source->id.isEmpty()) {
+    return true;
+  }
+  if (recurrenceScope == QStringLiteral("series") && !source->recurrenceId.isEmpty()) {
+    const Event master =
+        database.eventByUid(source->calendarId, source->uid, {}, dbError);
+    if (master.id.isEmpty()) {
+      return setError(error, QStringLiteral("series_master_not_found"),
+                      QStringLiteral("The recurring master could not be loaded"));
+    }
+    *source = master;
+    *revisionSource = master;
+    return true;
+  }
+  if (recurrenceScope != QStringLiteral("occurrence")) {
+    return true;
+  }
+  if (!source->recurrenceId.isEmpty()) {
+    if (!requestedRecurrenceId.isEmpty() &&
+        !occurrenceReferenceMatches(requestedRecurrenceId, *source)) {
+      return setError(
+          error, QStringLiteral("occurrence_identity_mismatch"),
+          QStringLiteral("The event and occurrence reference do not match"));
+    }
+    return true;
+  }
+  if (source->recurrenceRule.isEmpty() || requestedRecurrenceId.isEmpty()) {
+    return setError(error, QStringLiteral("occurrence_identity_required"),
+                    QStringLiteral("Moving one recurrence requires an occurrence ID"));
+  }
+  const Event existing = database.eventByUid(source->calendarId, source->uid,
+                                             requestedRecurrenceId, dbError);
+  if (!existing.id.isEmpty()) {
+    *source = existing;
+    *revisionSource = existing;
+    return true;
+  }
+  *revisionSource = *source;
+  *source = detachedOccurrence(*revisionSource, requestedRecurrenceId);
+  const QString occurrenceTimeError = validateEventTimes(*source);
+  if (!occurrenceTimeError.isEmpty()) {
+    return setError(error, QStringLiteral("invalid_occurrence"), occurrenceTimeError);
+  }
+  return true;
+}
+
+// Checks the client's revision, that both calendars are writable and that a
+// cross-account move was confirmed.
+bool checkMoveAllowed(const QJsonObject& params, const Event& revisionSource,
+                      const Calendar& sourceCalendar, const Calendar& targetCalendar,
+                      qint64* expectedLocalRevision, ipc::Error* error) {
+  *expectedLocalRevision = params.value(QStringLiteral("expectedLocalRevision"))
+                               .toInteger(revisionSource.localRevision);
+  if (*expectedLocalRevision >= 0 &&
+      *expectedLocalRevision != revisionSource.localRevision) {
+    return setError(error, QStringLiteral("stale_local_revision"),
+                    QStringLiteral("The event changed after this editor was opened; "
+                                   "reload it before moving"));
+  }
+  if (sourceCalendar.readOnly || targetCalendar.readOnly) {
+    return setError(error, QStringLiteral("calendar_read_only"),
+                    QStringLiteral("Source and target calendars must be writable"));
+  }
+  if (sourceCalendar.accountId != targetCalendar.accountId &&
+      !params.value(QStringLiteral("confirmedCrossProvider")).toBool()) {
+    return setError(error, QStringLiteral("confirmation_required"),
+                    QStringLiteral("Confirm the cross-account calendar move"));
+  }
+  return true;
+}
+
+// The moved row: the source with the client's draft applied, in the target
+// calendar. Moving one occurrence creates a standalone event there.
+Event moveDestination(const QJsonObject& params, const Event& source,
+                      const QString& targetCalendarId, const QString& recurrenceScope) {
+  Event destination = source;
+  if (params.value(QStringLiteral("draft")).isObject()) {
+    QJsonObject merged = toJson(source);
+    const QJsonObject draft =
+        normalizedEventDraft(params.value(QStringLiteral("draft")).toObject());
+    for (auto iterator = draft.constBegin(); iterator != draft.constEnd(); ++iterator) {
+      merged.insert(iterator.key(), iterator.value());
+    }
+    destination = eventFromJson(merged);
+    destination.uid = source.uid;
+  }
+  destination.calendarId = targetCalendarId;
+  if (recurrenceScope == QStringLiteral("occurrence")) {
+    destination.id.clear();
+    destination.remoteId.clear();
+    destination.uid.clear();
+    destination.etag.clear();
+    destination.recurrenceId.clear();
+    destination.recurrenceRule.clear();
+    destination.rawPayload.clear();
+    destination.rawFormat.clear();
+    destination.createdAt = {};
+    destination.localRevision = 0;
+  }
+  return destination;
+}
+
+// Maps a database move failure to its IPC error code. Only a cross-account
+// move can be blocked by the source's pending changes.
+QString moveFailureCode(const QString& dbError, bool acrossAccounts) {
+  if (dbError.contains(QStringLiteral("changed since"))) {
+    return QStringLiteral("stale_local_revision");
+  }
+  if (acrossAccounts && dbError.contains(QStringLiteral("pending event changes"))) {
+    return QStringLiteral("pending_operations");
+  }
+  return QStringLiteral("move_failed");
+}
+
+QJsonObject moveResult(const Event& source, const Event& destination,
+                       const QString& mutationId, bool complete, qint64 revision) {
+  return QJsonObject{
+      {QStringLiteral("sourceEventId"), source.id},
+      {QStringLiteral("event"), toJson(destination)},
+      {QStringLiteral("clientMutationId"), mutationId},
+      {QStringLiteral("state"),
+       complete ? QStringLiteral("complete") : QStringLiteral("pending")},
+      {QStringLiteral("revision"), revision},
+  };
+}
+
+}  // namespace
+
 QJsonValue Daemon::onEventsList(const QJsonObject& params, ipc::Error* error) {
   const QString startText = params.value(QStringLiteral("start")).toString();
   const QString endText = params.value(QStringLiteral("end")).toString();
@@ -611,272 +950,111 @@ QJsonValue Daemon::onEventsCreate(const QJsonObject& params, ipc::Error* error) 
   return result;
 }
 
-QJsonValue Daemon::onEventsUpdate(const QJsonObject& params, ipc::Error* error) {
-  QJsonObject eventPayload =
+bool Daemon::resolveUpdatePayload(const QJsonObject& params, QJsonObject* eventPayload,
+                                  ipc::Error* error) {
+  *eventPayload =
       normalizedEventDraft(params.value(QStringLiteral("event")).isObject()
                                ? params.value(QStringLiteral("event")).toObject()
                                : params.value(QStringLiteral("patch")).toObject());
   const QString referencedId = eventReferenceId(params);
-  if (!referencedId.isEmpty() && !eventPayload.contains(QStringLiteral("id"))) {
-    eventPayload.insert(QStringLiteral("id"), referencedId);
+  if (!referencedId.isEmpty() && !eventPayload->contains(QStringLiteral("id"))) {
+    eventPayload->insert(QStringLiteral("id"), referencedId);
   }
-  if (eventPayload.isEmpty()) {
-    if (error != nullptr) {
-      *error = {QStringLiteral("invalid_params"),
-                QStringLiteral("events.update requires {event:{...}} payload"), false};
-    }
-    return {};
+  if (eventPayload->isEmpty()) {
+    return setError(error, QStringLiteral("invalid_params"),
+                    QStringLiteral("events.update requires {event:{...}} payload"));
   }
-  const QString requestedId = eventPayload.value(QStringLiteral("id")).toString();
+  const QString requestedId = eventPayload->value(QStringLiteral("id")).toString();
   const Event requestedCurrent = m_database.event(requestedId);
-  if (params.value(QStringLiteral("patch")).isObject() &&
-      !requestedCurrent.id.isEmpty()) {
-    QJsonObject merged = toJson(requestedCurrent);
-    const QString patchScope = normalizedRecurrenceScope(
-        params.value(QStringLiteral("recurrenceScope")).toString());
-    const QString occurrenceId = recurrenceReference(params).trimmed();
-    if (!requestedCurrent.recurrenceRule.isEmpty() &&
-        requestedCurrent.recurrenceId.isEmpty() && !occurrenceId.isEmpty() &&
-        (patchScope == QStringLiteral("occurrence") ||
-         patchScope == QStringLiteral("future"))) {
-      // A partial edit applies to the selected occurrence, whose dates and
-      // duration can differ from the master (including across DST). Resolve
-      // through the same canonical expansion/exception lookup as events.get
-      // before merging fields, so an existing detached edit is preserved too.
-      const QJsonValue occurrence =
-          onEventsGet({{QStringLiteral("eventId"), requestedId},
-                       {QStringLiteral("recurrenceId"), occurrenceId}},
-                      error);
-      if (!occurrence.isObject()) {
-        return {};
-      }
-      merged = occurrence.toObject();
+  if (!params.value(QStringLiteral("patch")).isObject() ||
+      requestedCurrent.id.isEmpty()) {
+    return true;
+  }
+  QJsonObject merged = toJson(requestedCurrent);
+  const QString patchScope = normalizedRecurrenceScope(
+      params.value(QStringLiteral("recurrenceScope")).toString());
+  const QString occurrenceId = recurrenceReference(params).trimmed();
+  if (!requestedCurrent.recurrenceRule.isEmpty() &&
+      requestedCurrent.recurrenceId.isEmpty() && !occurrenceId.isEmpty() &&
+      (patchScope == QStringLiteral("occurrence") ||
+       patchScope == QStringLiteral("future"))) {
+    // A partial edit applies to the selected occurrence, whose dates and
+    // duration can differ from the master (including across DST). Resolve
+    // through the same canonical expansion/exception lookup as events.get
+    // before merging fields, so an existing detached edit is preserved too.
+    const QJsonValue occurrence =
+        onEventsGet({{QStringLiteral("eventId"), requestedId},
+                     {QStringLiteral("recurrenceId"), occurrenceId}},
+                    error);
+    if (!occurrence.isObject()) {
+      return false;
     }
-    const QString patchedId = merged.value(QStringLiteral("id")).toString();
-    const QJsonObject patch =
-        normalizedEventDraft(params.value(QStringLiteral("patch")).toObject());
-    for (auto iterator = patch.constBegin(); iterator != patch.constEnd(); ++iterator) {
-      merged.insert(iterator.key(), iterator.value());
-    }
-    merged.insert(QStringLiteral("id"), patchedId);
-    eventPayload = merged;
+    merged = occurrence.toObject();
+  }
+  const QString patchedId = merged.value(QStringLiteral("id")).toString();
+  const QJsonObject patch =
+      normalizedEventDraft(params.value(QStringLiteral("patch")).toObject());
+  for (auto iterator = patch.constBegin(); iterator != patch.constEnd(); ++iterator) {
+    merged.insert(iterator.key(), iterator.value());
+  }
+  merged.insert(QStringLiteral("id"), patchedId);
+  *eventPayload = merged;
+  return true;
+}
+
+QJsonValue Daemon::onEventsUpdate(const QJsonObject& params, ipc::Error* error) {
+  QJsonObject eventPayload;
+  if (!resolveUpdatePayload(params, &eventPayload, error)) {
+    return {};
   }
   Event event = eventFromJson(eventPayload);
   if (event.id.trimmed().isEmpty()) {
-    if (error != nullptr) {
-      *error = {QStringLiteral("invalid_params"),
-                QStringLiteral("event.id is required"), false};
-    }
+    setError(error, QStringLiteral("invalid_params"),
+             QStringLiteral("event.id is required"));
     return {};
   }
-  QString currentError;
-  Event currentEvent = m_database.event(event.id, &currentError);
-  if (currentEvent.id.isEmpty()) {
-    if (error != nullptr) {
-      *error = {QStringLiteral("not_found"), QStringLiteral("Event not found"), false};
-    }
+  UpdateTarget target;
+  target.current = m_database.event(event.id);
+  if (target.current.id.isEmpty()) {
+    setError(error, QStringLiteral("not_found"), QStringLiteral("Event not found"));
     return {};
   }
-  const QString recurrenceScope = normalizedRecurrenceScope(
-      params.value(QStringLiteral("recurrenceScope")).toString());
-  if (!QStringList{QStringLiteral("series"), QStringLiteral("occurrence"),
-                   QStringLiteral("future")}
-           .contains(recurrenceScope)) {
-    if (error != nullptr) {
-      *error = {QStringLiteral("invalid_recurrence_scope"),
-                QStringLiteral("Unknown recurrence scope"), false};
-    }
+  target.providerSource = target.current;
+  QString recurrenceScope;
+  if (!parseRecurrenceScope(params, &recurrenceScope, error) ||
+      !bindUpdateRecurrenceIdentity(params, recurrenceScope, target.current, &event,
+                                    error) ||
+      !retargetUpdate(m_database, recurrenceScope, &event, &target, error) ||
+      !keepDaemonOwnedFields(target, &event, error)) {
     return {};
-  }
-  // A recurrence identity is part of the event reference, never an editable
-  // draft field.  In particular, an untrusted draft must not be able to turn a
-  // non-recurring event into an occurrence mutation.  Persisted detached
-  // exceptions retain their own identity, while generated master occurrences
-  // require it on eventRef.
-  const QString referencedRecurrenceId = recurrenceReference(params).trimmed();
-  const bool storedDetachedException = !currentEvent.recurrenceId.isEmpty();
-  const bool storedRecurringMaster =
-      !currentEvent.recurrenceRule.isEmpty() && !storedDetachedException;
-  if (recurrenceScope == QStringLiteral("series")) {
-    event.recurrenceId =
-        storedDetachedException ? currentEvent.recurrenceId : QString();
-  } else {
-    if (!storedDetachedException && !storedRecurringMaster) {
-      if (error != nullptr) {
-        *error = {QStringLiteral("recurrence_scope_requires_recurring_event"),
-                  QStringLiteral("This recurrence scope requires a recurring event"),
-                  false};
-      }
-      return {};
-    }
-    if (storedDetachedException) {
-      if (!referencedRecurrenceId.isEmpty() &&
-          !occurrenceReferenceMatches(referencedRecurrenceId, currentEvent)) {
-        if (error != nullptr) {
-          *error = {QStringLiteral("occurrence_identity_mismatch"),
-                    QStringLiteral("eventRef does not match this detached occurrence"),
-                    false};
-        }
-        return {};
-      }
-      event.recurrenceId = currentEvent.recurrenceId;
-    } else {
-      if (referencedRecurrenceId.isEmpty()) {
-        if (error != nullptr) {
-          *error = {QStringLiteral("occurrence_identity_required"),
-                    QStringLiteral("This recurrence scope requires an occurrence ID"),
-                    false};
-        }
-        return {};
-      }
-      event.recurrenceId = referencedRecurrenceId;
-    }
-  }
-  Event providerSource = currentEvent;
-  bool newDetachedException = false;
-  const bool generatedOccurrence = !currentEvent.recurrenceRule.isEmpty() &&
-                                   currentEvent.recurrenceId.isEmpty() &&
-                                   !event.recurrenceId.isEmpty();
-  if ((generatedOccurrence || !currentEvent.recurrenceId.isEmpty()) &&
-      recurrenceScope == QStringLiteral("series")) {
-    const Event master =
-        currentEvent.recurrenceId.isEmpty()
-            ? currentEvent
-            : m_database.eventByUid(currentEvent.calendarId, currentEvent.uid);
-    QString rebaseError;
-    if (master.id.isEmpty() ||
-        !rebaseOccurrenceDraftOntoMaster(&event, master, &rebaseError)) {
-      if (error != nullptr) {
-        *error = {QStringLiteral("series_rebase_unsupported"),
-                  rebaseError.isEmpty()
-                      ? QStringLiteral("The recurring master could not be loaded")
-                      : rebaseError,
-                  false};
-      }
-      return {};
-    }
-    currentEvent = master;
-    providerSource = master;
-  } else if (generatedOccurrence) {
-    const QString recurrenceId = event.recurrenceId;
-    event.id = newUuid();
-    event.calendarId = currentEvent.calendarId;
-    event.remoteId = resourceRemoteId(currentEvent.remoteId);
-    if (!event.remoteId.isEmpty()) {
-      event.remoteId += QLatin1Char('#') + recurrenceId;
-    }
-    event.uid = currentEvent.uid;
-    event.etag = currentEvent.etag;
-    event.recurrenceId = recurrenceId;
-    event.recurrenceRule.clear();
-    event.rawPayload = currentEvent.rawPayload;
-    event.rawFormat = currentEvent.rawFormat;
-    event.createdAt = {};
-    event.localRevision = 0;
-    providerSource = currentEvent;
-    newDetachedException = true;
-  } else if (recurrenceScope != QStringLiteral("series") &&
-             event.recurrenceId.isEmpty()) {
-    if (error != nullptr) {
-      *error = {QStringLiteral("occurrence_identity_required"),
-                QStringLiteral("This recurrence scope requires an occurrence ID"),
-                false};
-    }
-    return {};
-  }
-  if (event.calendarId.trimmed().isEmpty()) {
-    event.calendarId = currentEvent.calendarId;
-  } else if (event.calendarId != currentEvent.calendarId) {
-    if (error != nullptr) {
-      *error = {QStringLiteral("calendar_move_not_supported"),
-                QStringLiteral(
-                    "Moving an existing event between calendars is not available yet"),
-                false};
-    }
-    return {};
-  }
-  // Provider identity and retained lossless payload are daemon-owned. Clients
-  // can edit canonical fields but cannot redirect an update to a different
-  // remote object or erase metadata required for a safe round trip.
-  if (!newDetachedException) {
-    event.remoteId = currentEvent.remoteId;
-    event.uid = currentEvent.uid;
-    event.etag = currentEvent.etag;
-    event.rawPayload = currentEvent.rawPayload;
-    event.rawFormat = currentEvent.rawFormat;
-    event.createdAt = currentEvent.createdAt;
   }
   const Calendar targetCalendar = m_database.calendar(event.calendarId);
-  if (targetCalendar.id.isEmpty()) {
-    if (error != nullptr) {
-      *error = {QStringLiteral("not_found"), QStringLiteral("Calendar not found"),
-                false};
-    }
-    return {};
-  }
-  if (recurrenceScope == QStringLiteral("future") &&
-      !targetCalendar.capabilities.value(QStringLiteral("thisAndFuture")).toBool()) {
-    if (error != nullptr) {
-      *error = {QStringLiteral("recurrence_scope_unsupported"),
-                QStringLiteral("This calendar cannot safely apply this-and-future "
-                               "changes"),
-                false};
-    }
-    return {};
-  }
-  if (targetCalendar.readOnly) {
-    if (error != nullptr) {
-      *error = {QStringLiteral("calendar_read_only"),
-                QStringLiteral("This calendar is read-only"), false};
-    }
-    return {};
-  }
-  if (!applyConferenceRequest(eventPayload, targetCalendar, &event, error)) {
+  if (!calendarAcceptsUpdate(targetCalendar, recurrenceScope, error) ||
+      !applyConferenceRequest(eventPayload, targetCalendar, &event, error)) {
     return {};
   }
   const QString timeError = validateEventTimes(event);
   if (!timeError.isEmpty()) {
-    if (error != nullptr) {
-      *error = {QStringLiteral("invalid_event_time"), timeError, false};
-    }
+    setError(error, QStringLiteral("invalid_event_time"), timeError);
     return {};
   }
-  QString guestPolicy =
-      params.value(QStringLiteral("guestNotificationPolicy")).toString();
-  if (event.attendees != providerSource.attendees && guestPolicy.isEmpty()) {
-    if (error != nullptr) {
-      *error = {QStringLiteral("guest_notification_policy_required"),
-                QStringLiteral("Choose whether guests should be notified"), false};
-    }
+  QString guestPolicy;
+  if (!resolveGuestPolicy(params, event.attendees != target.providerSource.attendees,
+                          &guestPolicy, error)) {
     return {};
-  }
-  if (guestPolicy.isEmpty()) {
-    guestPolicy = QStringLiteral("none");
   }
   const QString clientMutationId =
       params.value(QStringLiteral("clientMutationId")).toString(newUuid());
-  const qint64 requestedLocalRevision =
-      params.value(QStringLiteral("expectedLocalRevision"))
-          .toInteger(currentEvent.localRevision);
-  if (newDetachedException && requestedLocalRevision != providerSource.localRevision) {
-    if (error != nullptr) {
-      *error = {QStringLiteral("revision_mismatch"),
-                QStringLiteral("The recurring series changed since it was opened"),
-                false};
-    }
+  qint64 expectedLocalRevision = 0;
+  if (!updateExpectedRevision(params, target, &expectedLocalRevision, error)) {
     return {};
   }
-  const qint64 expectedLocalRevision =
-      newDetachedException ? 0 : requestedLocalRevision;
   QString dbError;
   if (!m_database.saveLocalEvent(&event, OutboxOperation::Update, &dbError,
                                  clientMutationId, recurrenceScope, guestPolicy,
                                  expectedLocalRevision)) {
-    if (error != nullptr) {
-      *error = {QStringLiteral("database_error"),
-                dbError.isEmpty() ? QStringLiteral("Unable to update event") : dbError,
-                false};
-    }
+    setError(error, QStringLiteral("database_error"),
+             dbError.isEmpty() ? QStringLiteral("Unable to update event") : dbError);
     return {};
   }
   emitEventsChanged({event.calendarId});
@@ -1160,173 +1338,57 @@ QJsonValue Daemon::onEventsMove(const QJsonObject& params, ipc::Error* error) {
   if (eventId.isEmpty() ||
       !validateRequiredString(params, QStringLiteral("targetCalendarId"),
                               &targetCalendarId, error)) {
-    if (eventId.isEmpty() && error != nullptr) {
-      *error = {QStringLiteral("invalid_params"),
-                QStringLiteral("eventRef.eventId is required"), false};
+    if (eventId.isEmpty()) {
+      setError(error, QStringLiteral("invalid_params"),
+               QStringLiteral("eventRef.eventId is required"));
     }
     return {};
   }
   QString dbError;
   Event source = m_database.event(eventId, &dbError);
   Event revisionSource = source;
-  const QString recurrenceScope = normalizedRecurrenceScope(
-      params.value(QStringLiteral("recurrenceScope")).toString());
-  if (!QStringList{QStringLiteral("series"), QStringLiteral("occurrence"),
-                   QStringLiteral("future")}
-           .contains(recurrenceScope)) {
-    if (error != nullptr) {
-      *error = {QStringLiteral("invalid_recurrence_scope"),
-                QStringLiteral("Unknown recurrence scope"), false};
-    }
+  QString recurrenceScope;
+  if (!parseRecurrenceScope(params, &recurrenceScope, error)) {
     return {};
   }
   if (recurrenceScope == QStringLiteral("future")) {
-    if (error != nullptr) {
-      *error = {
-          QStringLiteral("recurrence_scope_unsupported"),
-          QStringLiteral("Moving this and future occurrences cannot be represented "
-                         "safely by the selected providers"),
-          false};
-    }
+    setError(error, QStringLiteral("recurrence_scope_unsupported"),
+             QStringLiteral("Moving this and future occurrences cannot be represented "
+                            "safely by the selected providers"));
     return {};
   }
-  const QString requestedRecurrenceId = recurrenceReference(params).trimmed();
-  if (!source.id.isEmpty() && recurrenceScope == QStringLiteral("series") &&
-      !source.recurrenceId.isEmpty()) {
-    const Event master =
-        m_database.eventByUid(source.calendarId, source.uid, {}, &dbError);
-    if (master.id.isEmpty()) {
-      if (error != nullptr) {
-        *error = {QStringLiteral("series_master_not_found"),
-                  QStringLiteral("The recurring master could not be loaded"), false};
-      }
-      return {};
-    }
-    source = master;
-    revisionSource = master;
-  } else if (!source.id.isEmpty() && recurrenceScope == QStringLiteral("occurrence")) {
-    if (!source.recurrenceId.isEmpty()) {
-      if (!requestedRecurrenceId.isEmpty() &&
-          !occurrenceReferenceMatches(requestedRecurrenceId, source)) {
-        if (error != nullptr) {
-          *error = {QStringLiteral("occurrence_identity_mismatch"),
-                    QStringLiteral("The event and occurrence reference do not match"),
-                    false};
-        }
-        return {};
-      }
-    } else {
-      if (source.recurrenceRule.isEmpty() || requestedRecurrenceId.isEmpty()) {
-        if (error != nullptr) {
-          *error = {QStringLiteral("occurrence_identity_required"),
-                    QStringLiteral("Moving one recurrence requires an occurrence ID"),
-                    false};
-        }
-        return {};
-      }
-      const Event existing = m_database.eventByUid(source.calendarId, source.uid,
-                                                   requestedRecurrenceId, &dbError);
-      if (!existing.id.isEmpty()) {
-        source = existing;
-        revisionSource = existing;
-      } else {
-        revisionSource = source;
-        source = detachedOccurrence(revisionSource, requestedRecurrenceId);
-        const QString occurrenceTimeError = validateEventTimes(source);
-        if (!occurrenceTimeError.isEmpty()) {
-          if (error != nullptr) {
-            *error = {QStringLiteral("invalid_occurrence"), occurrenceTimeError, false};
-          }
-          return {};
-        }
-      }
-    }
+  if (!resolveMoveSource(m_database, recurrenceScope,
+                         recurrenceReference(params).trimmed(), &source,
+                         &revisionSource, &dbError, error)) {
+    return {};
   }
   const Calendar sourceCalendar = m_database.calendar(source.calendarId);
   const Calendar targetCalendar = m_database.calendar(targetCalendarId);
   if (source.id.isEmpty() || targetCalendar.id.isEmpty()) {
-    if (error != nullptr) {
-      *error = {QStringLiteral("not_found"),
-                source.id.isEmpty() ? QStringLiteral("Event not found")
-                                    : QStringLiteral("Target calendar not found"),
-                false};
-    }
+    setError(error, QStringLiteral("not_found"),
+             source.id.isEmpty() ? QStringLiteral("Event not found")
+                                 : QStringLiteral("Target calendar not found"));
     return {};
   }
   if (source.calendarId == targetCalendarId) {
     return toJson(source);
   }
-  const qint64 expectedLocalRevision =
-      params.value(QStringLiteral("expectedLocalRevision"))
-          .toInteger(revisionSource.localRevision);
-  if (expectedLocalRevision >= 0 &&
-      expectedLocalRevision != revisionSource.localRevision) {
-    if (error != nullptr) {
-      *error = {QStringLiteral("stale_local_revision"),
-                QStringLiteral("The event changed after this editor was opened; reload "
-                               "it before moving"),
-                false};
-    }
+  qint64 expectedLocalRevision = 0;
+  if (!checkMoveAllowed(params, revisionSource, sourceCalendar, targetCalendar,
+                        &expectedLocalRevision, error)) {
     return {};
   }
-  if (sourceCalendar.readOnly || targetCalendar.readOnly) {
-    if (error != nullptr) {
-      *error = {QStringLiteral("calendar_read_only"),
-                QStringLiteral("Source and target calendars must be writable"), false};
-    }
-    return {};
-  }
-  if (sourceCalendar.accountId != targetCalendar.accountId &&
-      !params.value(QStringLiteral("confirmedCrossProvider")).toBool()) {
-    if (error != nullptr) {
-      *error = {QStringLiteral("confirmation_required"),
-                QStringLiteral("Confirm the cross-account calendar move"), false};
-    }
-    return {};
-  }
-  Event destination = source;
-  if (params.value(QStringLiteral("draft")).isObject()) {
-    QJsonObject merged = toJson(source);
-    const QJsonObject draft =
-        normalizedEventDraft(params.value(QStringLiteral("draft")).toObject());
-    for (auto iterator = draft.constBegin(); iterator != draft.constEnd(); ++iterator) {
-      merged.insert(iterator.key(), iterator.value());
-    }
-    destination = eventFromJson(merged);
-    destination.uid = source.uid;
-  }
-  destination.calendarId = targetCalendarId;
-  if (recurrenceScope == QStringLiteral("occurrence")) {
-    destination.id.clear();
-    destination.remoteId.clear();
-    destination.uid.clear();
-    destination.etag.clear();
-    destination.recurrenceId.clear();
-    destination.recurrenceRule.clear();
-    destination.rawPayload.clear();
-    destination.rawFormat.clear();
-    destination.createdAt = {};
-    destination.localRevision = 0;
-  }
+  Event destination =
+      moveDestination(params, source, targetCalendarId, recurrenceScope);
   const QString timeError = validateEventTimes(destination);
   if (!timeError.isEmpty()) {
-    if (error != nullptr) {
-      *error = {QStringLiteral("invalid_event_time"), timeError, false};
-    }
+    setError(error, QStringLiteral("invalid_event_time"), timeError);
     return {};
   }
-
-  QString guestPolicy =
-      params.value(QStringLiteral("guestNotificationPolicy")).toString();
-  if (!destination.attendees.isEmpty() && guestPolicy.isEmpty()) {
-    if (error != nullptr) {
-      *error = {QStringLiteral("guest_notification_policy_required"),
-                QStringLiteral("Choose whether guests should be notified"), false};
-    }
+  QString guestPolicy;
+  if (!resolveGuestPolicy(params, !destination.attendees.isEmpty(), &guestPolicy,
+                          error)) {
     return {};
-  }
-  if (guestPolicy.isEmpty()) {
-    guestPolicy = QStringLiteral("none");
   }
   const QString mutationId =
       params.value(QStringLiteral("clientMutationId")).toString(newUuid());
@@ -1335,39 +1397,21 @@ QJsonValue Daemon::onEventsMove(const QJsonObject& params, ipc::Error* error) {
       recurrenceScope == QStringLiteral("series")) {
     if (!m_database.moveLocalEvent(&destination, &dbError, mutationId, recurrenceScope,
                                    guestPolicy, expectedLocalRevision)) {
-      if (error != nullptr) {
-        *error = {dbError.contains(QStringLiteral("changed since"))
-                      ? QStringLiteral("stale_local_revision")
-                      : QStringLiteral("move_failed"),
-                  dbError, false};
-      }
+      setError(error, moveFailureCode(dbError, false), dbError);
       return {};
     }
     emitEventsChanged({source.calendarId, destination.calendarId});
     if (m_database.account(sourceCalendar.accountId).provider != ProviderKind::Local) {
       m_sync.syncAccount(sourceCalendar.accountId);
     }
-    return QJsonObject{
-        {QStringLiteral("sourceEventId"), source.id},
-        {QStringLiteral("event"), toJson(destination)},
-        {QStringLiteral("clientMutationId"), mutationId},
-        {QStringLiteral("state"),
-         destination.dirty ? QStringLiteral("pending") : QStringLiteral("complete")},
-        {QStringLiteral("revision"), m_database.changeRevision()},
-    };
+    return moveResult(source, destination, mutationId, !destination.dirty,
+                      m_database.changeRevision());
   }
 
   if (!m_database.moveEventAcrossAccounts(source, &destination, &dbError, mutationId,
                                           recurrenceScope, guestPolicy,
                                           expectedLocalRevision)) {
-    if (error != nullptr) {
-      *error = {dbError.contains(QStringLiteral("changed since"))
-                    ? QStringLiteral("stale_local_revision")
-                : dbError.contains(QStringLiteral("pending event changes"))
-                    ? QStringLiteral("pending_operations")
-                    : QStringLiteral("move_failed"),
-                dbError, false};
-    }
+    setError(error, moveFailureCode(dbError, true), dbError);
     return {};
   }
   emitEventsChanged({source.calendarId, destination.calendarId});
@@ -1385,16 +1429,11 @@ QJsonValue Daemon::onEventsMove(const QJsonObject& params, ipc::Error* error) {
     // newly released dependency before returning to the client.
     m_sync.syncAccount(targetCalendar.accountId);
   }
-  return QJsonObject{{QStringLiteral("sourceEventId"), source.id},
-                     {QStringLiteral("event"), toJson(destination)},
-                     {QStringLiteral("clientMutationId"), mutationId},
-                     {QStringLiteral("state"),
-                      targetCalendar.accountId == sourceCalendar.accountId &&
-                              m_database.account(targetCalendar.accountId).provider ==
-                                  ProviderKind::Local
-                          ? QStringLiteral("complete")
-                          : QStringLiteral("pending")},
-                     {QStringLiteral("revision"), m_database.changeRevision()}};
+  const bool complete =
+      targetCalendar.accountId == sourceCalendar.accountId &&
+      m_database.account(targetCalendar.accountId).provider == ProviderKind::Local;
+  return moveResult(source, destination, mutationId, complete,
+                    m_database.changeRevision());
 }
 
 QJsonValue Daemon::onEventsRespond(const QJsonObject& params, ipc::Error* error) {
