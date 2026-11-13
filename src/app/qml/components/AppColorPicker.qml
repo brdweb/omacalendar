@@ -11,11 +11,18 @@ Item {
     property color selectedColor: Theme.accent
     property bool allowClear: false
     property string buttonText: qsTr("Color")
+    property string clearText: qsTr("Provider color")
+    // %1 is the colour name announced for each swatch.
+    property string swatchNameFormat: qsTr("%1 calendar color")
+    property string dialogTitle: qsTr("Choose calendar color")
+    // False when the owner drives selectedColor from its own state, so a
+    // choice does not break that binding.
+    property bool selectionFollowsChoice: true
     readonly property bool paletteVisible: palettePopup.opened
     signal colorSelected(string colorValue)
 
-    // Follows the active theme; see Theme.calendarPalette.
-    readonly property var colorChoices: Theme.calendarPalette
+    // Follows the active theme by default; see Theme.calendarPalette.
+    property var colorChoices: Theme.calendarPalette
 
     implicitWidth: 132
     implicitHeight: Theme.controlHeight
@@ -100,11 +107,12 @@ Item {
                         hoverEnabled: true
                         // Announce a colour name; the hex value stays as the
                         // description for users who want the exact colour.
-                        Accessible.name: qsTr("%1 calendar color")
+                        Accessible.name: root.swatchNameFormat
                                          .arg(Theme.colorName(swatch.modelData))
                         Accessible.description: swatch.modelData
                         onClicked: {
-                            root.selectedColor = modelData
+                            if (root.selectionFollowsChoice)
+                                root.selectedColor = modelData
                             root.colorSelected(modelData)
                             palettePopup.close()
                         }
@@ -134,7 +142,8 @@ Item {
                 spacing: 8
                 AppButton {
                     visible: root.allowClear
-                    text: qsTr("Provider color")
+                    objectName: "colorClear"
+                    text: root.clearText
                     compact: true
                     quiet: true
                     onClicked: {
@@ -163,10 +172,11 @@ Item {
 
     ColorDialog {
         id: customColorDialog
-        title: qsTr("Choose calendar color")
+        title: root.dialogTitle
         selectedColor: root.selectedColor
         onAccepted: {
-            root.selectedColor = selectedColor
+            if (root.selectionFollowsChoice)
+                root.selectedColor = selectedColor
             root.colorSelected(String(selectedColor))
         }
     }

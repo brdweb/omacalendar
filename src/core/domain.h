@@ -100,6 +100,8 @@ struct Event {
   QString status = QStringLiteral("confirmed");
   QString transparency = QStringLiteral("opaque");
   QString visibility = QStringLiteral("default");
+  // "#rrggbb" when the event overrides its calendar colour; empty otherwise.
+  QString color;
   QString recurrenceRule;
   QString recurrenceId;
   int sequence = 0;
@@ -207,6 +209,11 @@ Event eventFromJson(const QJsonObject& object);
 
 QString newUuid();
 QString isoUtc(const QDateTime& value);
+
+// A per-event colour is "#rrggbb" in lower case, or empty to use the calendar
+// colour. Returns that canonical form, or std::nullopt when the value is
+// neither empty nor a six-digit hex colour.
+std::optional<QString> normalizedEventColor(const QString& value);
 
 // All-day spans are stored with an exclusive end date, so a one-day event ends
 // the following day. Providers may publish an inclusive end date instead, and

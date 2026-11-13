@@ -26,6 +26,17 @@ inline QString validateEventTimes(const omacalendar::Event& event) {
   return {};
 }
 
+// Canonicalizes a client-supplied event colour in place. Returns an error
+// message when the value is neither empty nor "#rrggbb".
+inline QString normalizeEventColor(omacalendar::Event* event) {
+  const std::optional<QString> color = omacalendar::normalizedEventColor(event->color);
+  if (!color) {
+    return QStringLiteral("An event colour must be empty or #rrggbb");
+  }
+  event->color = *color;
+  return {};
+}
+
 inline QJsonObject normalizedEventDraft(QJsonObject object) {
   const auto copyAlias = [&object](const QString& canonical, const QString& alias) {
     if (!object.contains(canonical) && object.contains(alias)) {

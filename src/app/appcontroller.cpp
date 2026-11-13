@@ -1691,11 +1691,15 @@ void AppController::finishPdfExport(const std::shared_ptr<PdfExportJob>& job) {
     item.location = event.value(QStringLiteral("location")).toString();
     item.description = event.value(QStringLiteral("description")).toString();
     item.calendarName = calendar.value(QStringLiteral("name")).toString();
-    const QString colorOverride =
-        calendar.value(QStringLiteral("colorOverride")).toString();
-    item.color = QColor(colorOverride.isEmpty()
-                            ? calendar.value(QStringLiteral("color")).toString()
-                            : colorOverride);
+    // An event's own colour wins over its calendar's override and colour.
+    QString color = event.value(QStringLiteral("color")).toString();
+    if (color.isEmpty()) {
+      color = calendar.value(QStringLiteral("colorOverride")).toString();
+    }
+    if (color.isEmpty()) {
+      color = calendar.value(QStringLiteral("color")).toString();
+    }
+    item.color = QColor(color);
     item.allDay = event.value(QStringLiteral("allDay")).toBool();
     if (item.allDay) {
       item.startDate = QDate::fromString(

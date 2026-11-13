@@ -7,6 +7,9 @@
 #include <QRegularExpression>
 #include <QTimeZone>
 #include <QUrl>
+#include <array>
+#include <limits>
+#include <optional>
 
 namespace omacalendar::google {
 namespace {
@@ -264,7 +267,6 @@ void copyProviderWriteFields(const QJsonObject& raw, QJsonObject* result) {
       "attachments",
       "attendeesOmitted",
       "birthdayProperties",
-      "colorId",
       "conferenceData",
       "eventLabelId",
       "eventType",
@@ -287,6 +289,29 @@ void copyProviderWriteFields(const QJsonObject& raw, QJsonObject* result) {
   }
 }
 
+// Google's fixed event palette (colors.get "event"), indexed by colorId - 1.
+constexpr const char* kGoogleEventPalette[] = {
+    "#a4bdfc",  // 1 Lavender
+    "#7ae7bf",  // 2 Sage
+    "#dbadff",  // 3 Grape
+    "#ff887c",  // 4 Flamingo
+    "#fbd75b",  // 5 Banana
+    "#ffb878",  // 6 Tangerine
+    "#46d6db",  // 7 Peacock
+    "#e1e1e1",  // 8 Graphite
+    "#5484ed",  // 9 Blueberry
+    "#51b749",  // 10 Basil
+    "#dc2127",  // 11 Tomato
+};
+constexpr int kGoogleEventPaletteSize =
+    static_cast<int>(std::size(kGoogleEventPalette));
+
+// Channels of a canonical "#rrggbb" colour.
+std::array<int, 3> colorChannels(const QString& color) {
+  return {color.mid(1, 2).toInt(nullptr, 16), color.mid(3, 2).toInt(nullptr, 16),
+          color.mid(5, 2).toInt(nullptr, 16)};
+}
+
 QString joinedRecurrence(const QJsonValue& value) {
   if (!value.isArray()) {
     return {};
@@ -301,6 +326,39 @@ QString joinedRecurrence(const QJsonValue& value) {
 }
 
 }  // namespace
+
+QString googleEventColorHex(const QString& colorId) {
+  bool ok = false;
+  const int index = colorId.toInt(&ok);
+  if (!ok || index < 1 || index > kGoogleEventPaletteSize) {
+    return {};
+  }
+  return QString::fromLatin1(kGoogleEventPalette[index - 1]);
+}
+
+QString googleEventColorId(const QString& color) {
+  const std::optional<QString> normalized = normalizedEventColor(color);
+  if (!normalized || normalized->isEmpty()) {
+    return {};
+  }
+  const std::array<int, 3> wanted = colorChannels(*normalized);
+  int bestIndex = 0;
+  int bestDistance = std::numeric_limits<int>::max();
+  for (int index = 0; index < kGoogleEventPaletteSize; ++index) {
+    const std::array<int, 3> candidate =
+        colorChannels(QString::fromLatin1(kGoogleEventPalette[index]));
+    int distance = 0;
+    for (std::size_t channel = 0; channel < candidate.size(); ++channel) {
+      const int delta = wanted.at(channel) - candidate.at(channel);
+      distance += delta * delta;
+    }
+    if (distance < bestDistance) {
+      bestDistance = distance;
+      bestIndex = index;
+    }
+  }
+  return QString::number(bestIndex + 1);
+}
 
 QString rfc3339(const QDateTime& dateTime, const QString& timeZone) {
   if (!dateTime.isValid()) {
@@ -475,6 +533,9 @@ Event eventFromGoogleJson(const QJsonObject& resource, const QString& calendarId
   if (event.visibility.isEmpty()) {
     event.visibility = QStringLiteral("default");
   }
+  // An unknown colorId leaves the event on its calendar colour; the id itself
+  // stays in the retained payload and is written back unchanged.
+  event.color = googleEventColorHex(stringValue(resource, "colorId"));
   event.deleted = event.status == QStringLiteral("cancelled");
   event.recurrenceRule = joinedRecurrence(resource.value(QStringLiteral("recurrence")));
   event.recurrenceId = recurrenceInstanceId(
@@ -575,6 +636,21 @@ QJsonObject eventToGoogleJson(const Event& event) {
       event.visibility == QStringLiteral("private") ||
       event.visibility == QStringLiteral("confidential")) {
     result.insert(QStringLiteral("visibility"), event.visibility);
+  }
+
+  // Google only stores palette ids, so a custom colour is written as the
+  // nearest palette entry. Clearing a palette colour sends null; a colorId this
+  // build does not know is kept while the event has no colour of its own.
+  const QString rawColorId = stringValue(raw, "colorId");
+  const QString colorId = googleEventColorId(event.color);
+  if (!colorId.isEmpty()) {
+    result.insert(QStringLiteral("colorId"), colorId);
+  } else if (!event.remoteId.isEmpty() && !rawColorId.isEmpty()) {
+    if (googleEventColorHex(rawColorId).isEmpty()) {
+      result.insert(QStringLiteral("colorId"), rawColorId);
+    } else {
+      result.insert(QStringLiteral("colorId"), QJsonValue::Null);
+    }
   }
 
   const QJsonArray recurrence = recurrenceLines(event.recurrenceRule);

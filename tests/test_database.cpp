@@ -150,7 +150,7 @@ class DatabaseTest final : public QObject {
     QVERIFY(db.open(directory.filePath("store.sqlite"), &error));
     QVERIFY(db.isOpen());
     QCOMPARE(error, QString());
-    QCOMPARE(db.schemaVersion(), 3);
+    QCOMPARE(db.schemaVersion(), kDatabaseSchemaVersion);
     const qint64 initialRevision = db.changeRevision();
     QVERIFY(db.setSetting("timezone", QStringLiteral("UTC"), &error));
     QVERIFY(db.changeRevision() > initialRevision);
@@ -367,7 +367,7 @@ class DatabaseTest final : public QObject {
     Database reopened;
     QVERIFY2(reopened.open(directory.filePath("store.sqlite"), &error),
              qPrintable(error));
-    QCOMPARE(reopened.schemaVersion(), 3);
+    QCOMPARE(reopened.schemaVersion(), kDatabaseSchemaVersion);
   }
 
   void inclusiveAllDayEndDatesAreNormalizedOnWrite() {
@@ -475,7 +475,7 @@ class DatabaseTest final : public QObject {
     Database db;
     QString error;
     QVERIFY2(db.open(path, &error), qPrintable(error));
-    QCOMPARE(db.schemaVersion(), 3);
+    QCOMPARE(db.schemaVersion(), kDatabaseSchemaVersion);
     const QList<Account> firstAccounts = db.accounts(&error);
     QCOMPARE(firstAccounts.size(), 1);
     QCOMPARE(firstAccounts.first().id, QStringLiteral("local-account"));
@@ -489,7 +489,7 @@ class DatabaseTest final : public QObject {
     // Simulate daemon restart with a fresh process handle.
     Database reopened;
     QVERIFY2(reopened.open(path, &error), qPrintable(error));
-    QCOMPARE(reopened.schemaVersion(), 3);
+    QCOMPARE(reopened.schemaVersion(), kDatabaseSchemaVersion);
     const QList<Account> thirdAccounts = reopened.accounts(&error);
     QCOMPARE(thirdAccounts.size(), 1);
     QCOMPARE(thirdAccounts.first().provider, ProviderKind::Local);
@@ -817,7 +817,7 @@ class DatabaseTest final : public QObject {
     Database db;
     QString error;
     QVERIFY2(db.open(path, &error), qPrintable(error));
-    QCOMPARE(db.schemaVersion(), 3);
+    QCOMPARE(db.schemaVersion(), kDatabaseSchemaVersion);
     const QList<Account> accounts = db.accounts(&error);
     QCOMPARE(accounts.size(), 1);
     QCOMPARE(accounts.first().provider, ProviderKind::Local);
@@ -947,7 +947,7 @@ class DatabaseTest final : public QObject {
     QVERIFY(QDir().rmdir(stagingPath));
     error.clear();
     QVERIFY2(db.open(path, &error), qPrintable(error));
-    QCOMPARE(db.schemaVersion(), 3);
+    QCOMPARE(db.schemaVersion(), kDatabaseSchemaVersion);
     QCOMPARE(
         QDir(directory.path())
             .entryList({QStringLiteral("legacy.sqlite.pre-v2-*.backup")}, QDir::Files)
@@ -973,7 +973,8 @@ class DatabaseTest final : public QObject {
             "CREATE TABLE legacy_events(id TEXT PRIMARY KEY, title TEXT)")));
         QVERIFY(query.exec(
             QStringLiteral("INSERT INTO legacy_events VALUES('one','Keep me')")));
-        QVERIFY(query.exec(QStringLiteral("PRAGMA user_version = 4")));
+        QVERIFY(query.exec(QStringLiteral("PRAGMA user_version = %1")
+                               .arg(kDatabaseSchemaVersion + 1)));
       }
       future.close();
     }
@@ -999,7 +1000,7 @@ class DatabaseTest final : public QObject {
       QSqlQuery verifyQuery(verify);
       QVERIFY(verifyQuery.exec(QStringLiteral("PRAGMA user_version")));
       QVERIFY(verifyQuery.next());
-      QCOMPARE(verifyQuery.value(0).toInt(), 4);
+      QCOMPARE(verifyQuery.value(0).toInt(), kDatabaseSchemaVersion + 1);
       QVERIFY(verifyQuery.exec(
           QStringLiteral("SELECT title FROM legacy_events WHERE id='one'")));
       QVERIFY(verifyQuery.next());
@@ -1007,6 +1008,153 @@ class DatabaseTest final : public QObject {
       verify.close();
     }
     QSqlDatabase::removeDatabase(verifyConnection);
+  }
+
+  void schemaThreeMigratesToFourPreservingRows() {
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const QString freshPath = directory.filePath(QStringLiteral("fresh.sqlite"));
+    const QString path = directory.filePath(QStringLiteral("schema-three.sqlite"));
+    QString error;
+
+    const auto shape = [](const QSqlDatabase& connection) {
+      QStringList result;
+      QSqlQuery query(connection);
+      if (!query.exec(QStringLiteral("PRAGMA table_info(events)"))) {
+        return result;
+      }
+      while (query.next()) {
+        result.append(QStringLiteral("column:%1:%2:%3")
+                          .arg(query.value(QStringLiteral("name")).toString(),
+                               query.value(QStringLiteral("type")).toString(),
+                               query.value(QStringLiteral("notnull")).toString()));
+      }
+      if (!query.exec(QStringLiteral(
+              "SELECT name FROM sqlite_master WHERE type='index' "
+              "AND tbl_name='reminder_jobs' AND name NOT LIKE 'sqlite_%'"))) {
+        return result;
+      }
+      while (query.next()) {
+        result.append(QStringLiteral("index:") + query.value(0).toString());
+      }
+      result.sort();
+      return result;
+    };
+
+    QStringList freshShape;
+    {
+      Database fresh;
+      QVERIFY2(fresh.open(freshPath, &error), qPrintable(error));
+      freshShape = shape(calendarConnection());
+      fresh.close();
+    }
+    QVERIFY(freshShape.contains(QStringLiteral("column:color:TEXT:0")));
+    QVERIFY(freshShape.contains(QStringLiteral("index:reminder_jobs_event_index")));
+
+    Database db;
+    QVERIFY2(db.open(path, &error), qPrintable(error));
+    Event kept = makeLocalEvent(QStringLiteral("local-default"),
+                                QStringLiteral("schema-three-kept"));
+    kept.summary = QStringLiteral("Survives the upgrade");
+    kept.startUtc = QDateTime::currentDateTimeUtc().addDays(1);
+    kept.endUtc = kept.startUtc.addSecs(3600);
+    kept.reminders = QJsonArray{10};
+    QVERIFY2(db.saveLocalEvent(&kept, OutboxOperation::Create, &error),
+             qPrintable(error));
+    db.close();
+
+    // A schema-3 file has neither the colour column nor the reminder index.
+    const QString connectionName =
+        QStringLiteral("schema-three-%1")
+            .arg(QUuid::createUuid().toString(QUuid::WithoutBraces));
+    int reminderJobs = 0;
+    {
+      QSqlDatabase raw =
+          QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), connectionName);
+      raw.setDatabaseName(path);
+      QVERIFY(raw.open());
+      {
+        QSqlQuery sql(raw);
+        QVERIFY2(sql.exec(QStringLiteral("DROP INDEX reminder_jobs_event_index")),
+                 qPrintable(sql.lastError().text()));
+        QVERIFY2(sql.exec(QStringLiteral("ALTER TABLE events DROP COLUMN color")),
+                 qPrintable(sql.lastError().text()));
+        QVERIFY(sql.exec(QStringLiteral("PRAGMA user_version = 3")));
+        QVERIFY(sql.exec(QStringLiteral(
+            "SELECT COUNT(*) FROM reminder_jobs WHERE event_id='schema-three-kept'")));
+        QVERIFY(sql.next());
+        reminderJobs = sql.value(0).toInt();
+      }
+      QVERIFY(!shape(raw).contains(QStringLiteral("column:color:TEXT:0")));
+      raw.close();
+    }
+    QSqlDatabase::removeDatabase(connectionName);
+    QVERIFY(reminderJobs > 0);
+
+    Database upgraded;
+    QVERIFY2(upgraded.open(path, &error), qPrintable(error));
+    QCOMPARE(upgraded.schemaVersion(), kDatabaseSchemaVersion);
+    QCOMPARE(shape(calendarConnection()), freshShape);
+    Event migrated = upgraded.event(kept.id, &error);
+    QCOMPARE(migrated.summary, kept.summary);
+    QCOMPARE(migrated.color, QString());
+    {
+      QSqlQuery sql(calendarConnection());
+      QVERIFY(sql.exec(QStringLiteral(
+          "SELECT COUNT(*) FROM reminder_jobs WHERE event_id='schema-three-kept'")));
+      QVERIFY(sql.next());
+      QCOMPARE(sql.value(0).toInt(), reminderJobs);
+      // Per-event reminder lookups use the new index instead of a scan.
+      QVERIFY(sql.exec(QStringLiteral(
+          "EXPLAIN QUERY PLAN DELETE FROM reminder_jobs WHERE event_id='x'")));
+      QStringList plan;
+      while (sql.next()) {
+        plan.append(sql.value(3).toString());
+      }
+      QVERIFY2(plan.join(QLatin1Char('\n'))
+                   .contains(QStringLiteral("reminder_jobs_event_index")),
+               qPrintable(plan.join(QLatin1Char('\n'))));
+    }
+
+    migrated.color = QStringLiteral("#9ece6a");
+    QVERIFY2(upgraded.saveLocalEvent(&migrated, OutboxOperation::Update, &error),
+             qPrintable(error));
+    upgraded.close();
+    QVERIFY2(upgraded.open(path, &error), qPrintable(error));
+    QCOMPARE(upgraded.schemaVersion(), kDatabaseSchemaVersion);
+    QCOMPARE(upgraded.event(kept.id, &error).color, QStringLiteral("#9ece6a"));
+  }
+
+  void eventColorIsStoredAndClearedAsNull() {
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    Database db;
+    QString error;
+    QVERIFY2(db.open(directory.filePath(QStringLiteral("store.sqlite")), &error),
+             qPrintable(error));
+    Event event =
+        makeLocalEvent(QStringLiteral("local-default"), QStringLiteral("colored"));
+    event.color = QStringLiteral("#f7768e");
+    QVERIFY2(db.saveLocalEvent(&event, OutboxOperation::Create, &error),
+             qPrintable(error));
+    QCOMPARE(db.event(event.id, &error).color, QStringLiteral("#f7768e"));
+    QCOMPARE(
+        toJson(db.event(event.id, &error)).value(QStringLiteral("color")).toString(),
+        QStringLiteral("#f7768e"));
+    const QDateTime from = event.startUtc.addSecs(-60);
+    const QList<Event> ranged = db.eventsBetween(from, event.endUtc.addSecs(60));
+    QVERIFY(std::any_of(ranged.cbegin(), ranged.cend(), [](const Event& value) {
+      return value.color == QStringLiteral("#f7768e");
+    }));
+
+    event.color.clear();
+    QVERIFY2(db.saveLocalEvent(&event, OutboxOperation::Update, &error),
+             qPrintable(error));
+    QSqlQuery stored(calendarConnection());
+    QVERIFY(stored.exec(QStringLiteral("SELECT color FROM events WHERE id='colored'")));
+    QVERIFY(stored.next());
+    QVERIFY(stored.value(0).isNull());
+    QCOMPARE(db.event(event.id, &error).color, QString());
   }
 
   void accountAndCalendarCrud() {
@@ -3631,7 +3779,7 @@ class DatabaseTest final : public QObject {
 
     Database upgraded;
     QVERIFY2(upgraded.open(path, &error), qPrintable(error));
-    QCOMPARE(upgraded.schemaVersion(), 3);
+    QCOMPARE(upgraded.schemaVersion(), kDatabaseSchemaVersion);
     QHash<QString, QPair<QVariant, QVariant>> values;
     {
       QSqlQuery bounds(calendarConnection());
@@ -3662,7 +3810,7 @@ class DatabaseTest final : public QObject {
                         [&count](const Event& event) { return event.id == count.id; }));
     upgraded.close();
     QVERIFY2(upgraded.open(path, &error), qPrintable(error));
-    QCOMPARE(upgraded.schemaVersion(), 3);
+    QCOMPARE(upgraded.schemaVersion(), kDatabaseSchemaVersion);
     QCOMPARE(upgraded.eventsBetween(last, last.addSecs(1)).size(), occurrences.size());
   }
 

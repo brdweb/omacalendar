@@ -100,7 +100,8 @@ ItemDelegate {
             Layout.topMargin: 10
             Layout.bottomMargin: 10
             radius: 2
-            color: root.eventData.calendarColor || Theme.accent
+            color: root.eventData.color || root.eventData.calendarColor
+                   || Theme.accent
         }
         ColumnLayout {
             id: details

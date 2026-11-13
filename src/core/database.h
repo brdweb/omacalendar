@@ -464,6 +464,7 @@ class Database final {
   bool ensureTaskSchema(QString* errorMessage);
   bool repairInclusiveAllDayEndDates(QString* errorMessage);
   bool migrateSeriesBounds(QString* errorMessage);
+  bool migrateEventColor(QString* errorMessage);
   bool repairSeriesBounds(QString* errorMessage);
   bool archiveLegacyDatabase(const QString& path, QString* errorMessage);
   bool execute(const QString& sql, QString* errorMessage) const;

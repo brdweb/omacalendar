@@ -48,8 +48,9 @@ Control {
                                            && !isNaN(allDayDropY)
                                            && y + pressY + moveDelta < allDayDropY
 
-    readonly property color eventColor: eventData.calendarColor
-                                        || eventData.color || Theme.accent
+    // The event's own colour wins over its calendar's.
+    readonly property color eventColor: eventData.color
+                                        || eventData.calendarColor || Theme.accent
     readonly property real fillOpacity: selected ? 0.34 : hovered ? 0.28 : 0.21
     // Text colours are picked against the tinted fill so a very light or
     // very dark calendar colour stays readable.

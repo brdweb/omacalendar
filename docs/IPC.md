@@ -258,6 +258,20 @@ ignored when the event already has a `conferenceUrl`. The daemon generates the
 conference request id itself and keeps it with the queued write until Google
 accepts it; the new link arrives as `conferenceUrl` on the next sync.
 
+Event DTOs additively carry `color` (added in IPC 2.3, not yet released): the
+event's own colour as lower-case `#rrggbb`, or `""` when the event uses its
+calendar's colour. `events.create`, `events.update` (full event or `patch`),
+`events.move` drafts and conflict `mergedEvent` accept it; any other value is
+`invalid_event_color`, and `""` clears it. A full-event `events.update` that
+omits `color` keeps the stored colour, so older clients do not erase it.
+Providers store it as follows: local calendars keep the exact value; Google
+keeps only its 11-colour event palette (`colorId`), so another colour is written
+as the nearest palette entry and reads back as that entry, and an unknown
+`colorId` reads as `""` and is left unchanged; CalDAV writes the RFC 7986
+`COLOR` property as the nearest CSS3 colour name, reads CSS3 names and
+`#rrggbb`, and leaves an existing `COLOR` untouched unless the colour changed;
+ICS subscriptions are read-only and only report a feed's `COLOR`.
+
 `events.list` requires a bounded start/end interval and supports bounded
 pagination. The interval and `calendarIds` scope are applied before `offset`
 and `limit`; `total` is the size of that filtered result. `events.search`

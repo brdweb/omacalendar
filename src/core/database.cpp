@@ -1107,14 +1107,14 @@ bool Database::upsertEventRecord(const Event& event, QString* errorMessage,
       (id, calendar_id, remote_id, uid, etag, summary, description, location,
        url, conference_url, start_utc, end_utc, start_date, end_date,
        start_timezone, end_timezone, all_day, time_kind, status, transparency,
-       visibility, recurrence_rule, recurrence_id, series_until_utc,
+       visibility, color, recurrence_rule, recurrence_id, series_until_utc,
        series_until_date, original_start_utc, original_start_date, sequence,
        organizer_json, attendees_json, reminders_json, raw_payload, raw_format,
        dirty, deleted, local_revision, sync_state, created_at, updated_at)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
             ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
             ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-            ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(id) DO UPDATE SET
       calendar_id=excluded.calendar_id,
       remote_id=excluded.remote_id,
@@ -1136,6 +1136,7 @@ bool Database::upsertEventRecord(const Event& event, QString* errorMessage,
       status=excluded.status,
       transparency=excluded.transparency,
       visibility=excluded.visibility,
+      color=excluded.color,
       recurrence_rule=excluded.recurrence_rule,
       recurrence_id=excluded.recurrence_id,
       series_until_utc=excluded.series_until_utc,
@@ -1181,6 +1182,8 @@ bool Database::upsertEventRecord(const Event& event, QString* errorMessage,
   query.addBindValue(nonNull(event.status));
   query.addBindValue(nonNull(event.transparency));
   query.addBindValue(nonNull(event.visibility));
+  query.addBindValue(event.color.isEmpty() ? QVariant(QMetaType(QMetaType::QString))
+                                           : QVariant(event.color));
   query.addBindValue(nonNull(event.recurrenceRule));
   query.addBindValue(nonNull(event.recurrenceId));
   const RecurrenceStoredBounds bounds = recurrenceBounds(event);
@@ -2634,6 +2637,7 @@ Event Database::eventFromQuery(const QSqlQuery& query) const {
   result.status = query.value(QStringLiteral("status")).toString();
   result.transparency = query.value(QStringLiteral("transparency")).toString();
   result.visibility = query.value(QStringLiteral("visibility")).toString();
+  result.color = query.value(QStringLiteral("color")).toString();
   result.recurrenceRule = query.value(QStringLiteral("recurrence_rule")).toString();
   result.recurrenceId = query.value(QStringLiteral("recurrence_id")).toString();
   result.sequence = query.value(QStringLiteral("sequence")).toInt();
@@ -2857,7 +2861,8 @@ QList<Event> Database::eventsBetweenInternal(
       "e.id,e.calendar_id,e.remote_id,e.uid,e.etag,e.summary,e.description,"
       "e.location,e.url,e.conference_url,e.start_utc,e.end_utc,e.start_date,"
       "e.end_date,e.start_timezone,e.end_timezone,e.all_day,e.time_kind,e.status,"
-      "e.transparency,e.visibility,e.recurrence_rule,e.recurrence_id,e.sequence,"
+      "e.transparency,e.visibility,e.color,e.recurrence_rule,e.recurrence_id,e."
+      "sequence,"
       "e.organizer_json,e.attendees_json,e.reminders_json,e.raw_payload,e.raw_format,"
       "e.dirty,e.deleted,e.local_revision,e.sync_state,e.created_at,e.updated_at");
   const QString sql =
