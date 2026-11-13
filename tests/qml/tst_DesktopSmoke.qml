@@ -36,6 +36,7 @@ Item {
     Component { id: pdfExportFactory; Components.PdfExportDialog {} }
     Component { id: tasksPanelFactory; Components.TasksPanel {} }
     Component { id: taskEditorFactory; Components.TaskEditor {} }
+    Component { id: shortcutsFactory; Components.AppShortcuts {} }
     // Dialogs hand focus back through the window's content item, so the
     // focus test runs in an ApplicationWindow like the app's.
     Component {
