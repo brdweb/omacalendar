@@ -12,7 +12,9 @@
 #include <QTextStream>
 #include <QTimeZone>
 #include <QtTest/QtTest>
+#include <atomic>
 #include <ctime>
+#include <thread>
 
 #include "app/appcontroller.h"
 #include "app/applicationinstance.h"
@@ -408,6 +410,9 @@ class AppControllerTest final : public QObject {
   void startupArgumentsRouteDeepLinks();
   void startupArgumentsRouteLocalIcsFiles();
   void startupArgumentsRejectUnsafeImportTargets();
+  void webcalArgumentBecomesSubscribeRequest();
+  void httpsArgumentIsNotASubscribeRequest();
+  void forwardedWebcalReachesPrimary();
   void controllerDispatchesValidatedIcsFile();
   void applicationInstanceAllowsOnePrimary();
   void fallbackRuntimeDirectoryMustBePrivate();
@@ -1107,6 +1112,85 @@ void AppControllerTest::startupArgumentsRejectUnsafeImportTargets() {
   }
 }
 
+void AppControllerTest::webcalArgumentBecomesSubscribeRequest() {
+  for (const QString& link :
+       {QStringLiteral("webcal://calendar.example.test/team.ics"),
+        QStringLiteral("webcals://calendar.example.test/team.ics?token=abc"),
+        QStringLiteral("WEBCAL://calendar.example.test/holidays")}) {
+    const StartupRequest request =
+        startupRequestFromArguments({QStringLiteral("omacalendar"), link});
+    QVERIFY2(request.type == StartupRequestType::IcsSubscribe, qPrintable(link));
+    QCOMPARE(request.url, QUrl(link));
+  }
+
+  // The controller only asks the UI to show the prefilled form.
+  AppController controller;
+  QSignalSpy subscribeSpy(&controller, &AppController::openIcsSubscriptionRequested);
+  QSignalSpy importSpy(&controller, &AppController::openIcsImportRequested);
+  controller.handleStartupRequest(startupRequestFromArguments(
+      {QStringLiteral("omacalendar"),
+       QStringLiteral("webcal://calendar.example.test/team.ics")}));
+  QCOMPARE(subscribeSpy.count(), 1);
+  QCOMPARE(subscribeSpy.constFirst().constFirst().toUrl(),
+           QUrl(QStringLiteral("webcal://calendar.example.test/team.ics")));
+  QCOMPARE(importSpy.count(), 0);
+
+  // Links without a host or with embedded credentials are refused.
+  for (const QString& link : {QStringLiteral("webcal:///team.ics"),
+                              QStringLiteral("webcal://user:secret@example.test/a"),
+                              QStringLiteral("webcal://exa mple.test/a")}) {
+    const StartupRequest request =
+        startupRequestFromArguments({QStringLiteral("omacalendar"), link});
+    QVERIFY2(request.type == StartupRequestType::None, qPrintable(link));
+  }
+  controller.handleIcsSubscribeLink(QUrl(QStringLiteral("https://example.test/a.ics")));
+  QCOMPARE(subscribeSpy.count(), 1);
+  QCOMPARE(controller.lastError(),
+           QStringLiteral("Only a webcal:// or webcals:// link can be subscribed to"));
+}
+
+void AppControllerTest::httpsArgumentIsNotASubscribeRequest() {
+  for (const QString& link :
+       {QStringLiteral("https://calendar.example.test/team.ics"),
+        QStringLiteral("http://calendar.example.test/team.ics"),
+        QStringLiteral("feed://calendar.example.test/team.ics")}) {
+    const StartupRequest request =
+        startupRequestFromArguments({QStringLiteral("omacalendar"), link});
+    QVERIFY2(request.type == StartupRequestType::None, qPrintable(link));
+    QVERIFY(!request.url.isValid());
+  }
+}
+
+void AppControllerTest::forwardedWebcalReachesPrimary() {
+  ApplicationInstance primary;
+  QVERIFY(primary.claimPrimary());
+  AppController controller;
+  connect(&primary, &ApplicationInstance::activationRequested, &controller,
+          [&controller](const QString& argument) {
+            controller.handleStartupRequest(
+                startupRequestFromArguments({QStringLiteral("omacalendar"), argument}));
+          });
+  QSignalSpy subscribeSpy(&controller, &AppController::openIcsSubscriptionRequested);
+
+  const QUrl link(
+      QStringLiteral("webcals://calendar.example.test/team.ics?token=a%20b"));
+  const StartupRequest request = startupRequestFromArguments(
+      {QStringLiteral("omacalendar"), link.toString(QUrl::FullyEncoded)});
+  QVERIFY(request.type == StartupRequestType::IcsSubscribe);
+  // The secondary blocks until the primary acknowledges, so it runs on another
+  // thread while this one serves the primary's socket.
+  std::atomic<int> forwarded{-1};
+  std::thread secondaryThread([&forwarded, &request]() {
+    ApplicationInstance secondary;
+    forwarded =
+        secondary.forwardToPrimary(request.url.toString(QUrl::FullyEncoded)) ? 1 : 0;
+  });
+  QTRY_COMPARE(subscribeSpy.count(), 1);
+  secondaryThread.join();
+  QCOMPARE(forwarded.load(), 1);
+  QCOMPARE(subscribeSpy.constFirst().constFirst().toUrl(), link);
+}
+
 void AppControllerTest::controllerDispatchesValidatedIcsFile() {
   QTemporaryFile file(m_xdgRoot.filePath(QStringLiteral("calendar-XXXXXX.ics")));
   QVERIFY(file.open());
@@ -1501,7 +1585,7 @@ void AppControllerTest::preferencesFallBackWithoutGetMany() {
   QStringList methods = settledMethods(daemon);
   QCOMPARE(methods.count(QStringLiteral("settings.getMany")), 1);
   // One fallback read per preference key.
-  QCOMPARE(methods.count(QStringLiteral("settings.get")), 18);
+  QCOMPARE(methods.count(QStringLiteral("settings.get")), 19);
   QCOMPARE(controller.preferences().value(QStringLiteral("timeFormat")).toString(),
            QStringLiteral("24h"));
   QVERIFY2(controller.lastError().isEmpty(), qPrintable(controller.lastError()));
@@ -1511,7 +1595,7 @@ void AppControllerTest::preferencesFallBackWithoutGetMany() {
   daemon.broadcast(QStringLiteral("calendars.changed"));
   methods = settledMethods(daemon);
   QCOMPARE(methods.count(QStringLiteral("settings.getMany")), 0);
-  QCOMPARE(methods.count(QStringLiteral("settings.get")), 18);
+  QCOMPARE(methods.count(QStringLiteral("settings.get")), 19);
 }
 
 void AppControllerTest::contactSuggestionsAreRelayed() {

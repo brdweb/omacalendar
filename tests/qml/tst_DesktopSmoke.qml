@@ -57,6 +57,18 @@ Item {
     }
     Component { id: settingsFactory; Components.AccountSettingsDrawer {} }
     Component { id: errorBannerFactory; Components.ErrorBanner {} }
+    Component { id: welcomeStateFactory; Components.WelcomeState {} }
+    Component { id: icsDropFactory; Components.IcsFileDropArea {} }
+    Component {
+        id: eventDragSourceFactory
+        Rectangle {
+            width: 40
+            height: 20
+            Drag.keys: ["omacalendar-event"]
+            Drag.hotSpot.x: 5
+            Drag.hotSpot.y: 5
+        }
+    }
 
     Component {
         id: signalSpyFactory
@@ -595,6 +607,131 @@ Item {
             compare(dismissed.count, 1)
             banner.message = ""
             verify(!banner.visible)
+        }
+
+        function test_welcome_state_conditions() {
+            const welcome = createTemporaryObject(welcomeStateFactory, scene, {
+                "width": 460, "connected": true, "busy": false, "ready": true,
+                "accounts": [{"id": "local", "provider": "local"}],
+                "onboardingDismissed": false})
+            verify(welcome !== null)
+            compare(welcome.mode, "welcome",
+                    "the built-in device calendar alone still counts as first run")
+            verify(welcome.visible)
+            const card = findChild(welcome, "welcomeState")
+            verify(card !== null)
+            compare(card.title, "Your calendar, locally first")
+            const add = findChild(welcome, "emptyStateAction")
+            const later = findChild(welcome, "emptyStateSecondaryAction")
+            compare(add.text, "Add a calendar")
+            verify(later.visible)
+            compare(later.text, "Not now")
+
+            const addSpy = createTemporaryObject(signalSpyFactory, testCase, {
+                "target": welcome, "signalName": "addCalendarRequested"})
+            const dismissSpy = createTemporaryObject(signalSpyFactory, testCase, {
+                "target": welcome, "signalName": "dismissRequested"})
+            const reconnectSpy = createTemporaryObject(signalSpyFactory, testCase, {
+                "target": welcome, "signalName": "reconnectRequested"})
+            add.clicked()
+            later.clicked()
+            compare(addSpy.count, 1)
+            compare(dismissSpy.count, 1)
+
+            welcome.ready = false
+            compare(welcome.mode, "", "nothing shows before accounts and preferences load")
+            welcome.ready = true
+            welcome.onboardingDismissed = true
+            compare(welcome.mode, "")
+            verify(!welcome.visible)
+            welcome.onboardingDismissed = false
+            for (const provider of ["google", "caldav", "ics"]) {
+                welcome.accounts = [{"id": "local", "provider": "local"},
+                                    {"id": provider, "provider": provider}]
+                compare(welcome.mode, "", provider + " accounts end the first run")
+            }
+            welcome.accounts = []
+            compare(welcome.mode, "welcome")
+
+            // A stopped service has its own state, whatever the accounts.
+            welcome.connected = false
+            welcome.onboardingDismissed = true
+            compare(welcome.mode, "disconnected")
+            verify(welcome.visible)
+            const stopped = findChild(welcome, "serviceStoppedState")
+            verify(stopped !== null)
+            compare(stopped.title, "The calendar service isn't running")
+            compare(add.text, "Reconnect", "the same action the error banner offers")
+            verify(!later.visible)
+            add.clicked()
+            compare(reconnectSpy.count, 1)
+            compare(addSpy.count, 1)
+            welcome.busy = true
+            compare(welcome.mode, "", "no stopped state while reconnecting")
+        }
+
+        function test_file_drop_opens_import() {
+            const drop = createTemporaryObject(icsDropFactory, scene, {
+                "x": 0, "y": 0, "width": 400, "height": 300})
+            verify(drop !== null)
+            compare(drop.keys, ["text/uri-list"])
+            const dialog = createTemporaryObject(icsImportFactory, scene)
+            drop.importRequested.connect(function(fileUrl) {
+                dialog.fileUrl = fileUrl
+                dialog.open()
+            })
+            const importSpy = createTemporaryObject(signalSpyFactory, testCase, {
+                "target": drop, "signalName": "importRequested"})
+
+            // The views' own event drags never reach it.
+            const source = createTemporaryObject(eventDragSourceFactory, scene,
+                                                 {"x": 50, "y": 50})
+            source.Drag.active = true
+            verify(!drop.containsDrag, "internal event drags pass through")
+            source.Drag.drop()
+            source.Drag.active = false
+            compare(importSpy.count, 0)
+
+            const rejected = {"urls": ["file:///tmp/notes.txt",
+                                       "https://calendar.example.test/team.ics"],
+                              "accepted": true}
+            drop.handleEntered(rejected)
+            verify(!rejected.accepted)
+            verify(!drop.handleDropped(rejected))
+            verify(!rejected.accepted)
+            compare(importSpy.count, 0)
+
+            const file = "file:///tmp/team-calendar.ICS"
+            const entered = {"urls": ["https://example.test/", file], "accepted": false}
+            drop.handleEntered(entered)
+            verify(entered.accepted)
+            verify(drop.pendingAcceptable)
+            const dropped = {"urls": ["https://example.test/", file], "accepted": false}
+            verify(drop.handleDropped(dropped))
+            verify(dropped.accepted)
+            compare(importSpy.count, 1)
+            compare(String(importSpy.signalArguments[0][0]), file)
+            tryCompare(dialog, "opened", true)
+            compare(String(dialog.fileUrl), file)
+            dialog.close()
+            tryCompare(dialog, "opened", false)
+        }
+
+        function test_webcal_link_prefills_subscription_form() {
+            const settings = createTemporaryObject(settingsFactory, scene, {
+                "connected": true})
+            verify(settings !== null)
+            const addSpy = createTemporaryObject(signalSpyFactory, testCase, {
+                "target": settings, "signalName": "addIcsSubscriptionRequested"})
+            settings.openIcsSubscription("webcal://calendar.example.test/team.ics")
+            tryCompare(settings, "opened", true)
+            const field = findChild(settings, "icsUrlField")
+            verify(field !== null)
+            compare(field.text, "webcal://calendar.example.test/team.ics")
+            verify(field.visible, "the subscription form is expanded")
+            compare(addSpy.count, 0, "nothing is subscribed until confirmed")
+            settings.close()
+            tryCompare(settings, "opened", false)
         }
 
         function test_account_status_labels_are_human() {

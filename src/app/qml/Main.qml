@@ -593,15 +593,23 @@ ApplicationWindow {
                         }
                     }
 
-                    EmptyState {
-                        visible: App.calendars.length === 0 && !App.busy
+                    WelcomeState {
+                        objectName: "welcomeStateCard"
                         anchors.centerIn: parent
-                        width: Math.min(420, parent.width - 60)
-                        iconText: Theme.glyphCalendar
-                        title: qsTr("Your calendar, locally first")
-                        description: qsTr("Create a device-only calendar or connect Google, CalDAV, or an ICS subscription.")
-                        actionText: qsTr("Add a calendar")
-                        onActionRequested: settingsDrawer.openAccounts()
+                        width: Math.min(460, parent.width - 60)
+                        height: implicitHeight
+                        z: 40
+                        connected: App.connected
+                        busy: App.busy
+                        ready: window.firstLoadComplete
+                               && Boolean(window.appValue("preferencesLoaded", true))
+                        accounts: window.appList("accounts")
+                        onboardingDismissed: window.preferences.onboardingDismissed === true
+                                             || window.preferences.onboardingDismissed === "true"
+                        onAddCalendarRequested: settingsDrawer.openAccounts()
+                        onDismissRequested: window.callApp("setPreference",
+                                                           ["onboardingDismissed", true])
+                        onReconnectRequested: window.handleErrorAction("reconnect")
                     }
 
                     Rectangle {
@@ -966,6 +974,18 @@ ApplicationWindow {
         function onOpenIcsImportRequested(file) {
             window.openIcsImport(file)
         }
+        function onOpenIcsSubscriptionRequested(url) {
+            settingsDrawer.openIcsSubscription(String(url))
+        }
+    }
+
+    // .ics files dropped anywhere on the window. The controller validates the
+    // file and answers with openIcsImportRequested, like a command-line import.
+    IcsFileDropArea {
+        objectName: "icsFileDropArea"
+        anchors.fill: parent
+        z: 1000
+        onImportRequested: fileUrl => window.callApp("handleIcsImportFile", [fileUrl])
     }
 
     AppShortcuts {

@@ -9,7 +9,7 @@ Icon=org.omacalendar.OmaCalendar
 Terminal=false
 Categories=Office;Calendar;
 Keywords=calendar;agenda;caldav;google;ics;
-MimeType=text/calendar;x-scheme-handler/omacalendar;
+MimeType=text/calendar;x-scheme-handler/omacalendar;x-scheme-handler/webcal;x-scheme-handler/webcals;
 StartupNotify=true
 Actions=NewEvent;
 

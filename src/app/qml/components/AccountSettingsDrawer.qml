@@ -74,12 +74,21 @@ Drawer {
     signal backupRequested()
     signal importIcsRequested()
     signal exportIcsRequested()
+    // Asks the accounts tab to show the ICS form with this URL filled in.
+    signal icsSubscriptionPrefillRequested(string url)
     signal upsertCalendarSetRequested(var calendarSet)
     signal removeCalendarSetRequested(string calendarSetId)
 
     function openAccounts() {
         settingsTabs.currentIndex = 0
         open()
+    }
+
+    // Opens the ICS subscription form prefilled with a link from outside the
+    // app. Nothing is subscribed until the person presses the form's button.
+    function openIcsSubscription(url) {
+        openAccounts()
+        icsSubscriptionPrefillRequested(String(url || ""))
     }
 
     function beginSubmission(formId) {

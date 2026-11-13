@@ -399,8 +399,27 @@ ScrollView {
         }
 
         AppAccordionSection {
+            id: icsSection
             title: qsTr("ICS subscription")
             expanded: false
+
+            Connections {
+                target: tab.drawer
+                function onIcsSubscriptionPrefillRequested(url) {
+                    icsSection.expanded = true
+                    icsUrl.text = url
+                    icsName.text = ""
+                    icsUser.text = ""
+                    icsPassword.text = ""
+                    icsUrl.forceActiveFocus()
+                    // The form is last; scroll to it once it has expanded.
+                    Qt.callLater(function() {
+                        const bar = tab.ScrollBar.vertical
+                        if (bar)
+                            bar.position = Math.max(0, 1.0 - bar.size)
+                    })
+                }
+            }
 
             Rectangle {
                 Layout.fillWidth: true

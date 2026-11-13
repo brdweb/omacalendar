@@ -26,6 +26,21 @@ QUrl normalizedLocalIcsUrl(const QUrl& candidate) {
   return canonicalPath.isEmpty() ? QUrl() : QUrl::fromLocalFile(canonicalPath);
 }
 
+QUrl normalizedWebcalUrl(const QUrl& candidate) {
+  if (!candidate.isValid()) {
+    return {};
+  }
+  const QString scheme = candidate.scheme().toLower();
+  if (scheme != QStringLiteral("webcal") && scheme != QStringLiteral("webcals")) {
+    return {};
+  }
+  // Credentials in a link would end up in a visible form field; refuse them.
+  if (candidate.host().isEmpty() || !candidate.userInfo().isEmpty()) {
+    return {};
+  }
+  return candidate;
+}
+
 StartupRequest startupRequestFromArguments(const QStringList& arguments) {
   for (qsizetype index = 1; index < arguments.size(); ++index) {
     const QString argument = arguments.at(index);
@@ -33,6 +48,11 @@ StartupRequest startupRequestFromArguments(const QStringList& arguments) {
     if (parsed.isValid() && parsed.scheme().compare(QStringLiteral("omacalendar"),
                                                     Qt::CaseInsensitive) == 0) {
       return {StartupRequestType::DeepLink, parsed};
+    }
+
+    const QUrl webcal = normalizedWebcalUrl(parsed);
+    if (webcal.isValid()) {
+      return {StartupRequestType::IcsSubscribe, webcal};
     }
 
     QUrl localCandidate;
