@@ -1080,6 +1080,18 @@ void ProviderTest::googleResponseClassification() {
                                             received);
   QVERIFY(response.retryable);
   QCOMPARE(response.networkError, static_cast<int>(QNetworkReply::TimeoutError));
+  // Transport failures keep a code the desktop app can explain.
+  QCOMPARE(response.errorCode, QStringLiteral("timeout"));
+  response = google::parseGoogleApiResponse(0, QNetworkReply::HostNotFoundError, {}, {},
+                                            {}, received);
+  QCOMPARE(response.errorCode, QStringLiteral("host_not_found"));
+  QVERIFY(response.retryable);
+  response = google::parseGoogleApiResponse(0, QNetworkReply::SslHandshakeFailedError,
+                                            {}, {}, {}, received);
+  QCOMPARE(response.errorCode, QStringLiteral("tls_error"));
+  response = google::parseGoogleApiResponse(
+      0, QNetworkReply::TemporaryNetworkFailureError, {}, {}, {}, received);
+  QCOMPARE(response.errorCode, QStringLiteral("network_unavailable"));
 
   response = google::parseGoogleApiResponse(200, QNetworkReply::NoError,
                                             QByteArrayLiteral("[]"), {}, {}, received);

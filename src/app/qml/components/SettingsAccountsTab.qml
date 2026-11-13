@@ -3,11 +3,63 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 import OmaCalendar
+import "../StatusLabels.js" as StatusLabels
 
 // Connected accounts and the forms that add Google, CalDAV and ICS sources.
 ScrollView {
     id: tab
     required property var drawer
+
+    // A visible label above a form field.
+    component FieldLabel: Text {
+        textFormat: Text.PlainText
+        Layout.fillWidth: true
+        Layout.topMargin: Theme.spacingXS
+        color: Theme.text
+        font.pixelSize: Theme.smallFontSize
+        font.weight: Font.DemiBold
+    }
+
+    // One form's outcome: a spinner while it is in flight, then the result,
+    // which stays until dismissed or the form is sent again. Children are
+    // extra buttons shown beside it.
+    component SubmissionStatus: RowLayout {
+        id: status
+        required property string form
+        required property var drawer
+        objectName: form + "SubmissionStatus"
+        visible: status.drawer.submissionForm === form
+        Layout.fillWidth: true
+        spacing: Theme.spacingSM
+        BusyIndicator {
+            visible: status.drawer.submissionPending
+            running: visible
+            implicitWidth: 18
+            implicitHeight: 18
+        }
+        Text {
+            objectName: status.form + "SubmissionText"
+            textFormat: Text.PlainText
+            Layout.fillWidth: true
+            text: status.drawer.submissionStatusText()
+            color: status.drawer.submissionToneColor()
+            font.pixelSize: Theme.smallFontSize
+            wrapMode: Text.Wrap
+            Accessible.role: Accessible.StaticText
+            Accessible.name: text
+        }
+        AppButton {
+            objectName: status.form + "SubmissionDismiss"
+            visible: !status.drawer.submissionPending
+                     && status.drawer.submissionMessage.length > 0
+            text: "×"
+            toolTipText: qsTr("Dismiss")
+            Accessible.name: qsTr("Dismiss message")
+            compact: true
+            quiet: true
+            onClicked: status.drawer.dismissSubmission()
+        }
+    }
 
     clip: true
     ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
@@ -41,7 +93,8 @@ ScrollView {
                     spacing: Theme.spacingSM
                     StatusBadge {
                         dotOnly: true
-                        text: accountCard.modelData.authStatus || qsTr("unknown")
+                        text: StatusLabels.accountStatusLabel(
+                                  accountCard.modelData.authStatus)
                         tone: accountCard.modelData.authStatus === "connected"
                               ? "success"
                               : accountCard.modelData.authStatus === "reauthorization_required"
@@ -62,11 +115,14 @@ ScrollView {
                             elide: Text.ElideRight
                         }
                         Text {
+                            objectName: "accountStatusText-" + String(accountCard.modelData.id)
                             textFormat: Text.PlainText
                             Layout.fillWidth: true
-                            text: String(accountCard.modelData.provider || qsTr("calendar")).toUpperCase()
-                                  + " · "
-                                  + String(accountCard.modelData.authStatus || qsTr("connected")).replace(/_/g, " ")
+                            text: qsTr("%1 · %2").arg(
+                                      StatusLabels.providerLabel(
+                                          accountCard.modelData.provider)).arg(
+                                      StatusLabels.accountStatusLabel(
+                                          accountCard.modelData.authStatus))
                             color: Theme.mutedText
                             font.pixelSize: Theme.microFontSize
                             elide: Text.ElideRight
@@ -153,7 +209,7 @@ ScrollView {
                 Text {
                     textFormat: Text.PlainText
                     Layout.fillWidth: true
-                    text: qsTr("Authorization opens in your browser and returns through a secure local callback. OmaCalendar requests calendar and event access only.")
+                    text: qsTr("Authorization opens in your browser and returns through a secure local callback. OmaCalendar asks for access to your calendars and events, your tasks, and free/busy information.")
                     color: Theme.mutedText
                     font.pixelSize: Theme.smallFontSize
                     wrapMode: Text.Wrap
@@ -194,26 +250,17 @@ ScrollView {
                                         googleName.text.trim())
                     }
                 }
-                RowLayout {
-                    objectName: "googleSubmissionStatus"
-                    visible: tab.drawer.submissionForm === "google"
-                    Layout.fillWidth: true
-                    spacing: Theme.spacingSM
-                    BusyIndicator {
+                SubmissionStatus {
+                    form: "google"
+                    drawer: tab.drawer
+                    AppButton {
+                        objectName: "googleSignInCancel"
                         visible: tab.drawer.submissionPending
-                        running: visible
-                        implicitWidth: 18
-                        implicitHeight: 18
-                    }
-                    Text {
-                        textFormat: Text.PlainText
-                        Layout.fillWidth: true
-                        text: tab.drawer.submissionStatusText()
-                        color: tab.drawer.submissionToneColor()
-                        font.pixelSize: Theme.smallFontSize
-                        wrapMode: Text.Wrap
-                        Accessible.role: Accessible.StaticText
-                        Accessible.name: text
+                                 && tab.drawer.googleSignInState === "waiting"
+                        text: qsTr("Cancel")
+                        compact: true
+                        quiet: true
+                        onClicked: tab.drawer.cancelGoogleSignInRequested()
                     }
                 }
                 }
@@ -237,30 +284,94 @@ ScrollView {
                 anchors.top: parent.top
                 anchors.margins: Theme.spacingMD
                 spacing: Theme.spacingSM
-                AppTextField {
-                    id: caldavName
-                    Layout.fillWidth: true
-                    placeholderText: qsTr("Account label (optional)")
-                }
+                FieldLabel { text: qsTr("Server address") }
                 AppTextField {
                     id: caldavEndpoint
                     objectName: "caldavEndpointField"
-                    accessibleName: qsTr("CalDAV server URL")
                     Layout.fillWidth: true
                     placeholderText: qsTr("https://caldav.example.com/")
+                    label: qsTr("CalDAV server URL")
                     inputMethodHints: Qt.ImhUrlCharactersOnly | Qt.ImhNoAutoUppercase
                 }
+                AppButton {
+                    objectName: "caldavHelpToggle"
+                    text: caldavHelp.shown ? qsTr("Hide server addresses")
+                                             : qsTr("Where do I find the server address?")
+                    compact: true
+                    quiet: true
+                    onClicked: caldavHelp.shown = !caldavHelp.shown
+                }
+                ColumnLayout {
+                    id: caldavHelp
+                    objectName: "caldavHelp"
+                    property bool shown: false
+                    visible: shown
+                    Layout.fillWidth: true
+                    spacing: Theme.spacingXS
+                    Repeater {
+                        model: [
+                            {"name": qsTr("Fastmail"),
+                             "text": qsTr("https://caldav.fastmail.com/ with your Fastmail address and an app password from Settings → Privacy & Security.")},
+                            {"name": qsTr("iCloud"),
+                             "text": qsTr("https://caldav.icloud.com/ with your Apple Account email and an app-specific password from account.apple.com. Your usual Apple Account password does not work here.")},
+                            {"name": qsTr("Nextcloud"),
+                             "text": qsTr("https://cloud.example.com/remote.php/dav/ with your Nextcloud username and an app password from Personal settings → Security.")},
+                            {"name": qsTr("Radicale"),
+                             "text": qsTr("https://radicale.example.com/ (or http://localhost:5232/ on this computer) with the username and password set up on the server.")}
+                        ]
+                        delegate: Text {
+                            required property var modelData
+                            textFormat: Text.PlainText
+                            Layout.fillWidth: true
+                            text: qsTr("%1: %2").arg(modelData.name).arg(modelData.text)
+                            color: Theme.mutedText
+                            font.pixelSize: Theme.smallFontSize
+                            wrapMode: Text.Wrap
+                        }
+                    }
+                }
+                FieldLabel { text: qsTr("Username") }
                 AppTextField {
                     id: caldavUser
+                    objectName: "caldavUser"
                     Layout.fillWidth: true
-                    placeholderText: qsTr("Username")
+                    placeholderText: qsTr("name@example.com")
+                    label: qsTr("CalDAV username")
                     inputMethodHints: Qt.ImhEmailCharactersOnly | Qt.ImhNoAutoUppercase
                 }
-                AppTextField {
-                    id: caldavPassword
+                FieldLabel { text: qsTr("Password or app password") }
+                RowLayout {
+                    id: caldavPasswordRow
+                    property bool passwordShown: false
                     Layout.fillWidth: true
-                    placeholderText: qsTr("Password or app password")
-                    echoMode: TextInput.Password
+                    spacing: Theme.spacingSM
+                    AppTextField {
+                        id: caldavPassword
+                        objectName: "caldavPassword"
+                        Layout.fillWidth: true
+                        label: qsTr("CalDAV password or app password")
+                        echoMode: caldavPasswordRow.passwordShown ? TextInput.Normal
+                                                                  : TextInput.Password
+                    }
+                    AppButton {
+                        id: caldavShowPassword
+                        objectName: "caldavShowPassword"
+                        text: caldavPasswordRow.passwordShown ? qsTr("Hide") : qsTr("Show")
+                        Accessible.name: caldavPasswordRow.passwordShown
+                                         ? qsTr("Hide password") : qsTr("Show password")
+                        compact: true
+                        quiet: true
+                        onClicked: caldavPasswordRow.passwordShown =
+                                   !caldavPasswordRow.passwordShown
+                    }
+                }
+                FieldLabel { text: qsTr("Account label (optional)") }
+                AppTextField {
+                    id: caldavName
+                    objectName: "caldavName"
+                    Layout.fillWidth: true
+                    placeholderText: qsTr("Shown in the sidebar")
+                    label: qsTr("CalDAV account label")
                 }
                 AppButton {
                     Layout.fillWidth: true
@@ -279,27 +390,9 @@ ScrollView {
                         caldavPassword.text = ""
                     }
                 }
-                RowLayout {
-                    objectName: "caldavSubmissionStatus"
-                    visible: tab.drawer.submissionForm === "caldav"
-                    Layout.fillWidth: true
-                    spacing: Theme.spacingSM
-                    BusyIndicator {
-                        visible: tab.drawer.submissionPending
-                        running: visible
-                        implicitWidth: 18
-                        implicitHeight: 18
-                    }
-                    Text {
-                        textFormat: Text.PlainText
-                        Layout.fillWidth: true
-                        text: tab.drawer.submissionStatusText()
-                        color: tab.drawer.submissionToneColor()
-                        font.pixelSize: Theme.smallFontSize
-                        wrapMode: Text.Wrap
-                        Accessible.role: Accessible.StaticText
-                        Accessible.name: text
-                    }
+                SubmissionStatus {
+                    form: "caldav"
+                    drawer: tab.drawer
                 }
                 }
             }
@@ -362,27 +455,9 @@ ScrollView {
                         icsPassword.text = ""
                     }
                 }
-                RowLayout {
-                    objectName: "icsSubmissionStatus"
-                    visible: tab.drawer.submissionForm === "ics"
-                    Layout.fillWidth: true
-                    spacing: Theme.spacingSM
-                    BusyIndicator {
-                        visible: tab.drawer.submissionPending
-                        running: visible
-                        implicitWidth: 18
-                        implicitHeight: 18
-                    }
-                    Text {
-                        textFormat: Text.PlainText
-                        Layout.fillWidth: true
-                        text: tab.drawer.submissionStatusText()
-                        color: tab.drawer.submissionToneColor()
-                        font.pixelSize: Theme.smallFontSize
-                        wrapMode: Text.Wrap
-                        Accessible.role: Accessible.StaticText
-                        Accessible.name: text
-                    }
+                SubmissionStatus {
+                    form: "ics"
+                    drawer: tab.drawer
                 }
                 }
             }

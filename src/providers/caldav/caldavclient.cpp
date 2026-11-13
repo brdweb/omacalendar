@@ -7,6 +7,8 @@
 #include <QTimer>
 #include <memory>
 
+#include "sync/networkerrorcode.h"
+
 namespace omacalendar::caldav {
 namespace {
 
@@ -60,7 +62,7 @@ DavResponse responseFromReply(QNetworkReply* reply, const QByteArray& body,
       (result.httpStatus == 0 && reply->error() != QNetworkReply::NoError);
   result.errorCode = result.httpStatus > 0
                          ? QStringLiteral("http_%1").arg(result.httpStatus)
-                         : QStringLiteral("network_error");
+                         : networkErrorCode(static_cast<int>(reply->error()));
   result.errorMessage =
       result.authenticationRequired ? QStringLiteral("CalDAV credentials were rejected")
       : result.httpStatus > 0

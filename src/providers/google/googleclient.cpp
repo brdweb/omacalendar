@@ -12,6 +12,7 @@
 #include <limits>
 
 #include "providers/google/googleauth.h"
+#include "sync/networkerrorcode.h"
 
 namespace omacalendar::google {
 namespace {
@@ -283,6 +284,10 @@ ApiResponse parseGoogleApiResponse(const int httpStatus, const int networkError,
   }
   if (result.errorCode.isEmpty()) {
     result.errorCode = error.value(QStringLiteral("status")).toString();
+  }
+  if (result.errorCode.isEmpty() && result.httpStatus == 0 &&
+      networkError != static_cast<int>(QNetworkReply::NoError)) {
+    result.errorCode = networkErrorCode(networkError);
   }
   if (result.errorCode.isEmpty()) {
     result.errorCode = QStringLiteral("http_%1").arg(result.httpStatus);

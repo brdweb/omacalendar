@@ -24,6 +24,18 @@ class AppController final : public QObject {
   Q_PROPERTY(bool busy READ busy NOTIFY busyChanged)
   Q_PROPERTY(QString statusText READ statusText NOTIFY statusTextChanged)
   Q_PROPERTY(QString lastError READ lastError NOTIFY lastErrorChanged)
+  // The service's own wording behind a friendly lastError, for Details.
+  Q_PROPERTY(QString lastErrorDetails READ lastErrorDetails NOTIFY lastErrorChanged)
+  // What would fix lastError: "sign_in", "account_settings", "retry" or "".
+  Q_PROPERTY(QString lastErrorAction READ lastErrorAction NOTIFY lastErrorChanged)
+  // The account lastError is about, when it came from one account's sync.
+  Q_PROPERTY(QString lastErrorAccountId READ lastErrorAccountId NOTIFY lastErrorChanged)
+  // The browser sign-in started from this window: "" (none), "waiting",
+  // "connected", "cancelled", "timed_out" or "failed".
+  Q_PROPERTY(
+      QString googleSignInState READ googleSignInState NOTIFY googleSignInChanged)
+  Q_PROPERTY(QString googleSignInAccountId READ googleSignInAccountId NOTIFY
+                 googleSignInChanged)
   Q_PROPERTY(QVariantList accounts READ accounts NOTIFY accountsChanged)
   // The latest free/busy answer: {requestId, start, end, self, attendees
   // (email -> [{start, end}]), pending (emails), unavailable ([{email,
@@ -90,6 +102,11 @@ class AppController final : public QObject {
   [[nodiscard]] bool busy() const;
   [[nodiscard]] QString statusText() const;
   [[nodiscard]] QString lastError() const;
+  [[nodiscard]] QString lastErrorDetails() const;
+  [[nodiscard]] QString lastErrorAction() const;
+  [[nodiscard]] QString lastErrorAccountId() const;
+  [[nodiscard]] QString googleSignInState() const;
+  [[nodiscard]] QString googleSignInAccountId() const;
   [[nodiscard]] QVariantList accounts() const;
   [[nodiscard]] QVariantMap freeBusy() const;
   [[nodiscard]] QVariantMap eventAttachments() const;
@@ -125,6 +142,18 @@ class AppController final : public QObject {
   [[nodiscard]] bool googleOAuthConfigured() const;
 
   Q_INVOKABLE void refresh();
+  // Turns a daemon error code (an IPC error.code or a sync status errorCode)
+  // into {message, action, details}: translated text that says what to do,
+  // the action that would fix it ("sign_in", "account_settings", "retry" or
+  // "") and the service's own text. provider ("google", "caldav", "ics" or
+  // "") picks between wordings where they differ. Unknown codes keep
+  // fallbackMessage.
+  Q_INVOKABLE [[nodiscard]] QVariantMap describeError(
+      const QString& code, const QString& fallbackMessage,
+      const QString& provider = {}) const;
+  Q_INVOKABLE void dismissError();
+  // Stops the browser sign-in in progress (googleSignInAccountId).
+  Q_INVOKABLE void cancelGoogleSignIn();
   Q_INVOKABLE void loadRange(const QDate& firstDate, const QDate& lastDate);
   Q_INVOKABLE void createEvent(const QVariantMap& event);
   Q_INVOKABLE void updateEvent(const QVariantMap& event);
@@ -251,6 +280,7 @@ class AppController final : public QObject {
   void busyChanged();
   void statusTextChanged();
   void lastErrorChanged();
+  void googleSignInChanged();
   void accountsChanged();
   void accountSyncStatesChanged();
   void calendarsChanged();
@@ -314,6 +344,18 @@ class AppController final : public QObject {
                ErrorHandler errorHandler = {});
   void removeInvitation(const QString& eventId, const QString& recurrenceId);
   void setError(const QString& message);
+  // Shows the friendly form of a daemon error code; message is the raw text.
+  void setFriendlyError(const QString& code, const QString& message,
+                        const QString& accountId = {});
+  void setErrorState(const QString& message, const QString& details,
+                     const QString& action, const QString& accountId);
+  [[nodiscard]] QString accountProvider(const QString& accountId) const;
+  // After google.oauthStart or accounts.reauthorize answered: the browser
+  // is open and the daemon waits for its callback.
+  void beginGoogleSignIn(const QJsonValue& result);
+  void setGoogleSignIn(const QString& state, const QString& accountId);
+  void updateGoogleSignInFromStatus(const QString& accountId,
+                                    const QJsonObject& status);
   void setStatus(const QString& message);
   void setBusy(bool busy);
   void startDaemonIfNeeded();
@@ -413,6 +455,11 @@ class AppController final : public QObject {
   int m_scopeRequestsInFlight = 0;
   QString m_statusText = QStringLiteral("Connecting to calendar service…");
   QString m_lastError;
+  QString m_lastErrorDetails;
+  QString m_lastErrorAction;
+  QString m_lastErrorAccountId;
+  QString m_googleSignInState;
+  QString m_googleSignInAccountId;
   int m_activeRequests = 0;
   qint64 m_subscriptionRevision = -1;
   bool m_daemonStartAttempted = false;

@@ -15,6 +15,7 @@
 #include <utility>
 
 #include "providers/caldav/icalcodec.h"
+#include "sync/networkerrorcode.h"
 
 namespace omacalendar::ics {
 namespace {
@@ -814,7 +815,7 @@ void IcsService::beginFetch(const std::shared_ptr<FetchContext>& context,
                                  status >= 500 || status == 0;
           finishFetch(context,
                       status > 0 ? QStringLiteral("http_%1").arg(status)
-                                 : QStringLiteral("network_error"),
+                                 : networkErrorCode(static_cast<int>(networkError)),
                       publicNetworkError(status, networkError), retryable);
           return;
         }

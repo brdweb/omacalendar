@@ -145,6 +145,26 @@ QtObject {
         lastOpenedUrl = value
     }
 
+    // Errors and Google sign-in, as AppController reports them.
+    property string lastError: ""
+    property string lastErrorDetails: ""
+    property string lastErrorAction: ""
+    property string lastErrorAccountId: ""
+    property string googleSignInState: ""
+    property string googleSignInAccountId: ""
+
+    function dismissError() {
+        lastError = ""
+        lastErrorDetails = ""
+        lastErrorAction = ""
+        lastErrorAccountId = ""
+    }
+
+    function cancelGoogleSignIn() {
+        if (googleSignInState === "waiting")
+            googleSignInState = "cancelled"
+    }
+
     function connectGoogleWithClientId(clientId, displayName) {
         clientId
         displayName

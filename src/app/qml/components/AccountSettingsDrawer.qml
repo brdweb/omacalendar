@@ -26,6 +26,9 @@ Drawer {
     property var availableTimeZoneIds: ["UTC"]
     property bool bundledGoogleOAuthAvailable: false
     property bool googleOAuthConfigured: false
+    // App.googleSignInState: "", "waiting", "connected", "cancelled",
+    // "timed_out" or "failed".
+    property string googleSignInState: ""
     readonly property var timeZoneOptions: buildTimeZoneOptions()
     readonly property var defaultCalendarOptions: buildDefaultCalendarOptions()
 
@@ -60,6 +63,8 @@ Drawer {
     signal updateAccountCredentialsRequested(string accountId, string username,
                                              string password)
     signal syncAccountRequested(string accountId)
+    signal cancelGoogleSignInRequested()
+    signal dismissErrorRequested()
     signal calendarPreferenceChanged(string calendarId, string key, var value)
     signal preferenceChanged(string key, var value)
     signal diagnosticsRequested()
@@ -79,28 +84,48 @@ Drawer {
         submissionTone = "info"
         submissionPending = true
         submissionAccountCount = accounts.length
-        submissionTimer.restart()
+        // Google waits for the browser for as long as the person needs; it
+        // ends with sign-in, Cancel or the service's own timeout.
+        if (submissionForm === "google")
+            submissionTimer.stop()
+        else
+            submissionTimer.restart()
     }
 
-    function finishSubmission(succeeded, message) {
+    // Errors and notes stay until dismissed or the form is sent again;
+    // success clears itself.
+    function finishSubmission(succeeded, message, tone) {
         if (submissionForm.length === 0)
             return
         submissionPending = false
-        submissionTone = succeeded ? "success" : "danger"
+        submissionTone = tone !== undefined ? String(tone)
+                                             : succeeded ? "success" : "danger"
         submissionMessage = String(message || "")
-        submissionTimer.restart()
+        if (succeeded)
+            submissionTimer.restart()
+        else
+            submissionTimer.stop()
     }
 
     function clearSubmission() {
+        submissionTimer.stop()
         submissionForm = ""
         submissionMessage = ""
         submissionPending = false
         submissionTone = "info"
     }
 
+    function dismissSubmission() {
+        if (submissionTone === "danger")
+            dismissErrorRequested()
+        clearSubmission()
+    }
+
     function submissionStatusText() {
         if (!submissionPending)
             return submissionMessage
+        if (submissionForm === "google" && googleSignInState === "waiting")
+            return qsTr("Waiting for browser… Finish signing in to Google in the browser window that opened.")
         return busy && statusText.length > 0 ? statusText : qsTr("Connecting…")
     }
 
@@ -113,7 +138,10 @@ Drawer {
     }
 
     onAccountsChanged: {
-        if (submissionPending && accounts.length > submissionAccountCount) {
+        // A Google account appears as soon as sign-in starts; it is done
+        // when googleSignInState says so.
+        if (submissionPending && submissionForm !== "google"
+                && accounts.length > submissionAccountCount) {
             finishSubmission(true,
                              qsTr("Connected. Calendars are syncing in the background."))
         }
@@ -124,15 +152,32 @@ Drawer {
             finishSubmission(false, lastError)
     }
 
+    onGoogleSignInStateChanged: {
+        if (submissionForm !== "google" || !submissionPending)
+            return
+        if (googleSignInState === "connected")
+            finishSubmission(true, qsTr("Signed in. Calendars are syncing in the background."))
+        else if (googleSignInState === "timed_out")
+            finishSubmission(false, qsTr("Google sign-in timed out before it was finished in the browser. Try again."))
+        else if (googleSignInState === "cancelled")
+            finishSubmission(false, qsTr("Google sign-in cancelled."), "info")
+    }
+
     onCalendarsChanged: deletingCalendarId = ""
 
     Timer {
         id: submissionTimer
+        objectName: "submissionTimer"
         // Long window while the provider round-trip is in flight, short window
-        // once the form has reported its outcome.
+        // once the form has reported success.
         interval: root.submissionPending ? 45000 : 6000
-        running: root.submissionForm.length > 0
-        onTriggered: root.clearSubmission()
+        onTriggered: {
+            if (root.submissionPending)
+                root.finishSubmission(false, qsTr("This is taking longer than usual. The account keeps connecting in the background; see Activity for progress."),
+                                      "info")
+            else
+                root.clearSubmission()
+        }
     }
 
     Timer {

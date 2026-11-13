@@ -14,6 +14,8 @@
 #include <QStringList>
 #include <QTimeZone>
 #include <QUrlQuery>
+#include <algorithm>
+#include <initializer_list>
 #include <utility>
 
 #include "calendarpdf.h"
@@ -184,8 +186,9 @@ AppController::AppController(QObject* parent)
             if (errorHandler && errorHandler(error)) {
               return;
             }
-            setError(error.value(QStringLiteral("message"))
-                         .toString(tr("Calendar service request failed")));
+            setFriendlyError(error.value(QStringLiteral("code")).toString(),
+                             error.value(QStringLiteral("message"))
+                                 .toString(tr("Calendar service request failed")));
           });
   connect(
       &m_client, &ipc::IpcClient::notificationReceived, this,
@@ -242,12 +245,19 @@ AppController::AppController(QObject* parent)
           scheduleRefresh(parts);
         } else if (event == QStringLiteral("sync.statusChanged")) {
           const QJsonObject status = data.value(QStringLiteral("status")).toObject();
-          setAccountSyncState(data.value(QStringLiteral("accountId")).toString(),
-                              status);
+          const QString accountId = data.value(QStringLiteral("accountId")).toString();
+          setAccountSyncState(accountId, status);
+          updateGoogleSignInFromStatus(accountId, status);
           const QString state = status.value(QStringLiteral("state")).toString();
           if (state == QStringLiteral("error") ||
               state == QStringLiteral("reauthorization_required")) {
-            setError(status.value(QStringLiteral("message")).toString());
+            // Subscriptions name the message errorMessage.
+            QString message = status.value(QStringLiteral("message")).toString();
+            if (message.isEmpty()) {
+              message = status.value(QStringLiteral("errorMessage")).toString();
+            }
+            setFriendlyError(status.value(QStringLiteral("errorCode")).toString(),
+                             message, accountId);
           } else if (state == QStringLiteral("syncing")) {
             setStatus(tr("Synchronizing calendars…"));
           } else if (state == QStringLiteral("idle")) {
@@ -299,6 +309,11 @@ bool AppController::connected() const { return m_client.isConnected(); }
 bool AppController::busy() const { return m_activeRequests > 0; }
 QString AppController::statusText() const { return m_statusText; }
 QString AppController::lastError() const { return m_lastError; }
+QString AppController::lastErrorDetails() const { return m_lastErrorDetails; }
+QString AppController::lastErrorAction() const { return m_lastErrorAction; }
+QString AppController::lastErrorAccountId() const { return m_lastErrorAccountId; }
+QString AppController::googleSignInState() const { return m_googleSignInState; }
+QString AppController::googleSignInAccountId() const { return m_googleSignInAccountId; }
 QVariantList AppController::accounts() const { return m_accounts; }
 QVariantMap AppController::accountSyncStates() const { return m_accountSyncStates; }
 QVariantList AppController::calendars() const { return m_calendars; }
@@ -595,6 +610,18 @@ void AppController::refreshParts(const int parts) {
       m_accounts = variantList(value, QStringLiteral("accounts"));
       m_accountsModel.replace(m_accounts);
       emit accountsChanged();
+      if (m_googleSignInState == QStringLiteral("waiting")) {
+        for (const QVariant& item : std::as_const(m_accounts)) {
+          const QVariantMap account = item.toMap();
+          if (account.value(QStringLiteral("id")).toString() ==
+                  m_googleSignInAccountId &&
+              account.value(QStringLiteral("authStatus")).toString() ==
+                  QStringLiteral("connected")) {
+            setGoogleSignIn(QStringLiteral("connected"), m_googleSignInAccountId);
+            break;
+          }
+        }
+      }
       refreshAccountSyncStates(false);
     });
   }
@@ -1570,11 +1597,7 @@ void AppController::connectGoogle(const QString& displayName) {
          }
          send(QStringLiteral("google.oauthStart"),
               {{QStringLiteral("displayName"), displayName.trimmed()}},
-              [this](const QJsonValue&) {
-                setStatus(tr("Opening Google authorization…"));
-                emit accountSetupStarted();
-                refresh();
-              });
+              [this](const QJsonValue& result) { beginGoogleSignIn(result); });
        });
 }
 
@@ -1582,11 +1605,7 @@ void AppController::connectGoogleConfigured(const QString& displayName) {
   setError({});
   send(QStringLiteral("google.oauthStart"),
        {{QStringLiteral("displayName"), displayName.trimmed()}},
-       [this](const QJsonValue&) {
-         setStatus(tr("Opening Google authorization…"));
-         emit accountSetupStarted();
-         refresh();
-       });
+       [this](const QJsonValue& result) { beginGoogleSignIn(result); });
 }
 
 void AppController::connectGoogleWithClientId(const QString& clientId,
@@ -1607,11 +1626,7 @@ void AppController::connectGoogleWithClientId(const QString& clientId,
          }
          send(QStringLiteral("google.oauthStart"),
               {{QStringLiteral("displayName"), displayName.trimmed()}},
-              [this](const QJsonValue&) {
-                setStatus(tr("Opening Google authorization…"));
-                emit accountSetupStarted();
-                refresh();
-              });
+              [this](const QJsonValue& result) { beginGoogleSignIn(result); });
        });
 }
 
@@ -1646,11 +1661,7 @@ void AppController::connectGoogleWithCredentials(const QUrl& credentialsFile,
        [this, displayName](const QJsonValue&) {
          send(QStringLiteral("google.oauthStart"),
               {{QStringLiteral("displayName"), displayName}},
-              [this](const QJsonValue&) {
-                setStatus(tr("Opening Google authorization…"));
-                emit accountSetupStarted();
-                refresh();
-              });
+              [this](const QJsonValue& result) { beginGoogleSignIn(result); });
        });
 }
 
@@ -1695,11 +1706,8 @@ void AppController::reauthorizeAccount(const QString& accountId) {
     return;
   }
   send(QStringLiteral("accounts.reauthorize"),
-       {{QStringLiteral("accountId"), accountId}}, [this](const QJsonValue&) {
-         setStatus(tr("Opening account authorization…"));
-         emit accountSetupStarted();
-         refresh();
-       });
+       {{QStringLiteral("accountId"), accountId}},
+       [this](const QJsonValue& result) { beginGoogleSignIn(result); });
 }
 
 void AppController::updateAccountCredentials(const QString& accountId,
@@ -2575,11 +2583,209 @@ void AppController::activateWindow() {
 }
 
 void AppController::setError(const QString& message) {
-  if (message == m_lastError) {
+  setErrorState(message, {}, {}, {});
+}
+
+void AppController::setErrorState(const QString& message, const QString& details,
+                                  const QString& action, const QString& accountId) {
+  if (message == m_lastError && details == m_lastErrorDetails &&
+      action == m_lastErrorAction && accountId == m_lastErrorAccountId) {
     return;
   }
   m_lastError = message;
+  m_lastErrorDetails = details;
+  m_lastErrorAction = action;
+  m_lastErrorAccountId = accountId;
   emit lastErrorChanged();
+}
+
+void AppController::dismissError() { setError({}); }
+
+QString AppController::accountProvider(const QString& accountId) const {
+  if (accountId.isEmpty()) {
+    return {};
+  }
+  for (const QVariant& item : m_accounts) {
+    const QVariantMap account = item.toMap();
+    if (account.value(QStringLiteral("id")).toString() == accountId) {
+      return account.value(QStringLiteral("provider")).toString();
+    }
+  }
+  return {};
+}
+
+void AppController::setFriendlyError(const QString& code, const QString& message,
+                                     const QString& accountId) {
+  const QString provider = accountProvider(accountId);
+  const QVariantMap friendly = describeError(code, message, provider);
+  QString action = friendly.value(QStringLiteral("action")).toString();
+  // Signing in again needs a Google account to sign in to; otherwise the
+  // account settings are where to start over.
+  if (action == QStringLiteral("sign_in") && provider != QStringLiteral("google")) {
+    action = QStringLiteral("account_settings");
+  }
+  setErrorState(friendly.value(QStringLiteral("message")).toString(),
+                friendly.value(QStringLiteral("details")).toString(), action,
+                accountId);
+}
+
+QVariantMap AppController::describeError(const QString& code,
+                                         const QString& fallbackMessage,
+                                         const QString& provider) const {
+  const auto oneOf = [&code](std::initializer_list<const char*> codes) {
+    return std::any_of(codes.begin(), codes.end(), [&code](const char* candidate) {
+      return code == QLatin1String(candidate);
+    });
+  };
+  static const QRegularExpression serverStatus(QStringLiteral("^http_5\\d\\d$"));
+  const bool google = provider == QStringLiteral("google");
+  QString message;
+  QString action;
+  if (code.isEmpty()) {
+    // Nothing to map.
+  } else if (oneOf({"authentication_required", "authError", "invalid_grant",
+                    "http_401"})) {
+    if (google) {
+      message = tr("Google needs you to sign in again before this account can sync.");
+      action = QStringLiteral("sign_in");
+    } else {
+      message =
+          tr("The server did not accept the username or password. Check them "
+             "in Accounts & settings.");
+      action = QStringLiteral("account_settings");
+    }
+  } else if (oneOf({"oauth_scope_upgrade", "insufficientPermissions", "permission"})) {
+    message =
+        tr("Sign in to Google again to give OmaCalendar access to calendars, "
+           "tasks and free/busy.");
+    action = QStringLiteral("sign_in");
+  } else if (oneOf({"access_denied"})) {
+    message =
+        tr("Google sign-in was cancelled or access was not granted. Sign in "
+           "again and allow access to continue.");
+    action = QStringLiteral("sign_in");
+  } else if (oneOf({"authorization_timeout"})) {
+    message =
+        tr("Google sign-in timed out before it was finished in the browser. "
+           "Try again.");
+    action = QStringLiteral("sign_in");
+  } else if (oneOf({"http_403"}) && !google) {
+    message =
+        tr("The server refused access. Check the username, password and "
+           "address in Accounts & settings.");
+    action = QStringLiteral("account_settings");
+  } else if (oneOf({"keyring_error", "credentials_unavailable", "helper_unavailable",
+                    "start_failed", "process_failed"})) {
+    message =
+        tr("The system keyring is locked or not running, so the password could "
+           "not be saved or read. Unlock the keyring, or install a Secret "
+           "Service such as GNOME Keyring or KeePassXC, then retry.");
+    action = QStringLiteral("retry");
+  } else if (oneOf({"host_not_found"})) {
+    message =
+        tr("The server could not be found. Check the address and your "
+           "internet connection.");
+    action = QStringLiteral("retry");
+  } else if (oneOf(
+                 {"network_unavailable", "network_error", "http_0", "NetworkError"})) {
+    message =
+        tr("The server could not be reached. Check your internet connection; "
+           "OmaCalendar will sync again when it is back.");
+    action = QStringLiteral("retry");
+  } else if (oneOf({"connection_refused"})) {
+    message = tr("The server refused the connection. Check the address and port.");
+    action = QStringLiteral("retry");
+  } else if (oneOf({"tls_error"})) {
+    message =
+        tr("A secure connection to the server could not be set up. Check the "
+           "address and your system clock.");
+    action = QStringLiteral("retry");
+  } else if (oneOf({"timeout"})) {
+    message = tr("The server took too long to answer. Try again in a moment.");
+    action = QStringLiteral("retry");
+  } else if (oneOf({"http_429", "rateLimitExceeded", "userRateLimitExceeded",
+                    "quotaExceeded"})) {
+    message =
+        tr("The server is limiting requests right now. OmaCalendar will try "
+           "again shortly.");
+    action = QStringLiteral("retry");
+  } else if (serverStatus.match(code).hasMatch() ||
+             oneOf({"backendError", "internalError", "ServerError"})) {
+    message = tr("The server is having trouble right now. Try again later.");
+    action = QStringLiteral("retry");
+  } else if (oneOf({"http_404", "resource_not_found", "discovery_failed"}) && !google) {
+    message =
+        tr("No calendar was found at that address. Check the URL in Accounts "
+           "& settings.");
+    action = QStringLiteral("account_settings");
+  } else if (oneOf({"invalid_endpoint"})) {
+    message =
+        tr("The server address is not valid. Use the full https:// address "
+           "of the calendar server.");
+    action = QStringLiteral("account_settings");
+  } else if (oneOf({"database_error", "database_unavailable"})) {
+    message =
+        tr("OmaCalendar could not use its local database. Check that the disk "
+           "is not full, then restart OmaCalendar.");
+  }
+  if (message.isEmpty()) {
+    return {{QStringLiteral("message"), fallbackMessage},
+            {QStringLiteral("action"), QString()},
+            {QStringLiteral("details"), QString()}};
+  }
+  const QString details = fallbackMessage.isEmpty()
+                              ? code
+                              : QStringLiteral("%1 (%2)").arg(fallbackMessage, code);
+  return {{QStringLiteral("message"), message},
+          {QStringLiteral("action"), action},
+          {QStringLiteral("details"), details}};
+}
+
+void AppController::beginGoogleSignIn(const QJsonValue& result) {
+  setGoogleSignIn(QStringLiteral("waiting"),
+                  result.toObject().value(QStringLiteral("accountId")).toString());
+  setStatus(tr("Waiting for Google sign-in in your browser…"));
+  emit accountSetupStarted();
+  refresh();
+}
+
+void AppController::setGoogleSignIn(const QString& state, const QString& accountId) {
+  if (state == m_googleSignInState && accountId == m_googleSignInAccountId) {
+    return;
+  }
+  m_googleSignInState = state;
+  m_googleSignInAccountId = accountId;
+  emit googleSignInChanged();
+}
+
+void AppController::updateGoogleSignInFromStatus(const QString& accountId,
+                                                 const QJsonObject& status) {
+  if (m_googleSignInState != QStringLiteral("waiting") || accountId.isEmpty() ||
+      accountId != m_googleSignInAccountId) {
+    return;
+  }
+  const QString state = status.value(QStringLiteral("state")).toString();
+  if (status.value(QStringLiteral("errorCode")).toString() ==
+      QStringLiteral("authorization_timeout")) {
+    setGoogleSignIn(QStringLiteral("timed_out"), accountId);
+  } else if (state == QStringLiteral("error") ||
+             state == QStringLiteral("reauthorization_required")) {
+    setGoogleSignIn(QStringLiteral("failed"), accountId);
+  } else if (state == QStringLiteral("syncing") || state == QStringLiteral("idle")) {
+    // The first sync starts once the browser has handed back a token.
+    setGoogleSignIn(QStringLiteral("connected"), accountId);
+  }
+}
+
+void AppController::cancelGoogleSignIn() {
+  const QString accountId = m_googleSignInAccountId;
+  if (m_googleSignInState != QStringLiteral("waiting") || accountId.isEmpty()) {
+    return;
+  }
+  setGoogleSignIn(QStringLiteral("cancelled"), accountId);
+  setStatus(tr("Google sign-in cancelled"));
+  send(QStringLiteral("google.oauthCancel"), {{QStringLiteral("accountId"), accountId}},
+       [this](const QJsonValue&) { refresh(); });
 }
 
 void AppController::setStatus(const QString& message) {
