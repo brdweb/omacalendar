@@ -241,16 +241,42 @@ bool hasRecurrenceProperties(icalcomponent* event) {
           icalcomponent_get_first_property(event, ICAL_RDATE_PROPERTY) != nullptr);
 }
 
-icaltimezone* zoneFor(const QString& timeZone) {
-  if (timeZone.isEmpty()) {
-    return nullptr;
-  }
-  const QByteArray name = timeZone.toUtf8();
+icaltimezone* builtinZone(const QByteArray& name) {
   icaltimezone* zone = icaltimezone_get_builtin_timezone(name.constData());
   if (zone == nullptr) {
     zone = icaltimezone_get_builtin_timezone_from_tzid(name.constData());
   }
   return zone;
+}
+
+// The libical builtin name for |timeZone|: the name itself when libical knows
+// it, otherwise the IANA id of a Windows zone name, otherwise empty.
+QString builtinZoneName(const QString& timeZone) {
+  if (timeZone.isEmpty()) {
+    return {};
+  }
+  if (builtinZone(timeZone.toUtf8()) != nullptr) {
+    return timeZone;
+  }
+  const QString iana = ianaIdForWindowsTimeZone(timeZone);
+  return !iana.isEmpty() && builtinZone(iana.toUtf8()) != nullptr ? iana : QString();
+}
+
+// Resolves a TZID the way the provider meant it: a VTIMEZONE embedded in
+// |root| wins, then libical's builtin zones, then the IANA zone for a Windows
+// zone name (Outlook and Exchange send "Pacific Standard Time" and the like).
+icaltimezone* zoneFor(const QString& timeZone, icalcomponent* root = nullptr) {
+  if (timeZone.isEmpty()) {
+    return nullptr;
+  }
+  const QByteArray name = timeZone.toUtf8();
+  if (root != nullptr) {
+    if (icaltimezone* zone = icalcomponent_get_timezone(root, name.constData())) {
+      return zone;
+    }
+  }
+  const QString builtin = builtinZoneName(timeZone);
+  return builtin.isEmpty() ? nullptr : builtinZone(builtin.toUtf8());
 }
 
 icaltimetype dateValue(const QDate& date) {
@@ -298,8 +324,11 @@ icalproperty* dateTimeProperty(const icalproperty_kind kind, const QDateTime& ut
   icalproperty* property = kind == ICAL_DTSTART_PROPERTY
                                ? icalproperty_new_dtstart(value)
                                : icalproperty_new_dtend(value);
-  if (property != nullptr && !timeZone.isEmpty() && zoneFor(timeZone)) {
-    const QByteArray name = timeZone.toUtf8();
+  const QString zoneName = builtinZoneName(timeZone);
+  if (property != nullptr && !zoneName.isEmpty()) {
+    // Name the zone libical resolved, so a Windows zone name is not looked up
+    // again (and missed) when the rebuilt component is read back.
+    const QByteArray name = zoneName.toUtf8();
     icalproperty_add_parameter(property, icalparameter_new_tzid(name.constData()));
   }
   return property;
@@ -398,17 +427,20 @@ RecurrenceComponent componentFor(const Event& master, QStringList* warnings) {
   return result;
 }
 
-void applyPropertyTimeZone(icalproperty* property, icaltimetype* value) {
+void applyPropertyTimeZone(icalproperty* property, icalcomponent* root,
+                           icaltimetype* value) {
   const char* zoneName = icalproperty_get_parameter_as_string(property, "TZID");
   if (zoneName == nullptr || *zoneName == '\0' || icaltime_is_utc(*value)) {
     return;
   }
-  if (icaltimezone* zone = zoneFor(QString::fromUtf8(zoneName))) {
+  if (icaltimezone* zone = zoneFor(QString::fromUtf8(zoneName), root)) {
     icaltime_set_timezone(value, zone);
   }
 }
 
-QDateTime occurrenceUtc(const icaltimetype& value, const Event& master) {
+// |masterZone| is the master's start zone, resolved once per expansion.
+QDateTime occurrenceUtc(const icaltimetype& value, const Event& master,
+                        icaltimezone* masterZone) {
   if (icaltime_is_null_time(value) || !icaltime_is_valid_time(value)) {
     return {};
   }
@@ -421,7 +453,7 @@ QDateTime occurrenceUtc(const icaltimetype& value, const Event& master) {
   }
   icaltimezone* fallback = nullptr;
   if (valueZone == nullptr) {
-    fallback = zoneFor(master.startTimeZone);
+    fallback = masterZone;
   }
   if (valueZone == nullptr && fallback == nullptr) {
     fallback = icaltimezone_get_utc_timezone();
@@ -431,7 +463,8 @@ QDateTime occurrenceUtc(const icaltimetype& value, const Event& master) {
   return QDateTime::fromSecsSinceEpoch(static_cast<qint64>(seconds), QTimeZone::UTC);
 }
 
-Event occurrenceFrom(const Event& master, const icaltimetype& start,
+Event occurrenceFrom(const Event& master, icaltimezone* masterZone,
+                     const icaltimetype& start,
                      const std::optional<icaltimetype>& explicitEnd = std::nullopt,
                      const std::optional<qint64>& explicitDuration = std::nullopt) {
   Event occurrence = master;
@@ -451,13 +484,13 @@ Event occurrenceFrom(const Event& master, const icaltimetype& start,
     occurrence.endDate = occurrence.startDate.addDays(durationDays);
   } else {
     occurrence.allDay = false;
-    occurrence.startUtc = occurrenceUtc(start, master);
+    occurrence.startUtc = occurrenceUtc(start, master, masterZone);
     const qint64 masterDuration =
         master.endUtc.isValid()
             ? std::max<qint64>(0, master.startUtc.secsTo(master.endUtc))
             : 0;
     if (explicitEnd.has_value()) {
-      occurrence.endUtc = occurrenceUtc(*explicitEnd, master);
+      occurrence.endUtc = occurrenceUtc(*explicitEnd, master, masterZone);
     } else {
       occurrence.endUtc =
           occurrence.startUtc.addSecs(explicitDuration.value_or(masterDuration));
@@ -471,7 +504,8 @@ Event occurrenceFrom(const Event& master, const icaltimetype& start,
 
 bool enumerateRule(icalproperty* property, const icaltimetype& dtstart,
                    const icaltimetype& from, const icaltimetype& until,
-                   const Event& master, WorkBudget* budget, QList<Event>* output) {
+                   const Event& master, icaltimezone* masterZone, WorkBudget* budget,
+                   QList<Event>* output) {
   if (!budget->spend()) {
     return false;
   }
@@ -496,13 +530,14 @@ bool enumerateRule(icalproperty* property, const icaltimetype& dtstart,
       return true;
     }
     if (icaltime_compare(next, from) >= 0 && icaltime_compare(next, until) < 0) {
-      output->append(occurrenceFrom(master, next));
+      output->append(occurrenceFrom(master, masterZone, next));
     }
   }
 }
 
-bool enumerateDateProperties(icalcomponent* component, const icalproperty_kind kind,
-                             const Event& master, WorkBudget* budget,
+bool enumerateDateProperties(icalcomponent* component, icalcomponent* root,
+                             const icalproperty_kind kind, const Event& master,
+                             icaltimezone* masterZone, WorkBudget* budget,
                              QList<Event>* output) {
   for (icalproperty* property = icalcomponent_get_first_property(component, kind);
        property != nullptr;
@@ -526,13 +561,13 @@ bool enumerateDateProperties(icalcomponent* component, const icalproperty_kind k
         if (!icalperiodtype_is_valid_period(period)) {
           continue;
         }
-        applyPropertyTimeZone(property, &period.start);
+        applyPropertyTimeZone(property, root, &period.start);
         if (!icaltime_is_null_time(period.end)) {
-          applyPropertyTimeZone(property, &period.end);
-          output->append(occurrenceFrom(master, period.start, period.end));
+          applyPropertyTimeZone(property, root, &period.end);
+          output->append(occurrenceFrom(master, masterZone, period.start, period.end));
         } else {
           output->append(occurrenceFrom(
-              master, period.start, std::nullopt,
+              master, masterZone, period.start, std::nullopt,
               static_cast<qint64>(icaldurationtype_as_seconds(period.duration))));
         }
         continue;
@@ -541,8 +576,8 @@ bool enumerateDateProperties(icalcomponent* component, const icalproperty_kind k
       if (icaltime_is_null_time(time) || !icaltime_is_valid_time(time)) {
         continue;
       }
-      applyPropertyTimeZone(property, &time);
-      output->append(occurrenceFrom(master, time));
+      applyPropertyTimeZone(property, root, &time);
+      output->append(occurrenceFrom(master, masterZone, time));
     }
   }
   return true;
@@ -573,6 +608,8 @@ QList<Event> expandMaster(const Event& master, const QDateTime& startUtc,
     duration = std::max<qint64>(0, master.startUtc.secsTo(master.endUtc));
   }
   const QDateTime scanStart = startUtc.addSecs(-duration);
+  icalcomponent* root = component.owner.get();
+  icaltimezone* masterZone = zoneFor(master.startTimeZone, root);
   const icaltimetype dtstart = icalcomponent_get_dtstart(component.event);
   const bool floating = !master.allDay && master.startTimeZone.isEmpty() &&
                         icaltime_get_timezone(dtstart) == nullptr;
@@ -586,13 +623,14 @@ QList<Event> expandMaster(const Event& master, const QDateTime& startUtc,
            icalcomponent_get_first_property(component.event, ICAL_EXRULE_PROPERTY);
        property != nullptr; property = icalcomponent_get_next_property(
                                 component.event, ICAL_EXRULE_PROPERTY)) {
-    if (!enumerateRule(property, dtstart, from, until, master, budget, &excluded)) {
+    if (!enumerateRule(property, dtstart, from, until, master, masterZone, budget,
+                       &excluded)) {
       *truncated = true;
       return {};
     }
   }
-  if (!enumerateDateProperties(component.event, ICAL_EXDATE_PROPERTY, master, budget,
-                               &excluded)) {
+  if (!enumerateDateProperties(component.event, root, ICAL_EXDATE_PROPERTY, master,
+                               masterZone, budget, &excluded)) {
     *truncated = true;
     return {};
   }
@@ -606,18 +644,19 @@ QList<Event> expandMaster(const Event& master, const QDateTime& startUtc,
     *truncated = true;
     return {};
   }
-  candidates.append(occurrenceFrom(master, dtstart));
+  candidates.append(occurrenceFrom(master, masterZone, dtstart));
   for (icalproperty* property =
            icalcomponent_get_first_property(component.event, ICAL_RRULE_PROPERTY);
        property != nullptr; property = icalcomponent_get_next_property(
                                 component.event, ICAL_RRULE_PROPERTY)) {
-    if (!enumerateRule(property, dtstart, from, until, master, budget, &candidates)) {
+    if (!enumerateRule(property, dtstart, from, until, master, masterZone, budget,
+                       &candidates)) {
       *truncated = true;
       return {};
     }
   }
-  if (!enumerateDateProperties(component.event, ICAL_RDATE_PROPERTY, master, budget,
-                               &candidates)) {
+  if (!enumerateDateProperties(component.event, root, ICAL_RDATE_PROPERTY, master,
+                               masterZone, budget, &candidates)) {
     *truncated = true;
     return {};
   }
@@ -684,6 +723,8 @@ std::optional<RecurrenceSeriesEnd> RecurrenceExpander::finiteEnd(const Event& ma
   if (icaltime_is_null_time(dtstart) || !icaltime_is_valid_time(dtstart)) {
     return std::nullopt;
   }
+  icalcomponent* root = component.owner.get();
+  icaltimezone* masterZone = zoneFor(master.startTimeZone, root);
   const qint64 durationSeconds =
       master.startUtc.isValid() && master.endUtc.isValid()
           ? std::max<qint64>(0, master.startUtc.secsTo(master.endUtc))
@@ -712,7 +753,7 @@ std::optional<RecurrenceSeriesEnd> RecurrenceExpander::finiteEnd(const Event& ma
     }
     return true;
   };
-  if (!include(occurrenceFrom(master, dtstart))) {
+  if (!include(occurrenceFrom(master, masterZone, dtstart))) {
     return std::nullopt;
   }
 
@@ -739,7 +780,7 @@ std::optional<RecurrenceSeriesEnd> RecurrenceExpander::finiteEnd(const Event& ma
           finished = true;
           break;
         }
-        if (!include(occurrenceFrom(master, next))) {
+        if (!include(occurrenceFrom(master, masterZone, next))) {
           return std::nullopt;
         }
       }
@@ -761,7 +802,7 @@ std::optional<RecurrenceSeriesEnd> RecurrenceExpander::finiteEnd(const Event& ma
         }
         lastDate = std::max(lastDate, end);
       } else {
-        const QDateTime until = occurrenceUtc(rule->until, master);
+        const QDateTime until = occurrenceUtc(rule->until, master, masterZone);
         if (!until.isValid()) {
           return std::nullopt;
         }
@@ -778,8 +819,8 @@ std::optional<RecurrenceSeriesEnd> RecurrenceExpander::finiteEnd(const Event& ma
 
   WorkBudget budget{10000};
   QList<Event> extraDates;
-  if (!enumerateDateProperties(component.event, ICAL_RDATE_PROPERTY, master, &budget,
-                               &extraDates)) {
+  if (!enumerateDateProperties(component.event, root, ICAL_RDATE_PROPERTY, master,
+                               masterZone, &budget, &extraDates)) {
     return std::nullopt;
   }
   for (const Event& occurrence : std::as_const(extraDates)) {

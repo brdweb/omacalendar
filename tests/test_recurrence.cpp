@@ -30,6 +30,38 @@ Event timedEvent(const QString& id, const QDateTime& start,
   return event;
 }
 
+// Outlook and Exchange publish Windows zone names with an embedded VTIMEZONE.
+QString pacificStandardTimeZone() {
+  return QStringLiteral(
+      "BEGIN:VTIMEZONE\r\nTZID:Pacific Standard Time\r\n"
+      "BEGIN:STANDARD\r\nDTSTART:16010101T020000\r\nTZOFFSETFROM:-0700\r\n"
+      "TZOFFSETTO:-0800\r\nRRULE:FREQ=YEARLY;INTERVAL=1;BYDAY=1SU;BYMONTH=11\r\n"
+      "END:STANDARD\r\n"
+      "BEGIN:DAYLIGHT\r\nDTSTART:16010101T020000\r\nTZOFFSETFROM:-0800\r\n"
+      "TZOFFSETTO:-0700\r\nRRULE:FREQ=YEARLY;INTERVAL=1;BYDAY=2SU;BYMONTH=3\r\n"
+      "END:DAYLIGHT\r\nEND:VTIMEZONE\r\n");
+}
+
+Event embeddedZoneSeries(const QString& id, const QString& zone,
+                         const QString& vtimezone, const QDateTime& firstStart) {
+  Event master = timedEvent(id, firstStart);
+  master.uid = id + QStringLiteral("-uid");
+  master.startTimeZone = zone;
+  master.endTimeZone = zone;
+  master.recurrenceRule = QStringLiteral("FREQ=WEEKLY;COUNT=3");
+  master.rawFormat = QStringLiteral("text/calendar");
+  master.rawPayload =
+      QStringLiteral("BEGIN:VCALENDAR\r\nVERSION:2.0\r\n") + vtimezone +
+      QStringLiteral(
+          "BEGIN:VEVENT\r\nUID:%1\r\n"
+          "DTSTART;TZID=%2:20260105T100000\r\nDTEND;TZID=%2:20260105T110000\r\n"
+          "RRULE:FREQ=WEEKLY;COUNT=3\r\n"
+          "EXDATE;TZID=%2:20260112T100000\r\nRDATE;TZID=%2:20260114T100000\r\n"
+          "END:VEVENT\r\nEND:VCALENDAR\r\n")
+          .arg(master.uid, zone);
+  return master;
+}
+
 Account account() {
   Account result;
   result.id = QStringLiteral("account");
@@ -409,6 +441,85 @@ class RecurrenceTest final : public QObject {
     QCOMPARE(result.occurrences.size(), 2);
     QCOMPARE(result.occurrences.at(0).startUtc, utc(2026, 8, 28, 13));
     QCOMPARE(result.occurrences.at(1).startUtc, utc(2026, 8, 30, 13));
+  }
+
+  void windowsTzidExdateAndRdateFollowEmbeddedVtimezone() {
+    // 10:00 Pacific Standard Time is 18:00Z in January.
+    const Event master = embeddedZoneSeries(
+        QStringLiteral("windows-zone"), QStringLiteral("Pacific Standard Time"),
+        pacificStandardTimeZone(), utc(2026, 1, 5, 18));
+
+    const RecurrenceExpansionResult result =
+        RecurrenceExpander::expand({master}, utc(2026, 1, 1, 0), utc(2026, 2, 1, 0));
+
+    QVERIFY(result.warnings.isEmpty());
+    QCOMPARE(result.occurrences.size(), 3);
+    QCOMPARE(result.occurrences.at(0).startUtc, utc(2026, 1, 5, 18));
+    QCOMPARE(result.occurrences.at(1).startUtc, utc(2026, 1, 14, 18));
+    QCOMPARE(result.occurrences.at(2).startUtc, utc(2026, 1, 19, 18));
+  }
+
+  void customTzidResolvesOnlyFromComponent() {
+    // Neither libical, Qt nor the Windows zone table knows this name.
+    const QString vtimezone = QStringLiteral(
+        "BEGIN:VTIMEZONE\r\nTZID:Custom/Office\r\n"
+        "BEGIN:STANDARD\r\nDTSTART:19700101T000000\r\nTZOFFSETFROM:+0530\r\n"
+        "TZOFFSETTO:+0530\r\nEND:STANDARD\r\nEND:VTIMEZONE\r\n");
+    const Event master = embeddedZoneSeries(QStringLiteral("custom-zone"),
+                                            QStringLiteral("Custom/Office"), vtimezone,
+                                            utc(2026, 1, 5, 4, 30));
+
+    const RecurrenceExpansionResult result =
+        RecurrenceExpander::expand({master}, utc(2026, 1, 1, 0), utc(2026, 2, 1, 0));
+
+    QVERIFY(result.warnings.isEmpty());
+    QCOMPARE(result.occurrences.size(), 3);
+    QCOMPARE(result.occurrences.at(0).startUtc, utc(2026, 1, 5, 4, 30));
+    QCOMPARE(result.occurrences.at(1).startUtc, utc(2026, 1, 14, 4, 30));
+    QCOMPARE(result.occurrences.at(2).startUtc, utc(2026, 1, 19, 4, 30));
+  }
+
+  void dirtyMasterWithWindowsTzidKeepsWallClockAcrossDst() {
+    // 10:00 Pacific on 2 March 2026 (PST), weekly across the 8 March change.
+    Event master =
+        timedEvent(QStringLiteral("dirty-windows-zone"), utc(2026, 3, 2, 18));
+    master.startTimeZone = QStringLiteral("Pacific Standard Time");
+    master.endTimeZone = master.startTimeZone;
+    master.dirty = true;
+    master.recurrenceRule = QStringLiteral(
+        "RRULE:FREQ=WEEKLY;COUNT=4\n"
+        "EXDATE;TZID=Pacific Standard Time:20260316T100000");
+
+    const RecurrenceExpansionResult result =
+        RecurrenceExpander::expand({master}, utc(2026, 3, 1, 0), utc(2026, 4, 1, 0));
+
+    QVERIFY(result.warnings.isEmpty());
+    QCOMPARE(result.occurrences.size(), 3);
+    QCOMPARE(result.occurrences.at(0).startUtc, utc(2026, 3, 2, 18));
+    QCOMPARE(result.occurrences.at(1).startUtc, utc(2026, 3, 9, 17));
+    QCOMPARE(result.occurrences.at(2).startUtc, utc(2026, 3, 23, 17));
+    QCOMPARE(result.occurrences.at(2).endUtc, utc(2026, 3, 23, 18));
+  }
+
+  void windowsTzidRecurrenceIdMatchesGeneratedOccurrence() {
+    const Event master = embeddedZoneSeries(
+        QStringLiteral("windows-identity"), QStringLiteral("Pacific Standard Time"),
+        pacificStandardTimeZone(), utc(2026, 1, 5, 18));
+    Event moved =
+        timedEvent(QStringLiteral("windows-identity-moved"), utc(2026, 1, 19, 20));
+    moved.uid = master.uid;
+    moved.recurrenceId = QStringLiteral("TZID=Pacific Standard Time:20260119T100000");
+
+    const RecurrenceExpansionResult result = RecurrenceExpander::expand(
+        {master, moved}, utc(2026, 1, 1, 0), utc(2026, 2, 1, 0));
+
+    QVERIFY2(result.warnings.isEmpty(), qPrintable(result.warnings.join(u',')));
+    QCOMPARE(result.occurrences.size(), 3);
+    QCOMPARE(result.occurrences.at(2).id, moved.id);
+    QCOMPARE(result.occurrences.at(2).startUtc, utc(2026, 1, 19, 20));
+    QVERIFY(recurrenceIdentityEqual(moved.recurrenceId,
+                                    QStringLiteral("2026-01-19T18:00:00.000Z"), false,
+                                    TimeKind::Zoned, master.startTimeZone));
   }
 
   void dirtyLocalRuleTakesPrecedenceOverStaleRawPayload() {

@@ -312,6 +312,13 @@ QDateTime dateTimeFromIso(const QString& value) {
   return QDateTime::fromString(value, Qt::ISODateWithMs).toUTC();
 }
 
+QString ianaIdForWindowsTimeZone(const QString& timeZone) {
+  if (timeZone.isEmpty()) {
+    return {};
+  }
+  return QString::fromUtf8(QTimeZone::windowsIdToDefaultIanaId(timeZone.toUtf8()));
+}
+
 QString canonicalRecurrenceIdentity(const QString& value, const bool allDay,
                                     const TimeKind timeKind, const QString& timeZone) {
   const RecurrenceParts parts = splitRecurrenceParameters(value);
@@ -352,7 +359,10 @@ QString canonicalRecurrenceIdentity(const QString& value, const bool allDay,
     if (selectedTimeZone.isEmpty()) {
       return QStringLiteral("F:") + wallTimeKey(parsed);
     }
-    const QTimeZone zone(selectedTimeZone.toUtf8());
+    QTimeZone zone(selectedTimeZone.toUtf8());
+    if (!zone.isValid()) {
+      zone = QTimeZone(ianaIdForWindowsTimeZone(selectedTimeZone).toUtf8());
+    }
     if (!zone.isValid()) {
       return QStringLiteral("invalid:") + parts.body;
     }
