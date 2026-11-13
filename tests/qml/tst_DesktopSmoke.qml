@@ -1067,6 +1067,21 @@ Item {
             editor.close()
         }
 
+        function test_notes_fields_are_plain_text() {
+            // Provider notes are untrusted; rich text would render markup
+            // and fetch remote images.
+            const cases = [[editorFactory, "eventNotes"],
+                           [taskEditorFactory, "taskNotes"],
+                           [conflictMergeFactory, "mergeNotes"]]
+            for (let index = 0; index < cases.length; ++index) {
+                const item = createTemporaryObject(cases[index][0], scene)
+                verify(item !== null)
+                const field = findChild(item, cases[index][1])
+                verify(field !== null, cases[index][1])
+                compare(field.textFormat, TextEdit.PlainText, cases[index][1])
+            }
+        }
+
         function test_provider_markup_remains_literal() {
             const marker = "<b>literal & event text</b>"
             const location = "<img src='file:///etc/passwd'>"

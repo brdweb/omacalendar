@@ -417,6 +417,7 @@ class AppControllerTest final : public QObject {
   void freeBusyAnswersMergeAndFindASlot();
   void pdfExportValidatesItsRequest();
   void pdfExportWaitsForHydration();
+  void oauthUrlNotificationRejectsNonGoogleHosts();
   void tasksLoadRefreshAndMutate();
   void subscriptionFallsBackWithoutTasks();
 
@@ -683,6 +684,50 @@ void AppControllerTest::pdfExportWaitsForHydration() {
   daemon.broadcast(QStringLiteral("events.changed"));
   QTRY_COMPARE(pdfRequests(), 2);
   QVERIFY(!QFile::exists(path));
+}
+
+void AppControllerTest::oauthUrlNotificationRejectsNonGoogleHosts() {
+  FakeDaemon daemon(0);
+  QVERIFY(daemon.listen());
+  AppController controller;
+  QList<QUrl> opened;
+  controller.setUrlOpenerForTesting([&opened](const QUrl& url) {
+    opened.append(url);
+    return true;
+  });
+  QTRY_VERIFY(controller.connected());
+  // The fake daemon only knows the client once it has subscribed.
+  QTRY_VERIFY(daemon.subscribeCount() > 0);
+
+  const QStringList rejected{
+      QStringLiteral("http://accounts.google.com/o/oauth2/v2/auth"),
+      QStringLiteral("https://accounts.google.com.evil.example/o/oauth2/v2/auth"),
+      QStringLiteral("https://evil.example/o/oauth2/v2/auth"),
+      QStringLiteral("https://user@accounts.google.com/o/oauth2/v2/auth"),
+      QStringLiteral("https://accounts.google.com:8443/o/oauth2/v2/auth"),
+      QStringLiteral("file:///etc/passwd"),
+      QStringLiteral("javascript:alert(1)"),
+  };
+  const QString rejectedMessage = QStringLiteral(
+      "The calendar service sent a sign-in link that is not "
+      "Google's, so it was not opened");
+  QStringList seenErrors;
+  connect(&controller, &AppController::lastErrorChanged, &controller,
+          [&controller, &seenErrors]() { seenErrors.append(controller.lastError()); });
+  for (const QString& url : rejected) {
+    daemon.broadcast(QStringLiteral("google.oauthUrl"), {{QStringLiteral("url"), url}});
+  }
+  // Other refreshes may clear the banner, so check what was reported.
+  QTRY_VERIFY(seenErrors.contains(rejectedMessage));
+
+  // Notifications arrive in order, so once the accepted URL is opened every
+  // rejected one before it has been handled.
+  const QString accepted =
+      QStringLiteral("https://accounts.google.com/o/oauth2/v2/auth?state=x");
+  daemon.broadcast(QStringLiteral("google.oauthUrl"),
+                   {{QStringLiteral("url"), accepted}});
+  QTRY_COMPARE(opened.size(), 1);
+  QCOMPARE(opened.constFirst(), QUrl(accepted));
 }
 
 void AppControllerTest::tasksLoadRefreshAndMutate() {

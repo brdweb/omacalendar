@@ -856,6 +856,7 @@ Dialog {
                 }
                 TextArea {
                     id: notesField
+                    objectName: "eventNotes"
                     Layout.fillWidth: true
                     Layout.preferredHeight: 88
                     placeholderText: qsTr("Notes")
@@ -864,6 +865,7 @@ Dialog {
                     enabled: !editor.readOnly
                     wrapMode: TextEdit.Wrap
                     selectByMouse: true
+                    textFormat: TextEdit.PlainText
                     Accessible.name: qsTr("Event notes")
                     background: Rectangle {
                         radius: Theme.radiusMD

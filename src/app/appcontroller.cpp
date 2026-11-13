@@ -47,6 +47,15 @@ QUrl validatedExternalEventUrl(const QString& value) {
   return url;
 }
 
+// The daemon announces the Google consent page to open. Only Google's own
+// HTTPS sign-in host is accepted, so a confused or compromised service cannot
+// make the app open an arbitrary page or scheme.
+bool isGoogleSignInUrl(const QUrl& url) {
+  return url.isValid() && url.scheme() == QStringLiteral("https") &&
+         url.host() == QStringLiteral("accounts.google.com") && url.port(-1) == -1 &&
+         url.userInfo().isEmpty();
+}
+
 bool isExactGitCommit(const QString& value) {
   static const QRegularExpression expression(QStringLiteral("^[0-9a-f]{40}$"));
   return expression.match(value).hasMatch();
@@ -85,7 +94,9 @@ QString normalizedGuestPolicy(const QString& value) {
 
 }  // namespace
 
-AppController::AppController(QObject* parent) : QObject(parent) {
+AppController::AppController(QObject* parent)
+    : QObject(parent),
+      m_urlOpener([](const QUrl& url) { return QDesktopServices::openUrl(url); }) {
   m_refreshTimer.setSingleShot(true);
   // The daemon's interactive lease is 10 minutes.
   m_interactiveRenewal.setInterval(5 * 60 * 1000);
@@ -184,10 +195,18 @@ AppController::AppController(QObject* parent) : QObject(parent) {
           m_subscriptionRevision = revision;
         }
         if (event == QStringLiteral("google.oauthUrl")) {
-          const QUrl url(data.value(QStringLiteral("url")).toString());
-          if (url.isValid()) {
-            QDesktopServices::openUrl(url);
+          const QUrl url(data.value(QStringLiteral("url")).toString(),
+                         QUrl::StrictMode);
+          if (!isGoogleSignInUrl(url)) {
+            setError(
+                tr("The calendar service sent a sign-in link that is not "
+                   "Google's, so it was not opened"));
+            return;
+          }
+          if (m_urlOpener(url)) {
             setStatus(tr("Complete Google sign-in in your browser"));
+          } else {
+            setError(tr("The Google sign-in page could not be opened"));
           }
           return;
         }
@@ -2176,6 +2195,10 @@ void AppController::undeleteWithHistory(const HistoryEntry& entry,
         m_historyInFlight = 0;
         return false;
       });
+}
+
+void AppController::setUrlOpenerForTesting(UrlOpener opener) {
+  m_urlOpener = std::move(opener);
 }
 
 bool AppController::canOpenExternalEventUrl(const QString& value) const {

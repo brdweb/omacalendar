@@ -147,6 +147,7 @@ Dialog {
             enabled: !taskEditor.readOnly
             wrapMode: TextEdit.Wrap
             selectByMouse: true
+            textFormat: TextEdit.PlainText
             Accessible.name: qsTr("Task notes")
             background: Rectangle {
                 radius: Theme.radiusMD
