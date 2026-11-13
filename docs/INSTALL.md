@@ -30,6 +30,14 @@ Launch **OmaCalendar** from your application launcher or run `omacalendar`.
 Connect calendars in **Accounts & settings**. Credentials are stored in your
 keyring; event data is cached locally.
 
+OmaCalendar can also open `webcal://` and `webcals://` subscription links.
+It shows the ICS subscription form with the link filled in and subscribes
+only when you confirm. To make it the handler for those links, run:
+
+```sh
+xdg-mime default org.omacalendar.OmaCalendar.desktop x-scheme-handler/webcal x-scheme-handler/webcals
+```
+
 ## Optional widget
 
 Install the native app first, then follow the

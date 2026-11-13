@@ -58,6 +58,7 @@ qt_add_qml_module(omacalendar
     qml/components/EventEditor.qml
     qml/components/EventRow.qml
     qml/components/IcsExportDialog.qml
+    qml/components/IcsFileDropArea.qml
     qml/components/IcsImportDialog.qml
     qml/components/MonthCell.qml
     qml/components/MutationConfirmationDialog.qml
@@ -74,6 +75,7 @@ qt_add_qml_module(omacalendar
     qml/components/TimelineCanvas.qml
     qml/components/TimelineEvent.qml
     qml/components/UndoToast.qml
+    qml/components/WelcomeState.qml
     qml/views/AgendaView.qml
     qml/views/DayView.qml
     qml/views/MonthView.qml

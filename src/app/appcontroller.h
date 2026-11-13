@@ -15,6 +15,7 @@
 
 #include "ipc/ipcclient.h"
 #include "presentationlistmodel.h"
+#include "startuprequest.h"
 
 namespace omacalendar {
 
@@ -263,6 +264,12 @@ class AppController final : public QObject {
   Q_INVOKABLE void backupDatabase();
   Q_INVOKABLE void handleDeepLink(const QUrl& url);
   Q_INVOKABLE void handleIcsImportFile(const QUrl& file);
+  // Opens the subscription form prefilled with a webcal(s):// link. It never
+  // subscribes on its own.
+  Q_INVOKABLE void handleIcsSubscribeLink(const QUrl& url);
+  // Routes a request parsed from the command line or forwarded by a second
+  // instance.
+  void handleStartupRequest(const StartupRequest& request);
   // For a secondary time-zone gutter: each display-zone hour 0..24 of
   // dateText as {minute, dayOffset} in zoneId, plus a short label and UTC
   // offset for that day. Empty when either value is invalid.
@@ -319,6 +326,7 @@ class AppController final : public QObject {
   void openEventRequested(const QVariantMap& event);
   void createEventRequested(const QVariantMap& draft);
   void openIcsImportRequested(const QUrl& file);
+  void openIcsSubscriptionRequested(const QUrl& url);
   void openSectionRequested(const QString& section);
   void windowActivationRequested();
 

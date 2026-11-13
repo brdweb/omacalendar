@@ -10,7 +10,10 @@ ColumnLayout {
     property string title: qsTr("Nothing here")
     property string description: ""
     property string actionText: ""
+    // A quieter second button beside the action; empty hides it.
+    property string secondaryActionText: ""
     signal actionRequested()
+    signal secondaryActionRequested()
 
     width: 320
     spacing: 9
@@ -42,11 +45,24 @@ ColumnLayout {
         font.pixelSize: Theme.smallFontSize
         wrapMode: Text.Wrap
     }
-    AppButton {
-        visible: root.actionText.length > 0
+    RowLayout {
+        visible: root.actionText.length > 0 || root.secondaryActionText.length > 0
         Layout.alignment: Qt.AlignHCenter
         Layout.topMargin: 3
-        text: root.actionText
-        onClicked: root.actionRequested()
+        spacing: Theme.spacingSM
+        AppButton {
+            objectName: "emptyStateAction"
+            visible: root.actionText.length > 0
+            text: root.actionText
+            primary: root.secondaryActionText.length > 0
+            onClicked: root.actionRequested()
+        }
+        AppButton {
+            objectName: "emptyStateSecondaryAction"
+            visible: root.secondaryActionText.length > 0
+            text: root.secondaryActionText
+            quiet: true
+            onClicked: root.secondaryActionRequested()
+        }
     }
 }

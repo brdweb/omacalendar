@@ -132,7 +132,8 @@ AppController::AppController(QObject* parent)
       {QStringLiteral("weekViewDays"), 7},
       {QStringLiteral("defaultReminderMinutes"), 15},
       {QStringLiteral("defaultAllDayReminderMinutes"), 15},
-      {QStringLiteral("calendarDefaultReminders"), QVariantMap()}};
+      {QStringLiteral("calendarDefaultReminders"), QVariantMap()},
+      {QStringLiteral("onboardingDismissed"), false}};
   m_client.setAutoReconnect(true);
   connect(&m_client, &ipc::IpcClient::connectedChanged, this, [this]() {
     emit connectedChanged();
@@ -728,7 +729,8 @@ QStringList AppController::preferenceKeys() {
           QStringLiteral("weekViewDays"),
           QStringLiteral("defaultReminderMinutes"),
           QStringLiteral("defaultAllDayReminderMinutes"),
-          QStringLiteral("calendarDefaultReminders")};
+          QStringLiteral("calendarDefaultReminders"),
+          QStringLiteral("onboardingDismissed")};
 }
 
 void AppController::markPreferencesLoaded() {
@@ -2367,6 +2369,31 @@ void AppController::handleIcsImportFile(const QUrl& file) {
     return;
   }
   emit openIcsImportRequested(normalized);
+}
+
+void AppController::handleIcsSubscribeLink(const QUrl& url) {
+  const QUrl normalized = normalizedWebcalUrl(url);
+  if (!normalized.isValid()) {
+    setError(tr("Only a webcal:// or webcals:// link can be subscribed to"));
+    return;
+  }
+  emit openIcsSubscriptionRequested(normalized);
+}
+
+void AppController::handleStartupRequest(const StartupRequest& request) {
+  switch (request.type) {
+    case StartupRequestType::DeepLink:
+      handleDeepLink(request.url);
+      break;
+    case StartupRequestType::IcsImport:
+      handleIcsImportFile(request.url);
+      break;
+    case StartupRequestType::IcsSubscribe:
+      handleIcsSubscribeLink(request.url);
+      break;
+    case StartupRequestType::None:
+      break;
+  }
 }
 
 void AppController::processPendingDeepLink() {

@@ -18,15 +18,6 @@ QString startupArgument(const omacalendar::StartupRequest& request) {
              : request.url.toString(QUrl::FullyEncoded);
 }
 
-void dispatchStartupRequest(omacalendar::AppController* controller,
-                            const omacalendar::StartupRequest& request) {
-  if (request.type == omacalendar::StartupRequestType::DeepLink) {
-    controller->handleDeepLink(request.url);
-  } else if (request.type == omacalendar::StartupRequestType::IcsImport) {
-    controller->handleIcsImportFile(request.url);
-  }
-}
-
 }  // namespace
 
 int main(int argc, char* argv[]) {
@@ -51,14 +42,13 @@ int main(int argc, char* argv[]) {
   omacalendar::AppController controller;
   omacalendar::ThemeBridge theme;
 
-  QObject::connect(&applicationInstance,
-                   &omacalendar::ApplicationInstance::activationRequested, &controller,
-                   [&controller](const QString& argument) {
-                     controller.activateWindow();
-                     dispatchStartupRequest(
-                         &controller, omacalendar::startupRequestFromArguments(
-                                          {QStringLiteral("omacalendar"), argument}));
-                   });
+  QObject::connect(
+      &applicationInstance, &omacalendar::ApplicationInstance::activationRequested,
+      &controller, [&controller](const QString& argument) {
+        controller.activateWindow();
+        controller.handleStartupRequest(omacalendar::startupRequestFromArguments(
+            {QStringLiteral("omacalendar"), argument}));
+      });
 
   QQmlApplicationEngine engine;
   engine.rootContext()->setContextProperty(QStringLiteral("App"), &controller);
@@ -69,7 +59,7 @@ int main(int argc, char* argv[]) {
   engine.loadFromModule(QStringLiteral("OmaCalendar"), QStringLiteral("Main"));
 
   QTimer::singleShot(0, &controller, [&controller, startupRequest]() {
-    dispatchStartupRequest(&controller, startupRequest);
+    controller.handleStartupRequest(startupRequest);
   });
 
   return application.exec();
