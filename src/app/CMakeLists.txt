@@ -23,6 +23,7 @@ qt_add_qml_module(omacalendar
   VERSION 1.0
   QML_FILES
     qml/CalendarVisibility.js
+    qml/DateEntry.js
     qml/DateRange.js
     qml/EventIndex.js
     qml/RecurrenceRule.js
@@ -37,9 +38,11 @@ qt_add_qml_module(omacalendar
     qml/components/AppCloseButton.qml
     qml/components/AppColorPicker.qml
     qml/components/AppComboBox.qml
+    qml/components/AppDateField.qml
     qml/components/AppSpinBox.qml
     qml/components/AppTabButton.qml
     qml/components/AppTextField.qml
+    qml/components/AppTimeField.qml
     qml/components/AccountSettingsDrawer.qml
     qml/components/ActivityPanel.qml
     qml/components/AttendeeEditor.qml

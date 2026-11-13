@@ -1325,6 +1325,189 @@ Item {
             tryCompare(editor, "opened", false)
         }
 
+        function typeText(text) {
+            for (let index = 0; index < text.length; ++index)
+                keyClick(text.charAt(index))
+        }
+
+        function test_date_picker_selects_and_respects_week_start() {
+            const editor = createTemporaryObject(editorFactory, scene, {"firstDayOfWeek": 7})
+            const content = scene.Window.window.contentItem
+            editor.openNew(new Date(2026, 8, 28), 540)
+            tryCompare(editor, "opened", true)
+            const field = findChild(content, "eventStartDate")
+            compare(field.text, "2026-09-28")
+
+            mouseClick(findChild(content, "eventStartDatePickerButton"))
+            tryCompare(field, "pickerOpen", true)
+            const grid = findChild(content, "eventStartDatePickerGrid")
+            verify(grid !== null, "the grid lives in the window overlay")
+            compare(findChild(content, "eventStartDatePickerMonth").text,
+                    Qt.locale().standaloneMonthName(8) + " 2026")
+            // 1 September 2026 is a Tuesday: a Sunday-first grid starts on
+            // 30 August, a Monday-first grid on 31 August.
+            compare(findChild(grid, "day-2026-08-30").x, 0)
+            compare(findChild(grid, "day-2026-08-30").y,
+                    findChild(grid, "day-2026-09-05").y)
+            verify(findChild(grid, "day-2026-08-31").x > 0)
+            editor.firstDayOfWeek = 1
+            tryVerify(() => findChild(grid, "day-2026-08-30") === null)
+            compare(findChild(grid, "day-2026-08-31").x, 0)
+            compare(findChild(grid, "day-2026-09-06").y, findChild(grid, "day-2026-09-01").y,
+                    "Sunday ends a Monday-first row")
+
+            // Keyboard only: arrows move, Enter picks, focus returns.
+            keyClick(Qt.Key_Right)
+            keyClick(Qt.Key_Down)
+            keyClick(Qt.Key_Return)
+            tryCompare(field, "pickerOpen", false)
+            compare(field.text, "2026-10-06")
+            compare(findChild(content, "eventEndDate").text, "2026-09-28",
+                    "only the field that owns the picker changes")
+            verify(findChild(content, "eventStartDateInput").activeFocus,
+                   "focus returns to the date text")
+            verify(editor.hasUnsavedChanges(), "a picked date is an edit")
+
+            // Alt+Down opens it from the text; Page Down changes month.
+            keyClick(Qt.Key_Down, Qt.AltModifier)
+            tryCompare(field, "pickerOpen", true)
+            keyClick(Qt.Key_PageDown)
+            compare(findChild(content, "eventStartDatePickerMonth").text,
+                    Qt.locale().standaloneMonthName(10) + " 2026")
+            // Escape closes only the picker, not the editor.
+            keyClick(Qt.Key_Escape)
+            tryCompare(field, "pickerOpen", false)
+            compare(editor.opened, true)
+            compare(editor.discardArmed, false)
+            compare(field.text, "2026-10-06")
+
+            // A mouse pick, then typed ISO and unpadded dates.
+            mouseClick(findChild(content, "eventStartDatePickerButton"))
+            tryCompare(field, "pickerOpen", true)
+            mouseClick(findChild(findChild(content, "eventStartDatePickerGrid"),
+                                 "day-2026-10-15"))
+            tryCompare(field, "pickerOpen", false)
+            compare(field.text, "2026-10-15")
+            const input = findChild(content, "eventStartDateInput")
+            input.selectAll()
+            typeText("2026-9-5")
+            compare(field.text, "2026-09-05", "unpadded dates are read as ISO")
+            keyClick(Qt.Key_Tab)
+            compare(input.text, "2026-09-05")
+            input.forceActiveFocus()
+            input.selectAll()
+            typeText("2026-02-30")
+            compare(field.text, "2026-02-30", "an impossible date stays as typed")
+            verify(!field.acceptableInput)
+            editor.submit()
+            verify(editor.validationError.length > 0)
+            editor.close()
+            tryCompare(editor, "opened", false)
+
+            // The task editor's due date uses the same picker.
+            const tasks = createTemporaryObject(taskEditorFactory, scene, {
+                "taskLists": [{"id": "local-tasks", "name": "Tasks"}], "firstDayOfWeek": 6})
+            tasks.openNew("local-tasks", "2026-09-10")
+            tryCompare(tasks, "opened", true)
+            mouseClick(findChild(content, "taskDuePickerButton"))
+            tryCompare(findChild(content, "taskDue"), "pickerOpen", true)
+            compare(findChild(findChild(content, "taskDuePickerGrid"), "day-2026-08-29").x, 0,
+                    "a Saturday-first grid")
+            keyClick(Qt.Key_Left)
+            keyClick(Qt.Key_Return)
+            compare(findChild(content, "taskDue").text, "2026-09-09")
+            tasks.close()
+            tryCompare(tasks, "opened", false)
+        }
+
+        function test_time_field_follows_time_format() {
+            const editor = createTemporaryObject(editorFactory, scene, {"timeFormat": "12h"})
+            editorSaveSpy.target = editor
+            editorSaveSpy.clear()
+            const content = scene.Window.window.contentItem
+            editor.openNew(new Date(2026, 8, 28), 540)
+            tryCompare(editor, "opened", true)
+            const start = findChild(content, "eventStartTime")
+            const end = findChild(content, "eventEndTime")
+            compare(start.text, "09:00", "the value stays 24-hour")
+            compare(start.displayText, "9:00 AM")
+            compare(end.displayText, "10:00 AM")
+            verify(!editor.hasUnsavedChanges(), "formatting is not an edit")
+            editor.timeFormat = "24h"
+            compare(start.displayText, "09:00")
+            compare(start.text, "09:00")
+            editor.timeFormat = "12h"
+
+            // Lenient typing updates the value before the field loses focus.
+            const input = findChild(content, "eventStartTimeInput")
+            input.forceActiveFocus()
+            input.selectAll()
+            typeText("1:15 pm")
+            compare(start.text, "13:15")
+            compare(input.text, "1:15 pm", "the typed text is not rewritten mid-edit")
+            keyClick(Qt.Key_Tab)
+            compare(input.text, "1:15 PM")
+            const endInput = findChild(content, "eventEndTimeInput")
+            endInput.forceActiveFocus()
+            endInput.selectAll()
+            typeText("14")
+            compare(end.text, "14:00")
+            keyClick(Qt.Key_Tab)
+            compare(endInput.text, "2:00 PM")
+
+            // Midnight and noon in 12-hour form.
+            start.text = "00:00"
+            compare(start.displayText, "12:00 AM")
+            start.text = "12:00"
+            compare(start.displayText, "12:00 PM")
+            start.text = "9:5"
+            verify(!start.acceptableInput, "unparseable entry is kept as typed")
+            compare(start.displayText, "9:5")
+            editor.submit()
+            verify(editor.validationError.length > 0)
+            compare(editorSaveSpy.count, 0)
+
+            // 24-hour entry works in 12-hour mode, and Ctrl+S saves the
+            // value typed without leaving the field.
+            findChild(content, "eventTitle").text = "Review"
+            input.forceActiveFocus()
+            input.selectAll()
+            typeText("13:15")
+            compare(start.text, "13:15")
+            keySequence("Ctrl+S")
+            tryCompare(editorSaveSpy, "count", 1)
+            compare(editorSaveSpy.signalArguments[0][0].startUtc, "2026-09-28T13:15:00.000Z")
+            compare(editorSaveSpy.signalArguments[0][0].endUtc, "2026-09-28T14:00:00.000Z")
+        }
+
+        function test_search_range_dates_use_the_picker() {
+            const panel = createTemporaryObject(activityFactory, scene, {
+                "connected": true, "firstDayOfWeek": 1})
+            panel.open()
+            tryCompare(panel, "opened", true)
+            const requests = createTemporaryObject(signalSpyFactory, testCase, {
+                "target": panel, "signalName": "searchRequested"})
+            findChild(panel, "searchWhenFilter").currentIndex = 3
+            const from = findChild(panel, "searchStartDate")
+            verify(from.visible)
+            from.text = "2026-9-1"
+            compare(from.text, "2026-09-01", "values set from outside are normalized")
+            const pickerButton = findChild(panel, "searchEndDatePickerButton")
+            tryVerify(() => pickerButton.visible && pickerButton.width > 0)
+            waitForRendering(pickerButton)
+            mouseClick(pickerButton)
+            const endField = findChild(panel, "searchEndDate")
+            tryCompare(endField, "pickerOpen", true)
+            const grid = findChild(panel.Overlay.overlay, "searchEndDatePickerGrid")
+            mouseClick(findChild(grid, "day-" + Qt.formatDate(new Date(), "yyyy-MM-dd")))
+            tryCompare(endField, "pickerOpen", false)
+            verify(requests.count > 0, "picking a date runs the search")
+            const filters = requests.signalArguments[requests.count - 1][1]
+            compare(filters.start, new Date(2026, 8, 1).toISOString())
+            verify(filters.end !== undefined)
+            panel.close()
+        }
+
         function test_shortcut_cheat_sheet_lists_all() {
             const shortcuts = createTemporaryObject(shortcutsFactory, scene)
             verify(shortcuts !== null)

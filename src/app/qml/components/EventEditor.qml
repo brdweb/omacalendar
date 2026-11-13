@@ -28,6 +28,9 @@ Dialog {
     property int defaultDurationMinutes: 60
     property int workDayStart: 8
     property int workDayEnd: 18
+    // Display preferences for the date and time fields; values stay ISO.
+    property string timeFormat: "system"
+    property int firstDayOfWeek: Qt.locale().firstDayOfWeek
     // Start (UTC ISO) of the free/busy window this editor last asked for, so a
     // stale answer for another event is not shown.
     property string freeBusyWindowStart: ""
@@ -759,6 +762,7 @@ Dialog {
                 SectionLabel { text: qsTr("EVENT") }
                 AppTextField {
                     id: titleField
+                    objectName: "eventTitle"
                     Layout.fillWidth: true
                     placeholderText: qsTr("Event title")
                     accessibleName: qsTr("Event title")
@@ -799,20 +803,21 @@ Dialog {
                         color: Theme.mutedText
                         font.pixelSize: Theme.smallFontSize
                     }
-                    AppTextField {
+                    AppDateField {
                         id: startDateField
                         objectName: "eventStartDate"
                         Layout.fillWidth: true
-                        placeholderText: qsTr("YYYY-MM-DD")
+                        firstDayOfWeek: editor.firstDayOfWeek
                         accessibleName: qsTr("Start date")
                         enabled: !editor.readOnly
                     }
-                    AppTextField {
+                    AppTimeField {
                         id: startTimeField
                         objectName: "eventStartTime"
                         visible: !allDay.checked
                         Layout.fillWidth: true
-                        placeholderText: qsTr("09:00")
+                        timeFormat: editor.timeFormat
+                        placeholderTime: "09:00"
                         accessibleName: qsTr("Start time")
                         enabled: !editor.readOnly
                     }
@@ -825,20 +830,21 @@ Dialog {
                         color: Theme.mutedText
                         font.pixelSize: Theme.smallFontSize
                     }
-                    AppTextField {
+                    AppDateField {
                         id: endDateField
                         objectName: "eventEndDate"
                         Layout.fillWidth: true
-                        placeholderText: qsTr("YYYY-MM-DD")
+                        firstDayOfWeek: editor.firstDayOfWeek
                         accessibleName: qsTr("End date")
                         enabled: !editor.readOnly
                     }
-                    AppTextField {
+                    AppTimeField {
                         id: endTimeField
                         objectName: "eventEndTime"
                         visible: !allDay.checked
                         Layout.fillWidth: true
-                        placeholderText: qsTr("10:00")
+                        timeFormat: editor.timeFormat
+                        placeholderTime: "10:00"
                         accessibleName: qsTr("End time")
                         enabled: !editor.readOnly
                     }
