@@ -1226,16 +1226,25 @@ void ProviderTest::googleResponseClassificationTable_data() {
   row("400 badRequest", 400, QNetworkReply::ProtocolInvalidOperationError,
       googleErrorBody(QStringLiteral("badRequest"), QStringLiteral("Bad Request")),
       none, 0, QStringLiteral("badRequest"), -1);
+  // Failures before any HTTP status carry the networkErrorCode() names.
   row("connection refused", 0, QNetworkReply::ConnectionRefusedError, none, none,
-      kRetry, QStringLiteral("http_0"), -1);
+      kRetry, QStringLiteral("connection_refused"), -1);
   row("host not found", 0, QNetworkReply::HostNotFoundError, none, none, kRetry,
-      QStringLiteral("http_0"), -1);
-  row("remote closed", 0, QNetworkReply::RemoteHostClosedError, none, none, kRetry,
-      QStringLiteral("http_0"), -1);
+      QStringLiteral("host_not_found"), -1);
+  row("tls handshake failed", 0, QNetworkReply::SslHandshakeFailedError, none, none,
+      kRetry, QStringLiteral("tls_error"), -1);
+  row("timeout", 0, QNetworkReply::TimeoutError, none, none, kRetry,
+      QStringLiteral("timeout"), -1);
   row("transfer timeout", 0, QNetworkReply::OperationCanceledError, none, none, kRetry,
-      QStringLiteral("http_0"), -1);
-  row("network session failed", 0, QNetworkReply::TemporaryNetworkFailureError, none,
-      none, kRetry, QStringLiteral("http_0"), -1);
+      QStringLiteral("timeout"), -1);
+  row("network session failed", 0, QNetworkReply::NetworkSessionFailedError, none, none,
+      kRetry, QStringLiteral("network_unavailable"), -1);
+  row("temporary network failure", 0, QNetworkReply::TemporaryNetworkFailureError, none,
+      none, kRetry, QStringLiteral("network_unavailable"), -1);
+  row("remote closed", 0, QNetworkReply::RemoteHostClosedError, none, none, kRetry,
+      QStringLiteral("network_error"), -1);
+  row("proxy refused", 0, QNetworkReply::ProxyConnectionRefusedError, none, none,
+      kRetry, QStringLiteral("network_error"), -1);
 }
 
 void ProviderTest::googleResponseClassificationTable() {
