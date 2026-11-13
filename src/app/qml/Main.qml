@@ -961,136 +961,36 @@ ApplicationWindow {
         }
     }
 
-    Shortcut {
-        sequence: "Ctrl+Shift+T"
-        enabled: window.tasksAvailable
-        context: Qt.ApplicationShortcut
-        onActivated: tasksPanel.opened ? tasksPanel.close() : window.openTasks()
-    }
-    Shortcut {
-        sequence: "Ctrl+P"
-        context: Qt.ApplicationShortcut
-        onActivated: window.openPrint()
-    }
-    Shortcut {
-        sequence: "Ctrl+N"
-        context: Qt.ApplicationShortcut
-        onActivated: editor.openNew(App.selectedDate, 540)
-    }
-    Shortcut {
-        sequences: ["Ctrl+Shift+N", "Q"]
-        enabled: window.navigationShortcutsEnabled()
-        context: Qt.ApplicationShortcut
-        onActivated: quickAdd.openEmpty()
-    }
-    Shortcut {
-        sequence: "Ctrl+F"
-        context: Qt.ApplicationShortcut
-        onActivated: window.openActivity("search")
-    }
-    Shortcut {
-        sequence: "/"
-        enabled: !editor.opened && !settingsDrawer.opened
-        context: Qt.ApplicationShortcut
-        onActivated: window.openActivity("search")
-    }
-    Shortcut { sequence: "Alt+1"; context: Qt.ApplicationShortcut; onActivated: window.setView("agenda") }
-    Shortcut { sequence: "Alt+2"; context: Qt.ApplicationShortcut; onActivated: window.setView("day") }
-    Shortcut { sequence: "Alt+3"; context: Qt.ApplicationShortcut; onActivated: window.setView("week") }
-    Shortcut { sequence: "Alt+4"; context: Qt.ApplicationShortcut; onActivated: window.setView("month") }
-    Shortcut { sequence: "Alt+5"; context: Qt.ApplicationShortcut; onActivated: window.setView("year") }
-    Shortcut {
-        sequence: "T"
-        enabled: window.navigationShortcutsEnabled()
-        context: Qt.ApplicationShortcut
-        onActivated: window.goToday()
-    }
-    Shortcut {
-        sequence: "["
-        enabled: window.navigationShortcutsEnabled()
-        context: Qt.ApplicationShortcut
-        onActivated: window.navigatePeriod(-1)
-    }
-    Shortcut {
-        sequence: "]"
-        enabled: window.navigationShortcutsEnabled()
-        context: Qt.ApplicationShortcut
-        onActivated: window.navigatePeriod(1)
-    }
-    Shortcut {
-        sequence: "Left"
-        enabled: window.navigationShortcutsEnabled()
-        context: Qt.ApplicationShortcut
-        onActivated: window.moveSelectionDate(-1)
-    }
-    Shortcut {
-        sequence: "Right"
-        enabled: window.navigationShortcutsEnabled()
-        context: Qt.ApplicationShortcut
-        onActivated: window.moveSelectionDate(1)
-    }
-    Shortcut {
-        sequence: "Up"
-        enabled: window.navigationShortcutsEnabled()
-        context: Qt.ApplicationShortcut
-        onActivated: window.selectAdjacentEvent(-1)
-    }
-    Shortcut {
-        sequence: "Down"
-        enabled: window.navigationShortcutsEnabled()
-        context: Qt.ApplicationShortcut
-        onActivated: window.selectAdjacentEvent(1)
-    }
-    Shortcut {
-        sequence: "Return"
-        enabled: window.navigationShortcutsEnabled()
-        context: Qt.ApplicationShortcut
-        onActivated: window.openKeyboardSelection()
-    }
-    Shortcut {
-        sequence: "Enter"
-        enabled: window.navigationShortcutsEnabled()
-        context: Qt.ApplicationShortcut
-        onActivated: window.openKeyboardSelection()
-    }
-    // Keyboard move and resize for the selected timed event, matching drag:
-    // 15-minute steps, a day at a time sideways, and the same recurrence
-    // scope prompt.
-    Shortcut {
-        sequence: "Alt+Up"
-        enabled: window.navigationShortcutsEnabled() && window.canNudgeSelection()
-        context: Qt.ApplicationShortcut
-        onActivated: window.nudgeSelectedEvent(-15, 0, 0)
-    }
-    Shortcut {
-        sequence: "Alt+Down"
-        enabled: window.navigationShortcutsEnabled() && window.canNudgeSelection()
-        context: Qt.ApplicationShortcut
-        onActivated: window.nudgeSelectedEvent(15, 0, 0)
-    }
-    Shortcut {
-        sequence: "Alt+Shift+Up"
-        enabled: window.navigationShortcutsEnabled() && window.canNudgeSelection()
-        context: Qt.ApplicationShortcut
-        onActivated: window.nudgeSelectedEvent(0, -15, 0)
-    }
-    Shortcut {
-        sequence: "Alt+Shift+Down"
-        enabled: window.navigationShortcutsEnabled() && window.canNudgeSelection()
-        context: Qt.ApplicationShortcut
-        onActivated: window.nudgeSelectedEvent(0, 15, 0)
-    }
-    Shortcut {
-        sequence: "Alt+Left"
-        enabled: window.navigationShortcutsEnabled() && window.canNudgeSelection()
-        context: Qt.ApplicationShortcut
-        onActivated: window.nudgeSelectedEvent(0, 0, -1)
-    }
-    Shortcut {
-        sequence: "Alt+Right"
-        enabled: window.navigationShortcutsEnabled() && window.canNudgeSelection()
-        context: Qt.ApplicationShortcut
-        onActivated: window.nudgeSelectedEvent(0, 0, 1)
+    AppShortcuts {
+        id: appShortcuts
+        navigationEnabled: window.navigationShortcutsEnabled()
+        nudgeEnabled: window.canNudgeSelection()
+        hasSelectedEvent: Boolean(window.selectedEvent.id)
+        tasksAvailable: window.tasksAvailable
+        editorOpen: editor.opened
+        settingsOpen: settingsDrawer.opened
+        onToggleTasksRequested: tasksPanel.opened ? tasksPanel.close() : window.openTasks()
+        onPrintRequested: window.openPrint()
+        onNewEventRequested: editor.openNew(App.selectedDate, 540)
+        onQuickAddRequested: quickAdd.openEmpty()
+        onSearchRequested: window.openActivity("search")
+        onViewRequested: view => window.setView(view)
+        onTodayRequested: window.goToday()
+        onPeriodRequested: direction => window.navigatePeriod(direction)
+        onSelectionDateMoveRequested: days => window.moveSelectionDate(days)
+        onAdjacentEventRequested: direction => window.selectAdjacentEvent(direction)
+        onOpenSelectionRequested: window.openKeyboardSelection()
+        onNudgeRequested: (startMinutes, endMinutes, days) =>
+                          window.nudgeSelectedEvent(startMinutes, endMinutes, days)
+        onDeleteSelectionRequested: window.requestKeyboardDelete()
+        onUndoRequested: {
+            undoToast.dismiss()
+            window.callApp("undo", [])
+        }
+        onRedoRequested: {
+            undoToast.dismiss()
+            window.callApp("redo", [])
+        }
     }
 
     // Screen readers hear the view and period after navigation settles, once
@@ -1122,31 +1022,6 @@ ApplicationWindow {
         function onSelectedDateChanged() { window.queueViewAnnouncement() }
     }
 
-    Shortcut {
-        sequence: "Delete"
-        enabled: window.navigationShortcutsEnabled()
-                 && Boolean(window.selectedEvent.id)
-        context: Qt.ApplicationShortcut
-        onActivated: window.requestKeyboardDelete()
-    }
-    Shortcut {
-        sequence: "Ctrl+Z"
-        enabled: !editor.opened
-        context: Qt.ApplicationShortcut
-        onActivated: {
-            undoToast.dismiss()
-            window.callApp("undo", [])
-        }
-    }
-    Shortcut {
-        sequences: ["Ctrl+Shift+Z", "Ctrl+Y"]
-        enabled: !editor.opened
-        context: Qt.ApplicationShortcut
-        onActivated: {
-            undoToast.dismiss()
-            window.callApp("redo", [])
-        }
-    }
     Connections {
         target: App
         ignoreUnknownSignals: true
