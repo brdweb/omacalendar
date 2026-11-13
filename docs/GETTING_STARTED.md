@@ -11,7 +11,8 @@ Open **Accounts & settings**, then choose a provider:
   Desktop client configuration. Existing accounts may require one
   reauthorization after the requested scopes change.
 - **CalDAV:** enter the server URL and credentials or app password supplied by
-  the provider.
+  the provider. [CalDAV setup](CALDAV_SETUP.md) lists the addresses for
+  Fastmail, iCloud, Nextcloud and Radicale.
 - **Local calendar:** create events without connecting a remote provider.
 
 The first provider synchronization runs in the background. Cached calendars
@@ -47,8 +48,11 @@ OmaCalendar stores its database under
 `$XDG_DATA_HOME/omacalendar` (normally `~/.local/share/omacalendar`) and stores
 provider credentials in Secret Service rather than SQLite. See:
 
-- [Google test setup](GOOGLE_TESTING.md)
-- [CalDAV test setup](CALDAV_TESTING.md)
+- [Troubleshooting](TROUBLESHOOTING.md), including the keyring
+- [Google sign-in](GOOGLE_SIGN_IN.md)
+- [CalDAV setup](CALDAV_SETUP.md) with provider addresses
+- [What each provider supports](PROVIDERS.md)
+- [Keyboard shortcuts](SHORTCUTS.md) and the [command line](CLI.md)
 - [Backup and recovery](BACKUP_AND_RECOVERY.md)
 - [Compatibility and known limits](COMPATIBILITY.md)
 - [Uninstall and data removal](UNINSTALL.md)
@@ -56,5 +60,5 @@ provider credentials in Secret Service rather than SQLite. See:
 For a basic daemon check, run:
 
 ```bash
-omacalendarctl system.info '{}'
+omacalendarctl system.info
 ```
