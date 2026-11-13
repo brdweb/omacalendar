@@ -29,6 +29,8 @@ Drawer {
     property string statusText: ""
     property string searchText: searchField.text
     property string timeFormat: "system"
+    // Qt's numbering: Monday is 1, Sunday is 7.
+    property int firstDayOfWeek: Qt.locale().firstDayOfWeek
     property var pendingInvitation: ({})
     property string pendingInvitationResponse: ""
 
@@ -225,19 +227,25 @@ Drawer {
                     RowLayout {
                         Layout.fillWidth: true
                         visible: searchWhenFilter.currentValue === "range"
-                        AppTextField {
+                        AppDateField {
                             id: searchStartDate
+                            objectName: "searchStartDate"
                             Layout.fillWidth: true
+                            firstDayOfWeek: root.firstDayOfWeek
                             placeholderText: qsTr("From YYYY-MM-DD")
                             accessibleName: qsTr("Search start date")
                             onAccepted: root.submitSearch()
+                            onPicked: root.submitSearch()
                         }
-                        AppTextField {
+                        AppDateField {
                             id: searchEndDate
+                            objectName: "searchEndDate"
                             Layout.fillWidth: true
+                            firstDayOfWeek: root.firstDayOfWeek
                             placeholderText: qsTr("Through YYYY-MM-DD")
                             accessibleName: qsTr("Search end date")
                             onAccepted: root.submitSearch()
+                            onPicked: root.submitSearch()
                         }
                     }
                     Text {

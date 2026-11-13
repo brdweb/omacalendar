@@ -674,6 +674,8 @@ ApplicationWindow {
         defaultCalendarId: String(window.preferences.defaultCalendarId || "")
         workDayStart: Number(window.preferences.workDayStart || 8)
         workDayEnd: Number(window.preferences.workDayEnd || 18)
+        timeFormat: String(window.preferences.timeFormat || "system")
+        firstDayOfWeek: window.firstDayOfWeek
         onSaveRequested: (value, options) => window.saveEvent(value, options)
         onRemoveRequested: (eventId, options) => window.removeEvent(eventId, options)
         onDuplicateRequested: value => window.duplicateEvent(value)
@@ -749,6 +751,7 @@ ApplicationWindow {
     TaskEditor {
         id: taskEditor
         taskLists: window.taskLists
+        firstDayOfWeek: window.firstDayOfWeek
         onSaveRequested: task => window.callApp(task.id ? "updateTask" : "createTask",
                                                 [task])
         onRemoveRequested: taskId => window.callApp("removeTask", [taskId])
@@ -772,6 +775,7 @@ ApplicationWindow {
         syncing: App.busy
         statusText: App.statusText
         timeFormat: String(window.preferences.timeFormat || "system")
+        firstDayOfWeek: window.firstDayOfWeek
         onSearchRequested: (query, filters) => window.search(query, filters)
         onEventActivated: value => window.openEvent(value)
         onResultJumpRequested: value => window.jumpToEvent(value)

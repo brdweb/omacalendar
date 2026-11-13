@@ -34,6 +34,8 @@ Dialog {
     property string validationError: ""
     property string cleanSnapshot: ""
     property bool discardArmed: false
+    // Qt's numbering: Monday is 1, Sunday is 7.
+    property int firstDayOfWeek: Qt.locale().firstDayOfWeek
 
     signal saveRequested(var task)
     signal removeRequested(string taskId)
@@ -206,10 +208,11 @@ Dialog {
         }
         RowLayout {
             Layout.fillWidth: true
-            AppTextField {
+            AppDateField {
                 id: dueField
                 objectName: "taskDue"
                 Layout.fillWidth: true
+                firstDayOfWeek: taskEditor.firstDayOfWeek
                 placeholderText: qsTr("Due YYYY-MM-DD")
                 accessibleName: qsTr("Due date")
                 enabled: !taskEditor.readOnly
