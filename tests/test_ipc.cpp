@@ -670,8 +670,9 @@ class IpcTest final : public QObject {
                     {QStringLiteral("protocolMajor"), kIpcProtocolMajor},
                     {QStringLiteral("method"), QStringLiteral("system.subscribe")},
                     {QStringLiteral("params"), QJsonObject{}}});
-    QCOMPARE(::write(stalled, subscribe.constData(), subscribe.size()),
-             static_cast<ssize_t>(subscribe.size()));
+    QCOMPARE(
+        ::write(stalled, subscribe.constData(), static_cast<size_t>(subscribe.size())),
+        static_cast<ssize_t>(subscribe.size()));
     QTRY_COMPARE(server.clientCount(), 1);
 
     IpcClient healthy;

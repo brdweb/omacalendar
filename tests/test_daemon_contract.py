@@ -27,7 +27,7 @@ from typing import Any
 
 
 PROTOCOL_MAJOR = 2
-PROTOCOL_MINOR = 3
+PROTOCOL_MINOR = 2
 SCHEMA_VERSION = 3
 
 
