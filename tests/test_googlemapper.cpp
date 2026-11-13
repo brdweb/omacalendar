@@ -609,7 +609,13 @@ class GoogleMapperTest final : public QObject {
     duplicate.remoteId.clear();
     const QJsonObject create =
         google::eventToGoogleCreateJson(duplicate, QStringLiteral("mutation-1"));
-    QVERIFY(!create.contains(QStringLiteral("colorId")));
+    // The colour is a canonical event field now, so a copy keeps it; a copy
+    // without a colour of its own sends none, whatever the source payload had.
+    QCOMPARE(create.value(QStringLiteral("colorId")).toString(), QStringLiteral("11"));
+    Event uncolored = duplicate;
+    uncolored.color.clear();
+    QVERIFY(!google::eventToGoogleCreateJson(uncolored, QStringLiteral("mutation-2"))
+                 .contains(QStringLiteral("colorId")));
     QVERIFY(!create.contains(QStringLiteral("attachments")));
     QCOMPARE(create.value(QStringLiteral("id")).toString(),
              google::eventIdForClientMutation(QStringLiteral("mutation-1")));
