@@ -218,6 +218,10 @@ target_link_libraries(omacalendar_sync
 add_executable(omacalendard
   src/daemon/daemon.cpp
   src/daemon/daemon.h
+  src/daemon/daemon_accounts.cpp
+  src/daemon/daemon_events.cpp
+  src/daemon/daemon_misc.cpp
+  src/daemon/daemon_p.h
   src/daemon/daemontasks.cpp
   src/daemon/invitationclassification.cpp
   src/daemon/invitationclassification.h
