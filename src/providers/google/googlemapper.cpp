@@ -213,10 +213,18 @@ QJsonArray recurrenceLines(const QString& recurrenceRule) {
         line.startsWith(QStringLiteral("FREQ="), Qt::CaseInsensitive)) {
       line.prepend(QStringLiteral("RRULE:"));
     }
-    const QString upper = line.left(line.indexOf(QLatin1Char(':')) + 1).toUpper();
-    if (upper == QStringLiteral("RRULE:") || upper == QStringLiteral("RDATE:") ||
-        upper == QStringLiteral("EXRULE:") || upper == QStringLiteral("EXDATE:")) {
-      result.append(upper + line.sliced(upper.size()));
+    // The property name ends at its first parameter or at the value, so
+    // EXDATE;TZID=...: and RDATE;VALUE=DATE: are kept with their parameters.
+    const qsizetype colon = line.indexOf(QLatin1Char(':'));
+    if (colon < 0) {
+      continue;
+    }
+    const qsizetype semicolon = line.indexOf(QLatin1Char(';'));
+    const qsizetype nameEnd = semicolon >= 0 && semicolon < colon ? semicolon : colon;
+    const QString name = line.left(nameEnd).toUpper();
+    if (name == QStringLiteral("RRULE") || name == QStringLiteral("RDATE") ||
+        name == QStringLiteral("EXRULE") || name == QStringLiteral("EXDATE")) {
+      result.append(name + line.sliced(nameEnd));
     }
   }
   return result;
