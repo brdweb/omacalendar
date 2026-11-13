@@ -1884,6 +1884,94 @@ Item {
             tryCompare(editor, "opened", false)
         }
 
+        function test_editor_event_color_choice() {
+            const editor = createTemporaryObject(editorFactory, scene)
+            verify(editor !== null)
+            const saveSpy = createTemporaryObject(signalSpyFactory, testCase, {
+                "target": editor, "signalName": "saveRequested"})
+            const content = scene.Window.window.contentItem
+            const picker = findChild(content, "eventColorPicker")
+            verify(picker !== null)
+
+            // No colour of its own: the picker shows the calendar's colour.
+            editor.openExisting(Object.assign({}, representativeEvents()[0],
+                                              {"attendees": []}))
+            tryCompare(editor, "opened", true)
+            compare(editor.eventColor, "")
+            compare(picker.buttonText, "Calendar color")
+            compare(Theme.hexColor(picker.selectedColor), "#7aa2f7")
+            compare(picker.colorChoices, Theme.calendarPalette)
+            verify(!editor.hasUnsavedChanges())
+
+            // Picking a swatch is an edit, and the picker follows the event.
+            picker.openPalette()
+            tryCompare(picker, "paletteVisible", true)
+            const swatch = findChild(content, "colorSwatch-1")
+            verify(swatch !== null)
+            swatch.clicked()
+            const chosen = Theme.hexColor(Theme.calendarPalette[1])
+            compare(editor.eventColor, chosen)
+            compare(picker.buttonText, "Event color")
+            compare(Theme.hexColor(picker.selectedColor), chosen)
+            verify(editor.hasUnsavedChanges(), "a colour choice is an edit")
+
+            // Going back to the calendar colour is no longer an edit.
+            picker.openPalette()
+            tryCompare(picker, "paletteVisible", true)
+            findChild(content, "colorClear").clicked()
+            compare(editor.eventColor, "")
+            compare(Theme.hexColor(picker.selectedColor), "#7aa2f7")
+            verify(!editor.hasUnsavedChanges(), "the calendar colour is the saved state")
+
+            picker.openPalette()
+            tryCompare(picker, "paletteVisible", true)
+            findChild(content, "colorSwatch-1").clicked()
+            editor.submit()
+            compare(editor.validationError, "")
+            compare(saveSpy.count, 1)
+            compare(saveSpy.signalArguments[0][0].color, chosen)
+
+            // A stored colour loads clean and is kept on save.
+            editor.openExisting(Object.assign({}, representativeEvents()[0],
+                                              {"color": "#e0af68", "attendees": []}))
+            tryCompare(editor, "opened", true)
+            compare(editor.eventColor, "#e0af68")
+            compare(Theme.hexColor(picker.selectedColor), "#e0af68")
+            verify(!editor.hasUnsavedChanges())
+            editor.submit()
+            compare(saveSpy.signalArguments[1][0].color, "#e0af68")
+
+            // Google calendars offer exactly Google's event palette.
+            editor.openExisting(Object.assign({}, representativeEvents()[0],
+                                              {"calendarId": "calendar-google",
+                                               "attendees": []}))
+            tryCompare(editor, "opened", true)
+            compare(picker.colorChoices.length, 11)
+            compare(picker.colorChoices[8], "#5484ed")
+
+            // A new event starts on its calendar's colour.
+            editor.openNew(new Date(2026, 8, 28), 540)
+            tryCompare(editor, "opened", true)
+            compare(editor.eventColor, "")
+            compare(picker.buttonText, "Calendar color")
+        }
+
+        function test_event_color_wins_over_calendar_color() {
+            const colored = Object.assign({}, representativeEvents()[0],
+                                          {"calendarColor": "#7aa2f7",
+                                           "color": "#f7768e"})
+            const chip = createTemporaryObject(eventChipFactory, scene, {
+                "width": 200, "eventData": colored})
+            compare(Theme.hexColor(chip.eventColor), "#f7768e")
+            const block = createTemporaryObject(timelineEventFactory, scene, {
+                "width": 160, "height": 60, "eventData": colored})
+            compare(Theme.hexColor(block.eventColor), "#f7768e")
+            const plain = createTemporaryObject(eventChipFactory, scene, {
+                "width": 200,
+                "eventData": Object.assign({}, colored, {"color": ""})})
+            compare(Theme.hexColor(plain.eventColor), "#7aa2f7")
+        }
+
         function test_editor_ctrl_enter_saves() {
             const editor = createTemporaryObject(editorFactory, scene)
             verify(editor !== null)

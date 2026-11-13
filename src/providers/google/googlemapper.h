@@ -51,6 +51,12 @@ namespace omacalendar::google {
 // Only HTTPS links are kept, so the result is safe to offer for opening.
 [[nodiscard]] QJsonArray attachmentsFromGoogleJson(const QJsonObject& resource);
 
+// Google event colours are ids into a fixed 11-entry palette. These map an id
+// to its "#rrggbb" colour (empty for an unknown id) and a colour to the id of
+// the nearest palette entry (empty for an empty or invalid colour).
+[[nodiscard]] QString googleEventColorHex(const QString& colorId);
+[[nodiscard]] QString googleEventColorId(const QString& color);
+
 // Stable helpers used by the sync layer and mapper tests.
 [[nodiscard]] QString rfc3339(const QDateTime& dateTime, const QString& timeZone = {});
 [[nodiscard]] QString recurrenceInstanceId(const QJsonObject& originalStartTime);

@@ -1649,6 +1649,50 @@ def run_attachments_and_conference_contract(harness: DaemonHarness) -> None:
             f"events.get did not list an empty attachment set: {detail.get('attachments')}")
 
 
+def run_event_color_contract(harness: DaemonHarness) -> None:
+    event = {
+        "calendarId": "local-default",
+        "summary": "colour contract",
+        "startUtc": "2026-11-06T09:00:00Z",
+        "endUtc": "2026-11-06T10:00:00Z",
+        "startTimeZone": "UTC",
+        "endTimeZone": "UTC",
+        "allDay": False,
+        "timeKind": "zoned",
+    }
+    params = {"recurrenceScope": "series", "guestNotificationPolicy": "none"}
+    plain = harness.call("events.create",
+                         {**params, "clientMutationId": "contract-color-plain",
+                          "event": event})
+    require(plain.get("color") == "",
+            f"an event without a colour did not report an empty color: {plain}")
+    created = harness.call("events.create",
+                           {**params, "clientMutationId": "contract-color",
+                            "event": {**event, "color": "#9ECE6A"}})
+    require(created.get("color") == "#9ece6a",
+            f"events.create did not store a canonical colour: {created}")
+    detail = harness.call("events.get", {"eventId": created["id"]})
+    require(detail.get("color") == "#9ece6a",
+            f"events.get did not return the event colour: {detail}")
+    assert_ipc_error(
+        harness.call_error("events.create",
+                           {**params, "clientMutationId": "contract-color-bad",
+                            "event": {**event, "color": "green"}}),
+        "invalid_event_color", "events.create with a non-hex colour")
+
+    # A full-event update from a client that predates the field keeps it.
+    legacy = {key: value for key, value in detail.items() if key != "color"}
+    legacy["summary"] = "colour contract renamed"
+    kept = harness.call("events.update", {**params, "event": legacy})
+    require(kept.get("color") == "#9ece6a",
+            f"an update without color cleared the event colour: {kept}")
+    patched = harness.call("events.update", {**params,
+                                             "eventRef": {"eventId": created["id"]},
+                                             "patch": {"color": ""}})
+    require(patched.get("color") == "",
+            f"a color patch did not return the event to its calendar colour: {patched}")
+
+
 def run_tasks_contract(harness: DaemonHarness) -> None:
     subscribed = harness.call("system.subscribe", {"topics": ["tasks"]})
     require(subscribed.get("topics") == ["tasks"],
@@ -1919,6 +1963,7 @@ def run_contract(harness: DaemonHarness) -> None:
     run_sync_set_interactive_contract(harness)
     run_freebusy_contract(harness)
     run_attachments_and_conference_contract(harness)
+    run_event_color_contract(harness)
     run_tasks_contract(harness)
     for owned_directory in (
         harness.root / "data" / "omacalendar",

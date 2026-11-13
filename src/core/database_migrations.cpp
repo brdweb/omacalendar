@@ -27,9 +27,12 @@ bool Database::migrate(QString* errorMessage) {
            ensureSyncCoverageSchema(errorMessage) &&
            ensureProviderResourcesSchema(errorMessage) &&
            repairInclusiveAllDayEndDates(errorMessage) &&
-           migrateSeriesBounds(errorMessage) && ensureTaskSchema(errorMessage);
+           migrateSeriesBounds(errorMessage) && migrateEventColor(errorMessage) &&
+           ensureTaskSchema(errorMessage);
   }
-  if (schemaVersion() == kDatabaseSchemaVersion) {
+  // Schema 3 chains into the event-colour step; at the current version that
+  // step only confirms its column and index exist.
+  if (schemaVersion() == 3 || schemaVersion() == kDatabaseSchemaVersion) {
     return ensureOutboxMoveSchema(errorMessage) &&
            ensureConflictUniquenessSchema(errorMessage) &&
            ensureReminderDeliverySchema(errorMessage) &&
@@ -37,7 +40,7 @@ bool Database::migrate(QString* errorMessage) {
            ensureProviderResourcesSchema(errorMessage) &&
            ensureReadPerformanceIndexes(errorMessage) &&
            repairInclusiveAllDayEndDates(errorMessage) &&
-           ensureTaskSchema(errorMessage);
+           migrateEventColor(errorMessage) && ensureTaskSchema(errorMessage);
   }
   if (!m_database.transaction()) {
     if (errorMessage != nullptr) {
@@ -114,6 +117,7 @@ bool Database::migrate(QString* errorMessage) {
           status TEXT NOT NULL DEFAULT 'confirmed',
           transparency TEXT NOT NULL DEFAULT 'opaque',
           visibility TEXT NOT NULL DEFAULT 'default',
+          color TEXT,
           recurrence_rule TEXT NOT NULL DEFAULT '',
           recurrence_id TEXT NOT NULL DEFAULT '',
           series_until_utc TEXT,
@@ -294,6 +298,9 @@ bool Database::migrate(QString* errorMessage) {
       QStringLiteral(R"SQL(
         CREATE INDEX reminder_jobs_claim_lease_index
         ON reminder_jobs(state, lease_expires_at)
+      )SQL"),
+      QStringLiteral(R"SQL(
+        CREATE INDEX reminder_jobs_event_index ON reminder_jobs(event_id)
       )SQL"),
       QStringLiteral(R"SQL(
         CREATE TABLE notification_deliveries (
@@ -1012,15 +1019,67 @@ bool Database::migrateSeriesBounds(QString* errorMessage) {
       return false;
     }
   }
-  // This step takes schema 2 to exactly 3. A later schema adds its own step
-  // after this one and updates migrate() to chain them.
-  static_assert(kDatabaseSchemaVersion == 3,
-                "chain a migration step from schema 3 to the new version");
+  // This step takes schema 2 to exactly 3; migrateEventColor() follows it.
   if (!repairSeriesBounds(errorMessage) ||
       !ensureReadPerformanceIndexes(errorMessage) ||
       !execute(QStringLiteral("PRAGMA user_version = 3"), errorMessage)) {
     m_database.rollback();
     return false;
+  }
+  if (!m_database.commit()) {
+    if (errorMessage != nullptr) {
+      *errorMessage = m_database.lastError().text();
+    }
+    return false;
+  }
+  return true;
+}
+
+// Schema 3 to 4: a nullable per-event colour, and an index on
+// reminder_jobs(event_id) so per-event deletes and per-calendar counts stop
+// scanning. Both changes are idempotent, so the step is also safe to run on a
+// database that already has them.
+bool Database::migrateEventColor(QString* errorMessage) {
+  QSqlQuery columns(m_database);
+  if (!columns.exec(QStringLiteral("PRAGMA table_info(events)"))) {
+    if (errorMessage != nullptr) {
+      *errorMessage = sqlError(columns, QStringLiteral("inspect event schema"));
+    }
+    return false;
+  }
+  bool hasColor = false;
+  while (columns.next()) {
+    if (columns.value(QStringLiteral("name")).toString() == QStringLiteral("color")) {
+      hasColor = true;
+    }
+  }
+  columns.finish();
+  if (!m_database.transaction()) {
+    if (errorMessage != nullptr) {
+      *errorMessage = m_database.lastError().text();
+    }
+    return false;
+  }
+  if ((!hasColor && !execute(QStringLiteral("ALTER TABLE events ADD COLUMN color TEXT"),
+                             errorMessage)) ||
+      !execute(QStringLiteral("CREATE INDEX IF NOT EXISTS reminder_jobs_event_index "
+                              "ON reminder_jobs(event_id)"),
+               errorMessage)) {
+    m_database.rollback();
+    return false;
+  }
+  // This step takes schema 3 to exactly 4. A later schema adds its own step
+  // after this one and updates migrate() to chain them. Until the release
+  // that moves kDatabaseSchemaVersion to 4, the step adds its column and
+  // index without stamping the version, so a released schema-3 build can
+  // still open the file.
+  static_assert(kDatabaseSchemaVersion == 3 || kDatabaseSchemaVersion == 4,
+                "chain a migration step from schema 4 to the new version");
+  if constexpr (kDatabaseSchemaVersion == 4) {
+    if (!execute(QStringLiteral("PRAGMA user_version = 4"), errorMessage)) {
+      m_database.rollback();
+      return false;
+    }
   }
   if (!m_database.commit()) {
     if (errorMessage != nullptr) {

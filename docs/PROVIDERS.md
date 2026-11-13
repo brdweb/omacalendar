@@ -11,6 +11,7 @@
 | Video conferencing link | Google Meet | No | No | No |
 | Attachments | Shown | Shown | No | Shown |
 | Reminders | Yes | Yes | Yes | Muted by default for new subscriptions |
+| Event colour | Google's 11 event colours (others snap to the nearest) | `COLOR` as the nearest CSS colour name | Any colour | Read-only |
 | Tasks | Google Tasks | VTODO task lists | Device-only Tasks list | No |
 | Works offline | Cached; changes queue | Cached; changes queue | Always | Cached copy |
 | Credentials | Browser sign-in, token in keyring | Password in keyring | None | Optional password in keyring |

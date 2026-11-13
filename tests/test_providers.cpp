@@ -95,6 +95,8 @@ class ProviderTest final : public QObject {
   void googleOAuthLoopbackConfiguration();
   void calDavICalendarParsing();
   void calDavICalendarSerializationRoundTrip();
+  void googleEventColorRoundTrip();
+  void calDavEventColorRoundTrip();
   void davDiscoveryAndCollectionParsing();
   void davResourceAndErrorParsing();
   void retryClassification();
@@ -1488,6 +1490,163 @@ void ProviderTest::calDavICalendarSerializationRoundTrip() {
   QVERIFY(!caldav::ICalendarCodec::parse({}).ok());
   Event invalid;
   QVERIFY(!caldav::ICalendarCodec::serialize(invalid).ok());
+}
+
+void ProviderTest::googleEventColorRoundTrip() {
+  // Every palette id maps to its colour and back.
+  for (int id = 1; id <= 11; ++id) {
+    const QString hex = google::googleEventColorHex(QString::number(id));
+    QVERIFY2(!hex.isEmpty(), qPrintable(QString::number(id)));
+    QCOMPARE(google::googleEventColorId(hex), QString::number(id));
+  }
+  QCOMPARE(google::googleEventColorHex(QStringLiteral("9")), QStringLiteral("#5484ed"));
+  QCOMPARE(google::googleEventColorHex(QStringLiteral("0")), QString());
+  QCOMPARE(google::googleEventColorHex(QStringLiteral("12")), QString());
+  QCOMPARE(google::googleEventColorHex(QString()), QString());
+  // A custom colour snaps to the nearest palette entry.
+  QCOMPARE(google::googleEventColorId(QStringLiteral("#E02020")), QStringLiteral("11"));
+  QCOMPARE(google::googleEventColorId(QStringLiteral("#5080F0")), QStringLiteral("9"));
+  QCOMPARE(google::googleEventColorId(QString()), QString());
+  QCOMPARE(google::googleEventColorId(QStringLiteral("blue")), QString());
+
+  const QJsonObject resource{
+      {QStringLiteral("id"), QStringLiteral("colored-event")},
+      {QStringLiteral("iCalUID"), QStringLiteral("colored@example.test")},
+      {QStringLiteral("summary"), QStringLiteral("Colored")},
+      {QStringLiteral("colorId"), QStringLiteral("10")},
+      {QStringLiteral("start"), QJsonObject{{QStringLiteral("dateTime"),
+                                             QStringLiteral("2026-08-28T09:00:00Z")}}},
+      {QStringLiteral("end"), QJsonObject{{QStringLiteral("dateTime"),
+                                           QStringLiteral("2026-08-28T10:00:00Z")}}},
+  };
+  Event event = google::eventFromGoogleJson(resource, QStringLiteral("cal-1"));
+  QCOMPARE(event.color, QStringLiteral("#51b749"));
+  QCOMPARE(google::eventToGoogleJson(event).value(QStringLiteral("colorId")).toString(),
+           QStringLiteral("10"));
+  // The canonical event is what a round trip compares, so the RSVP fast path
+  // still sees an unchanged colour as unchanged.
+  QCOMPARE(google::eventFromGoogleJson(google::eventToGoogleJson(event),
+                                       QStringLiteral("cal-1"))
+               .color,
+           event.color);
+
+  event.color = QStringLiteral("#dc2127");
+  QCOMPARE(google::eventToGoogleJson(event).value(QStringLiteral("colorId")).toString(),
+           QStringLiteral("11"));
+
+  // Clearing the colour of a stored event resets it on Google.
+  event.color.clear();
+  const QJsonObject cleared = google::eventToGoogleJson(event);
+  QVERIFY(cleared.contains(QStringLiteral("colorId")));
+  QVERIFY(cleared.value(QStringLiteral("colorId")).isNull());
+
+  // An unknown id reads as no colour and is written back untouched.
+  QJsonObject unknownResource = resource;
+  unknownResource.insert(QStringLiteral("colorId"), QStringLiteral("42"));
+  const Event unknown =
+      google::eventFromGoogleJson(unknownResource, QStringLiteral("cal-1"));
+  QCOMPARE(unknown.color, QString());
+  QCOMPARE(
+      google::eventToGoogleJson(unknown).value(QStringLiteral("colorId")).toString(),
+      QStringLiteral("42"));
+
+  // A new event without a colour sends no colorId at all.
+  Event fresh;
+  fresh.summary = QStringLiteral("New");
+  fresh.startUtc = utc(2026, 8, 28, 9);
+  fresh.endUtc = utc(2026, 8, 28, 10);
+  QVERIFY(!google::eventToGoogleJson(fresh).contains(QStringLiteral("colorId")));
+  fresh.color = QStringLiteral("#a4bdfc");
+  QCOMPARE(google::eventToGoogleJson(fresh).value(QStringLiteral("colorId")).toString(),
+           QStringLiteral("1"));
+}
+
+void ProviderTest::calDavEventColorRoundTrip() {
+  Event input;
+  input.uid = QStringLiteral("colored@example.test");
+  input.summary = QStringLiteral("Colored");
+  input.startUtc = utc(2026, 9, 4, 13);
+  input.endUtc = utc(2026, 9, 4, 14);
+  input.color = QStringLiteral("#ff6347");
+
+  const caldav::ICalendarSerializeResult encoded =
+      caldav::ICalendarCodec::serialize(input);
+  QVERIFY2(encoded.ok(), qPrintable(encoded.error.message));
+  // RFC 7986 COLOR carries a CSS3 colour name.
+  QVERIFY2(encoded.payload.contains("COLOR:tomato\r\n"), encoded.payload.constData());
+  const caldav::ICalendarParseResult decoded =
+      caldav::ICalendarCodec::parse(encoded.payload);
+  QVERIFY2(decoded.ok(), qPrintable(decoded.error.message));
+  QCOMPARE(decoded.events.first().color, QStringLiteral("#ff6347"));
+
+  // A colour with no CSS3 name is written as the nearest one.
+  input.color = QStringLiteral("#ff6448");
+  const caldav::ICalendarSerializeResult nearest =
+      caldav::ICalendarCodec::serialize(input);
+  QVERIFY2(nearest.ok(), qPrintable(nearest.error.message));
+  QVERIFY(nearest.payload.contains("COLOR:tomato\r\n"));
+
+  // No colour, no property; an invalid one is refused.
+  input.color.clear();
+  QVERIFY(!caldav::ICalendarCodec::serialize(input).payload.contains("COLOR"));
+  input.color = QStringLiteral("not-a-colour");
+  QVERIFY(!caldav::ICalendarCodec::serialize(input).ok());
+
+  // Hex values written by other clients are read too.
+  const QByteArray retained =
+      "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//Other//EN\r\n"
+      "BEGIN:VEVENT\r\nUID:retained@example.test\r\nDTSTAMP:20260801T120000Z\r\n"
+      "DTSTART:20260904T130000Z\r\nDTEND:20260904T140000Z\r\nSUMMARY:Kept\r\n"
+      "COLOR:CornflowerBlue\r\nX-OTHER-CLIENT:keep me\r\n"
+      "END:VEVENT\r\nEND:VCALENDAR\r\n";
+  const caldav::ICalendarParseResult parsedRetained =
+      caldav::ICalendarCodec::parse(retained);
+  QVERIFY2(parsedRetained.ok(), qPrintable(parsedRetained.error.message));
+  Event retainedEvent = parsedRetained.events.first();
+  QCOMPARE(retainedEvent.color, QStringLiteral("#6495ed"));
+  const caldav::ICalendarParseResult hexParsed = caldav::ICalendarCodec::parse(
+      QByteArray(retained).replace("COLOR:CornflowerBlue", "COLOR:#7AA2F7"));
+  QVERIFY2(hexParsed.ok(), qPrintable(hexParsed.error.message));
+  QCOMPARE(hexParsed.events.first().color, QStringLiteral("#7aa2f7"));
+
+  // An unchanged colour keeps the retained spelling and unknown data.
+  retainedEvent.summary = QStringLiteral("Kept and renamed");
+  const caldav::ICalendarSerializeResult unchanged =
+      caldav::ICalendarCodec::patch(retainedEvent, retained);
+  QVERIFY2(unchanged.ok(), qPrintable(unchanged.error.message));
+  QVERIFY(unchanged.payload.contains("COLOR:CornflowerBlue"));
+  QVERIFY(unchanged.payload.contains("X-OTHER-CLIENT:keep me"));
+  QVERIFY(unchanged.payload.contains("SUMMARY:Kept and renamed"));
+
+  // A changed colour replaces it; a cleared colour removes it.
+  retainedEvent.color = QStringLiteral("#ff6347");
+  const caldav::ICalendarSerializeResult changed =
+      caldav::ICalendarCodec::patch(retainedEvent, retained);
+  QVERIFY2(changed.ok(), qPrintable(changed.error.message));
+  QVERIFY(changed.payload.contains("COLOR:tomato"));
+  QVERIFY(!changed.payload.contains("CornflowerBlue"));
+  QVERIFY(changed.payload.contains("X-OTHER-CLIENT:keep me"));
+  QCOMPARE(caldav::ICalendarCodec::parse(changed.payload).events.first().color,
+           QStringLiteral("#ff6347"));
+  retainedEvent.color.clear();
+  const caldav::ICalendarSerializeResult cleared =
+      caldav::ICalendarCodec::patch(retainedEvent, retained);
+  QVERIFY2(cleared.ok(), qPrintable(cleared.error.message));
+  QVERIFY(!cleared.payload.contains("COLOR"));
+  QVERIFY(cleared.payload.contains("X-OTHER-CLIENT:keep me"));
+
+  // libical drops a COLOR value it cannot parse; the event then has no colour
+  // and the rest of the resource still round-trips.
+  const QByteArray odd =
+      QByteArray(retained).replace("COLOR:CornflowerBlue", "COLOR:Sunset-Glow");
+  const caldav::ICalendarParseResult oddParsed = caldav::ICalendarCodec::parse(odd);
+  QVERIFY2(oddParsed.ok(), qPrintable(oddParsed.error.message));
+  QCOMPARE(oddParsed.events.first().color, QString());
+  const caldav::ICalendarSerializeResult oddPatched =
+      caldav::ICalendarCodec::patch(oddParsed.events.first(), odd);
+  QVERIFY2(oddPatched.ok(), qPrintable(oddPatched.error.message));
+  QVERIFY(oddPatched.payload.contains("X-OTHER-CLIENT:keep me"));
+  QVERIFY(!oddPatched.payload.contains("\r\nCOLOR"));
 }
 
 void ProviderTest::davDiscoveryAndCollectionParsing() {

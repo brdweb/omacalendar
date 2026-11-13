@@ -826,7 +826,7 @@ QJsonValue Daemon::onConflictsResolve(const QJsonObject& params, ipc::Error* err
         QStringLiteral("visibility"),    QStringLiteral("recurrenceRule"),
         QStringLiteral("recurrenceId"),  QStringLiteral("sequence"),
         QStringLiteral("organizer"),     QStringLiteral("attendees"),
-        QStringLiteral("reminders"),
+        QStringLiteral("reminders"),     QStringLiteral("color"),
     };
     for (const QString& field : editableFields) {
       if (requested.contains(field)) {
@@ -845,9 +845,13 @@ QJsonValue Daemon::onConflictsResolve(const QJsonObject& params, ipc::Error* err
         validatedMerge.insert(field, providerSnapshot.value(field));
       }
     }
-    const Event merged = eventFromJson(validatedMerge);
+    Event merged = eventFromJson(validatedMerge);
     const Calendar calendar = m_database.calendar(merged.calendarId, &dbError);
-    const QString timeError = validateEventTimes(merged);
+    QString timeError = validateEventTimes(merged);
+    if (timeError.isEmpty()) {
+      timeError = normalizeEventColor(&merged);
+      validatedMerge.insert(QStringLiteral("color"), merged.color);
+    }
     if (calendar.id.isEmpty() || calendar.readOnly || !timeError.isEmpty()) {
       if (error != nullptr) {
         *error = {QStringLiteral("invalid_merge"),

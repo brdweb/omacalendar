@@ -20,8 +20,9 @@ ItemDelegate {
     signal dragStarted(var eventData)
     signal dragFinished(var eventData)
 
-    readonly property color eventColor: eventData.calendarColor
-                                        || eventData.color || Theme.accent
+    // The event's own colour wins over its calendar's.
+    readonly property color eventColor: eventData.color
+                                        || eventData.calendarColor || Theme.accent
     readonly property real fillOpacity: selected ? 0.28
                                                  : hovered || activeFocus ? 0.22 : 0.13
     // Text colours are picked against the tinted fill so a very light or

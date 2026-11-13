@@ -288,6 +288,26 @@ OutboxState outboxStateFromString(const QString& value) {
   return OutboxState::Pending;
 }
 
+std::optional<QString> normalizedEventColor(const QString& value) {
+  const QString trimmed = value.trimmed();
+  if (trimmed.isEmpty()) {
+    return QString();
+  }
+  if (trimmed.size() != 7 || trimmed.front() != QLatin1Char('#')) {
+    return std::nullopt;
+  }
+  for (qsizetype index = 1; index < trimmed.size(); ++index) {
+    const char16_t digit = trimmed.at(index).unicode();
+    const bool hex = (digit >= u'0' && digit <= u'9') ||
+                     (digit >= u'a' && digit <= u'f') ||
+                     (digit >= u'A' && digit <= u'F');
+    if (!hex) {
+      return std::nullopt;
+    }
+  }
+  return trimmed.toLower();
+}
+
 QString newUuid() { return QUuid::createUuid().toString(QUuid::WithoutBraces); }
 
 QDate exclusiveAllDayEnd(const QDate& startDate, const QDate& endDate) {
@@ -526,6 +546,7 @@ QJsonObject toJson(const Event& event) {
       {QStringLiteral("status"), event.status},
       {QStringLiteral("transparency"), event.transparency},
       {QStringLiteral("visibility"), event.visibility},
+      {QStringLiteral("color"), event.color},
       {QStringLiteral("recurrenceRule"), event.recurrenceRule},
       {QStringLiteral("recurrenceId"), event.recurrenceId},
       {QStringLiteral("sequence"), event.sequence},
@@ -700,6 +721,7 @@ Event eventFromJson(const QJsonObject& object) {
   if (!visibility.isEmpty()) {
     event.visibility = visibility;
   }
+  event.color = jsonString(object, "color");
   event.recurrenceRule = jsonString(object, "recurrenceRule");
   event.recurrenceId = jsonString(object, "recurrenceId");
   event.sequence = object.value(QStringLiteral("sequence")).toInt();

@@ -50,6 +50,13 @@ Dialog {
     // The reminder list as the default left it on a new event; while the list
     // still matches, changing all-day or the calendar swaps in that default.
     property string defaultReminderSnapshot: ""
+    // "#rrggbb" when the event has its own colour; empty for the calendar's.
+    property string eventColor: ""
+    // Google stores only its fixed event palette, so offer exactly that there.
+    readonly property var googleEventPalette: [
+        "#a4bdfc", "#7ae7bf", "#dbadff", "#ff887c", "#fbd75b", "#ffb878",
+        "#46d6db", "#e1e1e1", "#5484ed", "#51b749", "#dc2127"
+    ]
     readonly property var sourceCalendar: calendarForId(eventData.calendarId || "")
     readonly property bool readOnly: Boolean(eventData && eventData.readOnly)
                                      || sourceCalendar.readOnly === true
@@ -155,7 +162,8 @@ Dialog {
             startDateField.text, endDateField.text, startTimeField.text,
             endTimeField.text, timeZoneBox.currentIndex, calendarBox.currentIndex,
             availabilityBox.currentIndex, visibilityBox.currentIndex,
-            recurrenceEditor.rule(), attendeeEditor.attendees, reminders
+            recurrenceEditor.rule(), attendeeEditor.attendees, reminders,
+            eventColor
         ])
     }
 
@@ -202,6 +210,7 @@ Dialog {
         urlField.text = ""
         notesField.text = ""
         meetBox.checked = false
+        eventColor = ""
         attendeeEditor.organizerEmail = ""
         attendeeEditor.load([])
         allDay.checked = false
@@ -350,6 +359,7 @@ Dialog {
         urlField.text = eventData.url || eventData.meetingUrl || ""
         notesField.text = eventData.description || ""
         meetBox.checked = false
+        eventColor = String(eventData.color || "")
         if (editing && typeof App.loadEventAttachments === "function")
             App.loadEventAttachments(String(eventData.id), String(eventData.recurrenceId || ""))
         attendeeEditor.organizerEmail = String((eventData.organizer || {}).email || "")
@@ -427,6 +437,7 @@ Dialog {
                 ? "transparent" : "opaque"
         value.availability = availabilityBox.currentValue
         value.visibility = visibilityBox.currentValue
+        value.color = eventColor
         value.attendees = parsedAttendees()
         value.reminders = reminderValues()
         value.recurrenceRule = recurrenceRule()
@@ -823,6 +834,28 @@ Dialog {
                         valueRole: "id"
                         enabled: !editor.readOnly
                         Accessible.name: qsTr("Calendar")
+                    }
+                    AppColorPicker {
+                        id: eventColorPicker
+                        objectName: "eventColorPicker"
+                        Layout.preferredWidth: 150
+                        enabled: !editor.readOnly
+                        allowClear: true
+                        selectionFollowsChoice: false
+                        buttonText: editor.eventColor.length > 0
+                                    ? qsTr("Event color") : qsTr("Calendar color")
+                        clearText: qsTr("Calendar color")
+                        swatchNameFormat: qsTr("%1 event color")
+                        dialogTitle: qsTr("Choose event color")
+                        colorChoices: editor.activeProvider === "google"
+                                      ? editor.googleEventPalette
+                                      : Theme.calendarPalette
+                        selectedColor: editor.eventColor
+                                       || editor.activeCalendar.colorOverride
+                                       || editor.activeCalendar.color
+                                       || Theme.accent
+                        onColorSelected: colorValue => editor.eventColor =
+                                         colorValue ? Theme.hexColor(colorValue) : ""
                     }
                     AppCheckBox {
                         id: allDay

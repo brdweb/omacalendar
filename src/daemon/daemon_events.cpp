@@ -895,6 +895,13 @@ QJsonValue Daemon::onEventsCreate(const QJsonObject& params, ipc::Error* error) 
     }
     return {};
   }
+  const QString colorError = normalizeEventColor(&event);
+  if (!colorError.isEmpty()) {
+    if (error != nullptr) {
+      *error = {QStringLiteral("invalid_event_color"), colorError, false};
+    }
+    return {};
+  }
   const QString recurrenceScope = normalizedRecurrenceScope(
       params.value(QStringLiteral("recurrenceScope")).toString());
   if (recurrenceScope != QStringLiteral("series")) {
@@ -1019,6 +1026,11 @@ QJsonValue Daemon::onEventsUpdate(const QJsonObject& params, ipc::Error* error) 
     setError(error, QStringLiteral("not_found"), QStringLiteral("Event not found"));
     return {};
   }
+  // Clients older than the colour field send full events without it; keep the
+  // stored colour instead of clearing it.
+  if (!eventPayload.contains(QStringLiteral("color"))) {
+    event.color = target.current.color;
+  }
   target.providerSource = target.current;
   QString recurrenceScope;
   if (!parseRecurrenceScope(params, &recurrenceScope, error) ||
@@ -1036,6 +1048,11 @@ QJsonValue Daemon::onEventsUpdate(const QJsonObject& params, ipc::Error* error) 
   const QString timeError = validateEventTimes(event);
   if (!timeError.isEmpty()) {
     setError(error, QStringLiteral("invalid_event_time"), timeError);
+    return {};
+  }
+  const QString colorError = normalizeEventColor(&event);
+  if (!colorError.isEmpty()) {
+    setError(error, QStringLiteral("invalid_event_color"), colorError);
     return {};
   }
   QString guestPolicy;
@@ -1383,6 +1400,11 @@ QJsonValue Daemon::onEventsMove(const QJsonObject& params, ipc::Error* error) {
   const QString timeError = validateEventTimes(destination);
   if (!timeError.isEmpty()) {
     setError(error, QStringLiteral("invalid_event_time"), timeError);
+    return {};
+  }
+  const QString colorError = normalizeEventColor(&destination);
+  if (!colorError.isEmpty()) {
+    setError(error, QStringLiteral("invalid_event_color"), colorError);
     return {};
   }
   QString guestPolicy;
