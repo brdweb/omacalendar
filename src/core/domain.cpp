@@ -3,9 +3,11 @@
 #include <QCryptographicHash>
 #include <QJsonArray>
 #include <QJsonDocument>
+#include <QSet>
 #include <QTimeZone>
 #include <QUuid>
 #include <algorithm>
+#include <cmath>
 #include <utility>
 
 namespace omacalendar {
@@ -317,6 +319,70 @@ QString ianaIdForWindowsTimeZone(const QString& timeZone) {
     return {};
   }
   return QString::fromUtf8(QTimeZone::windowsIdToDefaultIanaId(timeZone.toUtf8()));
+}
+
+qint64 clampedReminderOffsetMinutes(const qint64 minutes) {
+  return std::clamp(minutes, -kMaximumReminderOffsetMinutes,
+                    kMaximumReminderOffsetMinutes);
+}
+
+std::optional<qint64> reminderOffsetMinutes(const QJsonValue& reminder) {
+  QJsonValue value = reminder;
+  if (reminder.isObject()) {
+    const QJsonObject object = reminder.toObject();
+    if (dateTimeFromIso(object.value(QStringLiteral("at")).toString()).isValid()) {
+      return std::nullopt;
+    }
+    value = object.value(QStringLiteral("minutesBefore"));
+    if (!value.isDouble()) {
+      value = object.value(QStringLiteral("offsetMinutes"));
+    }
+    if (!value.isDouble()) {
+      value = object.value(QStringLiteral("minutes"));
+    }
+    if (!value.isDouble()) {
+      // Historical behaviour: an object without an offset fires at the start.
+      return 0;
+    }
+  }
+  if (!value.isDouble()) {
+    return std::nullopt;
+  }
+  const double minutes = value.toDouble();
+  if (!std::isfinite(minutes)) {
+    return std::nullopt;
+  }
+  const auto limit = static_cast<double>(kMaximumReminderOffsetMinutes);
+  return static_cast<qint64>(std::trunc(std::clamp(minutes, -limit, limit)));
+}
+
+QString reminderTriggerKey(const QJsonValue& reminder) {
+  if (reminder.isObject()) {
+    const QDateTime at =
+        dateTimeFromIso(reminder.toObject().value(QStringLiteral("at")).toString());
+    if (at.isValid()) {
+      return QStringLiteral("a:") + isoUtc(at);
+    }
+  }
+  const std::optional<qint64> minutes = reminderOffsetMinutes(reminder);
+  return minutes.has_value() ? QStringLiteral("m:%1").arg(*minutes) : QString();
+}
+
+QJsonArray boundedReminders(const QJsonArray& reminders) {
+  QJsonArray result;
+  QSet<QString> seen;
+  for (const QJsonValue& reminder : reminders) {
+    if (result.size() >= kMaximumRemindersPerEvent) {
+      break;
+    }
+    const QString key = reminderTriggerKey(reminder);
+    if (key.isEmpty() || seen.contains(key)) {
+      continue;
+    }
+    seen.insert(key);
+    result.append(reminder);
+  }
+  return result;
 }
 
 QString canonicalRecurrenceIdentity(const QString& value, const bool allDay,

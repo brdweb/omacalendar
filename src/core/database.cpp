@@ -414,11 +414,12 @@ bool Database::upsertAccount(Account account, QString* errorMessage) {
   return bumpChangeRevision(errorMessage);
 }
 
-bool Database::rebuildEventInstances(const Event& event, QString* errorMessage) {
+bool Database::rebuildEventInstances(const Event& event, QString* errorMessage,
+                                     const QDateTime& referenceNow) {
   QList<Event> occurrences{event};
   if (!event.deleted && !event.recurrenceRule.isEmpty() &&
       event.recurrenceId.isEmpty()) {
-    const QDateTime now = nowUtc();
+    const QDateTime now = referenceNow.isValid() ? referenceNow.toUTC() : nowUtc();
     const RecurrenceExpansionResult expansion =
         RecurrenceExpander::expand({event}, now.addYears(-2), now.addYears(5), 10000);
     if (expansion.truncated) {

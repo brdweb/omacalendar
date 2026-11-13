@@ -1,9 +1,13 @@
 // Database: reminder jobs, notification deliveries and invitation baselines.
 // Split out of database.cpp; shared helpers live in database_p.h.
 
+#include <QHash>
+#include <QSet>
 #include <QSqlError>
 #include <QSqlQuery>
 #include <QVariant>
+#include <algorithm>
+#include <optional>
 
 #include "core/database.h"
 #include "core/database_p.h"
@@ -12,11 +16,40 @@ namespace omacalendar {
 
 using namespace detail;
 
-bool Database::rebuildReminderJobs(const Event& event, QString* errorMessage) {
+namespace {
+
+struct DesiredReminderJob {
+  QString occurrenceId;
+  qsizetype index = 0;
+  QDateTime fireAt;
+  QString fingerprint;
+};
+
+// The (occurrence, alarm index) slot a stored job belongs to. Fingerprints are
+// "<event id>:<occurrence id>:<alarm index>:<fire time>"; the occurrence id is
+// stored separately, so the index is the segment right after that prefix.
+QString reminderSlotKey(const QString& eventId, const QString& occurrenceId,
+                        const QString& fingerprint) {
+  const QString prefix = eventId + QLatin1Char(':') + occurrenceId + QLatin1Char(':');
+  if (!fingerprint.startsWith(prefix)) {
+    return {};
+  }
+  return occurrenceId + QLatin1Char('\x1f') +
+         fingerprint.mid(prefix.size()).section(QLatin1Char(':'), 0, 0);
+}
+
+}  // namespace
+
+bool Database::rebuildReminderJobs(const Event& event, QString* errorMessage,
+                                   const QDateTime& referenceNow,
+                                   const ReminderRebuildMode mode, bool* changed) {
+  if (changed != nullptr) {
+    *changed = false;
+  }
+  const QDateTime now = referenceNow.isValid() ? referenceNow.toUTC() : nowUtc();
   QList<Event> occurrences{event};
   if (!event.deleted && !event.reminders.isEmpty() && !event.recurrenceRule.isEmpty() &&
       event.recurrenceId.isEmpty()) {
-    const QDateTime now = nowUtc();
     const RecurrenceExpansionResult expansion =
         RecurrenceExpander::expand({event}, now.addDays(-2), now.addYears(2), 2000);
     if (expansion.truncated) {
@@ -29,48 +62,33 @@ bool Database::rebuildReminderJobs(const Event& event, QString* errorMessage) {
     occurrences = expansion.occurrences;
   }
 
-  QSqlQuery remove(m_database);
-  remove.prepare(QStringLiteral(R"SQL(
-    DELETE FROM reminder_jobs
-    WHERE event_id=? AND state IN ('pending','snoozed')
-  )SQL"));
-  remove.addBindValue(event.id);
-  if (!remove.exec()) {
-    if (errorMessage != nullptr) {
-      *errorMessage = sqlError(remove, QStringLiteral("replace event reminders"));
-    }
-    return false;
-  }
-  if (event.deleted || event.reminders.isEmpty()) {
-    return true;
-  }
-  for (const Event& occurrence : occurrences) {
-    const QDateTime eventStart =
-        occurrence.allDay
-            ? QDateTime(occurrence.startDate, QTime(0, 0), QTimeZone::LocalTime).toUTC()
-            : occurrence.startUtc;
-    if (!eventStart.isValid()) {
-      continue;
-    }
-    for (qsizetype index = 0; index < event.reminders.size(); ++index) {
-      const QJsonValue value = event.reminders.at(index);
-      QDateTime fireAt;
-      int minutesBefore = 0;
-      if (value.isDouble()) {
-        minutesBefore = value.toInt();
-        fireAt = eventStart.addSecs(-minutesBefore * 60);
-      } else if (value.isObject()) {
-        const QJsonObject reminder = value.toObject();
-        fireAt = dateTimeFromIso(reminder.value(QStringLiteral("at")).toString());
-        if (!fireAt.isValid()) {
-          minutesBefore =
-              reminder.value(QStringLiteral("minutesBefore"))
-                  .toInt(reminder.value(QStringLiteral("offsetMinutes"))
-                             .toInt(reminder.value(QStringLiteral("minutes")).toInt()));
-          fireAt = eventStart.addSecs(-minutesBefore * 60);
-        }
+  // Alarms that would fire at the same instant collapse into one, and only the
+  // first kMaximumRemindersPerEvent distinct triggers are scheduled. Each kept
+  // alarm retains its original index so existing fingerprints stay stable.
+  QList<qsizetype> alarmIndexes;
+  {
+    QSet<QString> seenTriggers;
+    for (qsizetype index = 0; index < event.reminders.size() &&
+                              alarmIndexes.size() < kMaximumRemindersPerEvent;
+         ++index) {
+      const QString key = reminderTriggerKey(event.reminders.at(index));
+      if (key.isEmpty() || seenTriggers.contains(key)) {
+        continue;
       }
-      if (!fireAt.isValid()) {
+      seenTriggers.insert(key);
+      alarmIndexes.append(index);
+    }
+  }
+
+  QList<DesiredReminderJob> desired;
+  if (!event.deleted) {
+    for (const Event& occurrence : std::as_const(occurrences)) {
+      const QDateTime eventStart =
+          occurrence.allDay
+              ? QDateTime(occurrence.startDate, QTime(0, 0), QTimeZone::LocalTime)
+                    .toUTC()
+              : occurrence.startUtc;
+      if (!eventStart.isValid()) {
         continue;
       }
       const QString occurrenceId =
@@ -78,34 +96,313 @@ bool Database::rebuildReminderJobs(const Event& event, QString* errorMessage) {
               ? (occurrence.allDay ? occurrence.startDate.toString(Qt::ISODate)
                                    : isoUtc(occurrence.startUtc))
               : occurrence.recurrenceId;
-      const QString fingerprint = QStringLiteral("%1:%2:%3:%4")
-                                      .arg(event.id, occurrenceId)
-                                      .arg(index)
-                                      .arg(isoUtc(fireAt));
-      QSqlQuery insert(m_database);
-      insert.prepare(QStringLiteral(R"SQL(
-        INSERT INTO reminder_jobs
-          (event_id,occurrence_id,fingerprint,fire_at,state,event_revision)
-        VALUES (?, ?, ?, ?, 'pending', ?)
-        ON CONFLICT(fingerprint) DO UPDATE SET
-          event_revision=excluded.event_revision,
-          fire_at=CASE WHEN reminder_jobs.state IN ('pending','snoozed')
-                       THEN excluded.fire_at ELSE reminder_jobs.fire_at END
-      )SQL"));
-      insert.addBindValue(event.id);
-      insert.addBindValue(nonNull(occurrenceId));
-      insert.addBindValue(fingerprint);
-      insert.addBindValue(isoUtc(fireAt));
-      insert.addBindValue(event.localRevision);
-      if (!insert.exec()) {
+      for (const qsizetype index : std::as_const(alarmIndexes)) {
+        const QJsonValue value = event.reminders.at(index);
+        QDateTime fireAt;
+        if (const std::optional<qint64> minutesBefore = reminderOffsetMinutes(value);
+            minutesBefore.has_value()) {
+          // 64-bit arithmetic on an already clamped offset cannot overflow.
+          fireAt = eventStart.addSecs(-*minutesBefore * 60);
+        } else if (value.isObject()) {
+          fireAt =
+              dateTimeFromIso(value.toObject().value(QStringLiteral("at")).toString());
+        }
+        if (!fireAt.isValid()) {
+          continue;
+        }
+        const QString fingerprint = QStringLiteral("%1:%2:%3:%4")
+                                        .arg(event.id, occurrenceId)
+                                        .arg(index)
+                                        .arg(isoUtc(fireAt));
+        desired.append({occurrenceId, index, fireAt, fingerprint});
+      }
+    }
+  }
+
+  // A reconcile never re-creates a job for an (occurrence, alarm) slot that is
+  // already settled — delivered, dismissed, claimed or snoozed — even when the
+  // recomputed fire time, and so the fingerprint, differs.
+  QSet<QString> settledSlots;
+  QHash<QString, qint64> pendingByFingerprint;
+  if (mode == ReminderRebuildMode::Reconcile) {
+    QSqlQuery existing(m_database);
+    existing.prepare(
+        QStringLiteral("SELECT id,fingerprint,occurrence_id,state FROM reminder_jobs "
+                       "WHERE event_id=?"));
+    existing.addBindValue(event.id);
+    if (!existing.exec()) {
+      if (errorMessage != nullptr) {
+        *errorMessage = sqlError(existing, QStringLiteral("read event reminders"));
+      }
+      return false;
+    }
+    while (existing.next()) {
+      const QString fingerprint = existing.value(1).toString();
+      if (existing.value(3).toString() == QStringLiteral("pending")) {
+        pendingByFingerprint.insert(fingerprint, existing.value(0).toLongLong());
+      } else {
+        settledSlots.insert(
+            reminderSlotKey(event.id, existing.value(2).toString(), fingerprint));
+      }
+    }
+  } else {
+    QSqlQuery remove(m_database);
+    remove.prepare(QStringLiteral(R"SQL(
+      DELETE FROM reminder_jobs
+      WHERE event_id=? AND state IN ('pending','snoozed')
+    )SQL"));
+    remove.addBindValue(event.id);
+    if (!remove.exec()) {
+      if (errorMessage != nullptr) {
+        *errorMessage = sqlError(remove, QStringLiteral("replace event reminders"));
+      }
+      return false;
+    }
+    if (changed != nullptr && remove.numRowsAffected() > 0) {
+      *changed = true;
+    }
+  }
+
+  // A calendar's pending work is bounded: once other events hold the budget,
+  // this event schedules only what still fits, nearest occurrences first.
+  if (!desired.isEmpty()) {
+    QSqlQuery budget(m_database);
+    budget.prepare(QStringLiteral(R"SQL(
+      SELECT COUNT(*) FROM reminder_jobs
+      WHERE state IN ('pending','snoozed') AND event_id<>?
+        AND event_id IN (SELECT id FROM events WHERE calendar_id=?)
+    )SQL"));
+    budget.addBindValue(event.id);
+    budget.addBindValue(event.calendarId);
+    if (!budget.exec() || !budget.next()) {
+      if (errorMessage != nullptr) {
+        *errorMessage = sqlError(budget, QStringLiteral("count calendar reminders"));
+      }
+      return false;
+    }
+    const qint64 available = std::max<qint64>(
+        0, kMaximumPendingReminderJobsPerCalendar - budget.value(0).toLongLong());
+    if (desired.size() > available) {
+      qWarning(
+          "reminder_job_budget_exceeded: calendar %s keeps %lld of %lld "
+          "reminders for event %s",
+          qPrintable(event.calendarId), static_cast<long long>(available),
+          static_cast<long long>(desired.size()), qPrintable(event.id));
+      desired.resize(available);
+    }
+  }
+
+  QSet<QString> keptFingerprints;
+  for (const DesiredReminderJob& job : std::as_const(desired)) {
+    if (mode == ReminderRebuildMode::Reconcile) {
+      if (pendingByFingerprint.contains(job.fingerprint)) {
+        keptFingerprints.insert(job.fingerprint);
+        continue;
+      }
+      if (settledSlots.contains(
+              reminderSlotKey(event.id, job.occurrenceId, job.fingerprint))) {
+        continue;
+      }
+    }
+    QSqlQuery insert(m_database);
+    insert.prepare(QStringLiteral(R"SQL(
+      INSERT INTO reminder_jobs
+        (event_id,occurrence_id,fingerprint,fire_at,state,event_revision)
+      VALUES (?, ?, ?, ?, 'pending', ?)
+      ON CONFLICT(fingerprint) DO UPDATE SET
+        event_revision=excluded.event_revision,
+        fire_at=CASE WHEN reminder_jobs.state IN ('pending','snoozed')
+                     THEN excluded.fire_at ELSE reminder_jobs.fire_at END
+    )SQL"));
+    insert.addBindValue(event.id);
+    insert.addBindValue(nonNull(job.occurrenceId));
+    insert.addBindValue(job.fingerprint);
+    insert.addBindValue(isoUtc(job.fireAt));
+    insert.addBindValue(event.localRevision);
+    if (!insert.exec()) {
+      if (errorMessage != nullptr) {
+        *errorMessage = sqlError(insert, QStringLiteral("schedule event reminder"));
+      }
+      return false;
+    }
+    if (changed != nullptr) {
+      *changed = true;
+    }
+  }
+
+  if (mode == ReminderRebuildMode::Reconcile) {
+    for (auto iterator = pendingByFingerprint.cbegin();
+         iterator != pendingByFingerprint.cend(); ++iterator) {
+      if (keptFingerprints.contains(iterator.key())) {
+        continue;
+      }
+      QSqlQuery remove(m_database);
+      remove.prepare(
+          QStringLiteral("DELETE FROM reminder_jobs WHERE id=? AND state='pending'"));
+      remove.addBindValue(iterator.value());
+      if (!remove.exec()) {
         if (errorMessage != nullptr) {
-          *errorMessage = sqlError(insert, QStringLiteral("schedule event reminder"));
+          *errorMessage = sqlError(remove, QStringLiteral("drop stale reminder"));
         }
         return false;
+      }
+      if (changed != nullptr && remove.numRowsAffected() > 0) {
+        *changed = true;
       }
     }
   }
   return true;
+}
+
+QString Database::metadataValue(const QString& key, QString* errorMessage) const {
+  QSqlQuery query(m_database);
+  query.prepare(QStringLiteral("SELECT value FROM metadata WHERE key=?"));
+  query.addBindValue(key);
+  if (!query.exec()) {
+    if (errorMessage != nullptr) {
+      *errorMessage = sqlError(query, QStringLiteral("read metadata"));
+    }
+    return {};
+  }
+  return query.next() ? query.value(0).toString() : QString();
+}
+
+bool Database::setMetadataValue(const QString& key, const QString& value,
+                                QString* errorMessage) {
+  QSqlQuery query(m_database);
+  query.prepare(QStringLiteral(R"SQL(
+    INSERT INTO metadata(key,value) VALUES (?,?)
+    ON CONFLICT(key) DO UPDATE SET value=excluded.value
+  )SQL"));
+  query.addBindValue(key);
+  query.addBindValue(nonNull(value));
+  if (!query.exec()) {
+    if (errorMessage != nullptr) {
+      *errorMessage = sqlError(query, QStringLiteral("write metadata"));
+    }
+    return false;
+  }
+  return true;
+}
+
+bool Database::reconcileReminderJobs(QList<Event> events, const QDateTime& now,
+                                     const bool rebuildInstances, bool* changedOut,
+                                     QString* errorMessage) {
+  if (changedOut != nullptr) {
+    *changedOut = false;
+  }
+  if (events.isEmpty()) {
+    return true;
+  }
+  if (!m_database.transaction()) {
+    if (errorMessage != nullptr) {
+      *errorMessage = m_database.lastError().text();
+    }
+    return false;
+  }
+  bool changed = false;
+  for (Event& event : events) {
+    bool eventChanged = false;
+    if (!hydrateProviderResource(&event, errorMessage) ||
+        (rebuildInstances && !rebuildEventInstances(event, errorMessage, now)) ||
+        !rebuildReminderJobs(event, errorMessage, now, ReminderRebuildMode::Reconcile,
+                             &eventChanged)) {
+      m_database.rollback();
+      return false;
+    }
+    changed = changed || eventChanged;
+  }
+  if (changed && !bumpChangeRevision(errorMessage)) {
+    m_database.rollback();
+    return false;
+  }
+  if (!m_database.commit()) {
+    const QString commitError = m_database.lastError().text();
+    m_database.rollback();
+    if (errorMessage != nullptr) {
+      *errorMessage = commitError;
+    }
+    return false;
+  }
+  if (changedOut != nullptr) {
+    *changedOut = changed;
+  }
+  return true;
+}
+
+bool Database::rebaseAllDayReminderJobs(const QDateTime& now, bool* changed,
+                                        QString* errorMessage) {
+  // All-day fire times are local midnight converted to UTC when a job is
+  // built, so they go stale when the system zone changes. Only pending jobs
+  // move; snoozed, claimed, delivered and dismissed slots stay settled.
+  QList<Event> events;
+  {
+    QSqlQuery rows(m_database);
+    rows.prepare(QStringLiteral(R"SQL(
+      SELECT e.* FROM events e
+      WHERE e.deleted=0 AND e.all_day=1 AND e.reminders_json NOT IN ('','[]')
+        AND EXISTS (SELECT 1 FROM reminder_jobs j
+                    WHERE j.event_id=e.id AND j.state='pending')
+      ORDER BY e.id
+    )SQL"));
+    if (!rows.exec()) {
+      if (errorMessage != nullptr) {
+        *errorMessage = sqlError(rows, QStringLiteral("read all-day reminder events"));
+      }
+      return false;
+    }
+    while (rows.next()) {
+      events.append(eventFromQuery(rows));
+    }
+  }
+  return reconcileReminderJobs(std::move(events), now, false, changed, errorMessage);
+}
+
+qsizetype Database::extendReminderHorizons(const QDateTime& now,
+                                           const QString& afterEventId, const int limit,
+                                           QString* lastEventId,
+                                           QString* errorMessage) {
+  // Instances and reminder jobs are expanded over a window around the time a
+  // series was last written. Re-expanding open-ended (or still running) series
+  // with reminders keeps an unchanged series reminding indefinitely.
+  QList<Event> events;
+  {
+    QSqlQuery rows(m_database);
+    rows.prepare(QStringLiteral(R"SQL(
+      SELECT * FROM events
+      WHERE deleted=0 AND recurrence_rule<>'' AND recurrence_id=''
+        AND reminders_json NOT IN ('','[]') AND id>?
+        AND (
+          (all_day=0 AND time_kind<>'floating'
+           AND COALESCE(series_until_utc,'~')>?)
+          OR ((all_day=1 OR time_kind='floating')
+              AND COALESCE(series_until_date,'~')>=?)
+        )
+      ORDER BY id LIMIT ?
+    )SQL"));
+    rows.addBindValue(nonNull(afterEventId));
+    rows.addBindValue(isoUtc(now));
+    rows.addBindValue(now.toUTC().date().addDays(-1).toString(Qt::ISODate));
+    rows.addBindValue(qBound(1, limit, 1000));
+    if (!rows.exec()) {
+      if (errorMessage != nullptr) {
+        *errorMessage = sqlError(rows, QStringLiteral("read reminder series"));
+      }
+      return -1;
+    }
+    while (rows.next()) {
+      events.append(eventFromQuery(rows));
+    }
+  }
+  const qsizetype processed = events.size();
+  const QString last = events.isEmpty() ? QString() : events.constLast().id;
+  if (!reconcileReminderJobs(std::move(events), now, true, nullptr, errorMessage)) {
+    return -1;
+  }
+  if (lastEventId != nullptr) {
+    *lastEventId = last;
+  }
+  return processed;
 }
 
 namespace {

@@ -14,6 +14,7 @@
 #include <QtTest/QtTest>
 #include <algorithm>
 #include <ctime>
+#include <limits>
 
 #include "core/database.h"
 #include "reminders/reminderscheduler.h"
@@ -158,6 +159,53 @@ bool executeSql(const QString& databasePath, const QString& statement,
     *errorMessage = failure;
   }
   return succeeded;
+}
+
+QStringList sqlColumn(const QString& databasePath, const QString& statement,
+                      QString* errorMessage = nullptr) {
+  const QString connectionName =
+      QStringLiteral("reminder-column-test-%1")
+          .arg(QUuid::createUuid().toString(QUuid::WithoutBraces));
+  QStringList values;
+  QString failure;
+  {
+    QSqlDatabase connection =
+        QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), connectionName);
+    connection.setDatabaseName(databasePath);
+    connection.setConnectOptions(QStringLiteral("QSQLITE_BUSY_TIMEOUT=5000"));
+    if (!connection.open()) {
+      failure = connection.lastError().text();
+    } else {
+      QSqlQuery query(connection);
+      if (!query.exec(statement)) {
+        failure = query.lastError().text();
+      }
+      while (query.next()) {
+        values.append(query.value(0).toString());
+      }
+      connection.close();
+    }
+  }
+  QSqlDatabase::removeDatabase(connectionName);
+  if (!failure.isEmpty() && errorMessage != nullptr) {
+    *errorMessage = failure;
+  }
+  return values;
+}
+
+Event allDayReminderEvent(const QString& summary, const QDate& date,
+                          const QJsonArray& reminders) {
+  Event event =
+      reminderEvent(summary, QDateTime(date, QTime(0, 0), QTimeZone::UTC), reminders);
+  event.allDay = true;
+  event.timeKind = TimeKind::AllDay;
+  event.startUtc = {};
+  event.endUtc = {};
+  event.startTimeZone.clear();
+  event.endTimeZone.clear();
+  event.startDate = date;
+  event.endDate = date.addDays(1);
+  return event;
 }
 
 QString notificationDeliveryState(const QString& databasePath,
@@ -1997,6 +2045,269 @@ class ReminderSchedulerTest final : public QObject {
     const ReminderJob job = reminderForEvent(&database, reminder.id);
     QVERIFY(job.id > 0);
     QVERIFY(!job.claimedAt.isValid());
+  }
+
+  void hostileAlarmCountIsCapped() {
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    Database database;
+    QString error;
+    const QString databasePath = directory.filePath(QStringLiteral("store.sqlite"));
+    QVERIFY2(database.open(databasePath, &error), qPrintable(error));
+
+    QJsonArray reminders;
+    for (int minutes = 1; minutes <= 500; ++minutes) {
+      reminders.append(minutes);
+    }
+    const QDateTime start(QDateTime::currentDateTimeUtc().date().addDays(1),
+                          QTime(9, 0), QTimeZone::UTC);
+    Event series = reminderEvent(QStringLiteral("Alarm flood"), start, reminders);
+    series.recurrenceRule = QStringLiteral("FREQ=DAILY;COUNT=30");
+    QVERIFY2(database.saveLocalEvent(&series, OutboxOperation::Create, &error),
+             qPrintable(error));
+
+    const QStringList total = sqlColumn(
+        databasePath,
+        QStringLiteral("SELECT COUNT(*) FROM reminder_jobs WHERE event_id='%1'")
+            .arg(series.id),
+        &error);
+    QVERIFY2(error.isEmpty(), qPrintable(error));
+    QCOMPARE(total, QStringList{QString::number(30 * kMaximumRemindersPerEvent)});
+    const QStringList perOccurrence = sqlColumn(
+        databasePath,
+        QStringLiteral("SELECT MAX(c) FROM (SELECT COUNT(*) AS c FROM reminder_jobs "
+                       "WHERE event_id='%1' GROUP BY occurrence_id)")
+            .arg(series.id),
+        &error);
+    QCOMPARE(perOccurrence, QStringList{QString::number(kMaximumRemindersPerEvent)});
+  }
+
+  void duplicateTriggersCollapse() {
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    Database database;
+    QString error;
+    QVERIFY2(database.open(directory.filePath(QStringLiteral("store.sqlite")), &error),
+             qPrintable(error));
+    const QDateTime start(QDate(2027, 3, 1), QTime(12, 0), QTimeZone::UTC);
+    const QString at = QStringLiteral("2027-03-01T11:00:00.000Z");
+    Event event = reminderEvent(
+        QStringLiteral("Duplicated alarms"), start,
+        QJsonArray{10, 10,
+                   QJsonObject{{QStringLiteral("method"), QStringLiteral("popup")},
+                               {QStringLiteral("minutes"), 10}},
+                   QJsonObject{{QStringLiteral("minutesBefore"), 10}}, 20,
+                   QJsonObject{{QStringLiteral("at"), at}},
+                   QJsonObject{{QStringLiteral("method"), QStringLiteral("email")},
+                               {QStringLiteral("at"), at}}});
+    QVERIFY2(database.saveLocalEvent(&event, OutboxOperation::Create, &error),
+             qPrintable(error));
+    QList<QDateTime> fireTimes;
+    for (const ReminderJob& job : database.reminders(500, &error)) {
+      if (job.eventId == event.id) {
+        fireTimes.append(job.fireAt);
+      }
+    }
+    std::sort(fireTimes.begin(), fireTimes.end());
+    QCOMPARE(fireTimes,
+             (QList<QDateTime>{start.addSecs(-60 * 60), start.addSecs(-20 * 60),
+                               start.addSecs(-10 * 60)}));
+  }
+
+  void extremeReminderOffsetIsClampedWithoutOverflow() {
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    Database database;
+    QString error;
+    QVERIFY2(database.open(directory.filePath(QStringLiteral("store.sqlite")), &error),
+             qPrintable(error));
+    const QDateTime start(QDate(2027, 3, 1), QTime(12, 0), QTimeZone::UTC);
+    Event event =
+        reminderEvent(QStringLiteral("Extreme offsets"), start,
+                      QJsonArray{std::numeric_limits<int>::max(),
+                                 QJsonObject{{QStringLiteral("minutesBefore"),
+                                              std::numeric_limits<int>::min()}}});
+    QVERIFY2(database.saveLocalEvent(&event, OutboxOperation::Create, &error),
+             qPrintable(error));
+    QList<QDateTime> fireTimes;
+    for (const ReminderJob& job : database.reminders(500, &error)) {
+      if (job.eventId == event.id) {
+        fireTimes.append(job.fireAt);
+      }
+    }
+    std::sort(fireTimes.begin(), fireTimes.end());
+    const qint64 limitSeconds = kMaximumReminderOffsetMinutes * 60;
+    QCOMPARE(fireTimes, (QList<QDateTime>{start.addSecs(-limitSeconds),
+                                          start.addSecs(limitSeconds)}));
+  }
+
+  void allDayReminderFollowsSystemZoneChange() {
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    Database database;
+    QString error;
+    QVERIFY2(database.open(directory.filePath(QStringLiteral("store.sqlite")), &error),
+             qPrintable(error));
+    const QDateTime current(QDate(2027, 3, 1), QTime(12, 0), QTimeZone::UTC);
+    FakeNotificationBackend backend;
+    ReminderScheduler scheduler(
+        &database, &backend, [current]() { return current; },
+        [](const QUrl&) { return true; });
+
+    const QDate day(2027, 6, 15);
+    const ScopedTimeZone newYork("America/New_York");
+    Event event = allDayReminderEvent(QStringLiteral("Holiday"), day, QJsonArray{60});
+    QVERIFY2(database.saveLocalEvent(&event, OutboxOperation::Create, &error),
+             qPrintable(error));
+    scheduler.checkNow();
+    const ReminderJob original = reminderForEvent(&database, event.id);
+    QCOMPARE(original.fireAt, QDateTime(day, QTime(0, 0), QTimeZone("America/New_York"))
+                                  .addSecs(-3600)
+                                  .toUTC());
+    {
+      const ScopedTimeZone berlin("Europe/Berlin");
+      scheduler.checkNow();
+      const ReminderJob rebased = reminderForEvent(&database, event.id);
+      QCOMPARE(rebased.state, QStringLiteral("pending"));
+      QCOMPARE(rebased.fireAt, QDateTime(day, QTime(0, 0), QTimeZone("Europe/Berlin"))
+                                   .addSecs(-3600)
+                                   .toUTC());
+    }
+    QCOMPARE(backend.sent.size(), 0);
+  }
+
+  void zoneChangeDoesNotRedeliverDeliveredAllDayReminder() {
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    Database database;
+    QString error;
+    QVERIFY2(database.open(directory.filePath(QStringLiteral("store.sqlite")), &error),
+             qPrintable(error));
+    const QDate day(2027, 6, 15);
+    // New York fires one day before local midnight: 2027-06-14 04:00Z.
+    const QDateTime current(QDate(2027, 6, 14), QTime(4, 30), QTimeZone::UTC);
+    FakeNotificationBackend backend;
+    ReminderScheduler scheduler(
+        &database, &backend, [current]() { return current; },
+        [](const QUrl&) { return true; });
+
+    const ScopedTimeZone newYork("America/New_York");
+    Event event = allDayReminderEvent(QStringLiteral("Delivered holiday"), day,
+                                      QJsonArray{24 * 60});
+    QVERIFY2(database.saveLocalEvent(&event, OutboxOperation::Create, &error),
+             qPrintable(error));
+    scheduler.checkNow();
+    QCOMPARE(backend.sent.size(), 1);
+    QCOMPARE(reminderForEvent(&database, event.id).state, QStringLiteral("delivered"));
+    {
+      // In Berlin the same slot fires at 2027-06-13 22:00Z, which is overdue but
+      // still due (the occurrence is upcoming). A naive rebuild would create a
+      // fresh pending job for it and notify a second time.
+      const ScopedTimeZone berlin("Europe/Berlin");
+      scheduler.checkNow();
+      QCOMPARE(backend.sent.size(), 1);
+      const QList<ReminderJob> jobs = database.reminders(500, &error);
+      QCOMPARE(std::count_if(jobs.cbegin(), jobs.cend(),
+                             [&event](const ReminderJob& job) {
+                               return job.eventId == event.id;
+                             }),
+               1);
+    }
+  }
+
+  void unchangedSeriesStillRemindsAfterThreeYears() {
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    Database database;
+    QString error;
+    QVERIFY2(database.open(directory.filePath(QStringLiteral("store.sqlite")), &error),
+             qPrintable(error));
+    const QDateTime start(QDateTime::currentDateTimeUtc().date().addDays(1),
+                          QTime(9, 0), QTimeZone::UTC);
+    Event series = reminderEvent(QStringLiteral("Standup"), start, QJsonArray{10});
+    series.recurrenceRule = QStringLiteral("FREQ=DAILY");
+    QVERIFY2(database.saveLocalEvent(&series, OutboxOperation::Create, &error),
+             qPrintable(error));
+
+    // Five minutes into the reminder window of an occurrence three years on.
+    const QDateTime later = start.addYears(3).addSecs(-5 * 60);
+    QVERIFY(database.dueReminders(later, 20, &error).isEmpty());
+
+    FakeNotificationBackend backend;
+    ReminderScheduler scheduler(
+        &database, &backend, [later]() { return later; },
+        [](const QUrl&) { return true; });
+    QSignalSpy changed(&scheduler, &ReminderScheduler::reminderStateChanged);
+    scheduler.refreshReminderHorizons();
+    QTRY_COMPARE(changed.count(), 1);
+
+    const QList<ReminderJob> due = database.dueReminders(later, 20, &error);
+    QVERIFY2(error.isEmpty(), qPrintable(error));
+    QCOMPARE(due.size(), 1);
+    QCOMPARE(due.first().eventId, series.id);
+    QCOMPARE(due.first().fireAt, start.addYears(3).addSecs(-10 * 60));
+    scheduler.checkNow();
+    QCOMPARE(backend.sent.size(), 1);
+  }
+
+  void horizonRefreshIsRateLimitedAndChunked() {
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    Database database;
+    QString error;
+    QVERIFY2(database.open(directory.filePath(QStringLiteral("store.sqlite")), &error),
+             qPrintable(error));
+    const QDateTime start(QDateTime::currentDateTimeUtc().date().addDays(1),
+                          QTime(9, 0), QTimeZone::UTC);
+    for (int index = 0; index < 3; ++index) {
+      Event series = reminderEvent(QStringLiteral("Open series %1").arg(index),
+                                   start.addSecs(index * 3600), QJsonArray{10});
+      series.recurrenceRule = QStringLiteral("FREQ=WEEKLY");
+      QVERIFY2(database.saveLocalEvent(&series, OutboxOperation::Create, &error),
+               qPrintable(error));
+    }
+    Event ended = reminderEvent(
+        QStringLiteral("Ended series"),
+        QDateTime(QDate(2020, 1, 1), QTime(9, 0), QTimeZone::UTC), QJsonArray{10});
+    ended.recurrenceRule = QStringLiteral("FREQ=DAILY;UNTIL=20200105T090000Z");
+    QVERIFY2(database.saveLocalEvent(&ended, OutboxOperation::Create, &error),
+             qPrintable(error));
+    Event silent = reminderEvent(QStringLiteral("No reminders"), start, QJsonArray{});
+    silent.recurrenceRule = QStringLiteral("FREQ=DAILY");
+    QVERIFY2(database.saveLocalEvent(&silent, OutboxOperation::Create, &error),
+             qPrintable(error));
+
+    const QDateTime now = start.addDays(1);
+    QString cursor;
+    QCOMPARE(database.extendReminderHorizons(now, cursor, 2, &cursor, &error),
+             qsizetype(2));
+    QCOMPARE(database.extendReminderHorizons(now, cursor, 2, &cursor, &error),
+             qsizetype(1));
+    QCOMPARE(database.extendReminderHorizons(now, cursor, 2, &cursor, &error),
+             qsizetype(0));
+    QVERIFY2(error.isEmpty(), qPrintable(error));
+
+    QDateTime current = now;
+    FakeNotificationBackend backend;
+    ReminderScheduler scheduler(
+        &database, &backend, [&current]() { return current; },
+        [](const QUrl&) { return true; });
+    QSignalSpy changed(&scheduler, &ReminderScheduler::reminderStateChanged);
+    const QString key = QStringLiteral("reminder_horizon_refreshed_at");
+    scheduler.refreshReminderHorizons();
+    QTRY_COMPARE(changed.count(), 1);
+    QCOMPARE(database.metadataValue(key), isoUtc(now));
+
+    current = now.addDays(1);
+    scheduler.refreshReminderHorizons();
+    QCoreApplication::processEvents();
+    QCOMPARE(changed.count(), 1);
+    QCOMPARE(database.metadataValue(key), isoUtc(now));
+
+    current = now.addDays(ReminderScheduler::kHorizonRefreshDays);
+    scheduler.refreshReminderHorizons();
+    QTRY_COMPARE(changed.count(), 2);
+    QCOMPARE(database.metadataValue(key), isoUtc(current));
   }
 };
 
