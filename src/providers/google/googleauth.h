@@ -34,6 +34,14 @@ class GoogleAuthManager final : public QObject {
   bool forget(const QString& accountId, QString* errorMessage = nullptr);
   void cancel(const QString& accountId);
 
+  // How long an interactive sign-in keeps its loopback listener open before it
+  // fails with authorization_timeout. Adjustable for tests.
+  [[nodiscard]] static constexpr int defaultInteractiveTimeoutMs() {
+    return 10 * 60 * 1000;
+  }
+  void setInteractiveTimeout(int milliseconds);
+  [[nodiscard]] int interactiveTimeout() const { return m_interactiveTimeoutMs; }
+
  signals:
   void authorizationUrlReady(const QString& accountId, const QUrl& url);
   void authorized(const QString& accountId);
@@ -84,6 +92,7 @@ class GoogleAuthManager final : public QObject {
   quint64 m_nextSessionGeneration = 0;
   quint64 m_nextAuthorizationGeneration = 0;
   quint64 m_nextForgetGeneration = 0;
+  int m_interactiveTimeoutMs = defaultInteractiveTimeoutMs();
 };
 
 }  // namespace omacalendar::google

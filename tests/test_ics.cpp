@@ -53,6 +53,7 @@ class IcsServiceTest final : public QObject {
   void rejectsMalformedPayloads();
   void credentialStorageDoesNotBlockEventLoop();
   void rejectsCrossOriginRedirects();
+  void privateFeedIsFlaggedAndRedirectToPrivateIsRefused();
   void boundsNetworkPayloadBeforeAppend();
   void preservesCompleteRecurrenceAcrossFeedRefreshAndImport();
   void subscriptionWithWindowsTzidHonoursExdate();
@@ -262,6 +263,87 @@ void IcsServiceTest::rejectsCrossOriginRedirects() {
            QStringLiteral("cross_origin_redirect_blocked"));
   QCOMPARE(ics::IcsService::redirectErrorCode(origin, otherPort, true),
            QStringLiteral("credential_redirect_blocked"));
+}
+
+void IcsServiceTest::privateFeedIsFlaggedAndRedirectToPrivateIsRefused() {
+  const auto isPrivate = [](const char* url) {
+    return ics::IcsService::isPrivateNetworkHost(QUrl(QString::fromLatin1(url)));
+  };
+  QVERIFY(isPrivate("https://localhost/feed.ics"));
+  QVERIFY(isPrivate("https://LOCALHOST:8443/feed.ics"));
+  QVERIFY(isPrivate("https://calendar.localhost/feed.ics"));
+  QVERIFY(isPrivate("https://127.0.0.1/feed.ics"));
+  QVERIFY(isPrivate("https://127.8.9.10/feed.ics"));
+  QVERIFY(isPrivate("https://10.1.2.3/feed.ics"));
+  QVERIFY(isPrivate("https://172.16.0.1/feed.ics"));
+  QVERIFY(isPrivate("https://192.168.1.20/feed.ics"));
+  QVERIFY(isPrivate("https://169.254.169.254/feed.ics"));
+  QVERIFY(isPrivate("https://100.100.1.1/feed.ics"));
+  QVERIFY(isPrivate("https://0.0.0.0/feed.ics"));
+  QVERIFY(isPrivate("https://[::1]/feed.ics"));
+  QVERIFY(isPrivate("https://[fe80::1]/feed.ics"));
+  QVERIFY(isPrivate("https://[fd12:3456::1]/feed.ics"));
+  QVERIFY(isPrivate("https://[::ffff:192.168.0.1]/feed.ics"));
+  QVERIFY(!isPrivate("https://calendar.example.test/feed.ics"));
+  QVERIFY(!isPrivate("https://8.8.8.8/feed.ics"));
+  QVERIFY(!isPrivate("https://172.32.0.1/feed.ics"));
+  QVERIFY(!isPrivate("https://[2001:4860::8888]/feed.ics"));
+  QVERIFY(
+      ics::IcsService::isPrivateNetworkFeed(QStringLiteral("webcal://192.168.1.5/a")));
+  QVERIFY(!ics::IcsService::isPrivateNetworkFeed(
+      QStringLiteral("webcal://calendar.example.test/a")));
+
+  // A LAN feed remains a valid subscription; it is only flagged.
+  QUrl normalized;
+  QVERIFY(ics::IcsService::normalizeSubscriptionUrl(
+      QStringLiteral("https://192.168.1.5:8443/home.ics"), &normalized));
+
+  Database database;
+  QString error;
+  QVERIFY2(database.open(QStringLiteral(":memory:"), &error), qPrintable(error));
+  for (const auto& [id, url] :
+       {std::pair{QStringLiteral("lan-feed"),
+                  QStringLiteral("https://192.168.1.5/a.ics")},
+        std::pair{QStringLiteral("public-feed"),
+                  QStringLiteral("https://calendar.example.test/a.ics")}}) {
+    Account account;
+    account.id = id;
+    account.provider = ProviderKind::Ics;
+    account.displayName = id;
+    account.endpoint = url;
+    QVERIFY(database.upsertAccount(account, &error));
+    IcsSubscription subscription;
+    subscription.accountId = id;
+    subscription.url = url;
+    QVERIFY(database.upsertIcsSubscription(subscription, &error));
+  }
+  ics::IcsService service(&database);
+  QVERIFY(service.status(QStringLiteral("lan-feed"))
+              .value(QStringLiteral("privateNetwork"))
+              .toBool());
+  const QJsonValue publicFlag = service.status(QStringLiteral("public-feed"))
+                                    .value(QStringLiteral("privateNetwork"));
+  QVERIFY(publicFlag.isBool());
+  QCOMPARE(publicFlag.toBool(), false);
+  for (const QJsonValue& entry :
+       service.status().value(QStringLiteral("subscriptions")).toArray()) {
+    QVERIFY(entry.toObject().value(QStringLiteral("privateNetwork")).isBool());
+  }
+
+  // A public feed redirecting onto a private address is refused with its own
+  // code; a LAN feed redirecting within its own origin keeps working.
+  const QUrl publicOrigin(QStringLiteral("https://calendar.example.test/feed.ics"));
+  QCOMPARE(
+      ics::IcsService::redirectErrorCode(
+          publicOrigin, QUrl(QStringLiteral("https://192.168.1.1/feed.ics")), false),
+      QStringLiteral("private_network_redirect_blocked"));
+  QCOMPARE(ics::IcsService::redirectErrorCode(
+               publicOrigin, QUrl(QStringLiteral("https://localhost/feed.ics")), true),
+           QStringLiteral("private_network_redirect_blocked"));
+  const QUrl lanOrigin(QStringLiteral("https://192.168.1.5/a.ics"));
+  QVERIFY(ics::IcsService::redirectErrorCode(
+              lanOrigin, QUrl(QStringLiteral("https://192.168.1.5/b.ics")), true)
+              .isEmpty());
 }
 
 void IcsServiceTest::boundsNetworkPayloadBeforeAppend() {

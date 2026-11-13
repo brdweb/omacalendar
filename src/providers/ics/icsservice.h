@@ -41,6 +41,12 @@ class IcsService final : public Provider {
 
   static bool normalizeSubscriptionUrl(const QString& input, QUrl* normalized,
                                        QString* errorMessage = nullptr);
+  // True for `localhost` and IP-literal loopback, private-use, link-local,
+  // unique-local and unspecified addresses. Such feeds are allowed (a LAN
+  // calendar server is a normal setup) but reported as `privateNetwork`.
+  // Host names are not resolved, so this is a hint, not a security boundary.
+  [[nodiscard]] static bool isPrivateNetworkHost(const QUrl& url);
+  [[nodiscard]] static bool isPrivateNetworkFeed(const QString& input);
   static bool payloadFromRequest(const QJsonObject& request, QByteArray* payload,
                                  IcsError* error);
 

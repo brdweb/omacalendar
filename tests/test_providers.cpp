@@ -85,6 +85,7 @@ class ProviderTest final : public QObject {
   void allDayInclusiveEndDatesAreNormalized();
   void googleOccurrenceMutationTargeting();
   void googleRequestConstructionAndHydrationBounds();
+  void googleRequestsNeverFollowCrossOriginRedirects();
   void googleResponseClassification();
   void googleMutationIdentityAndRsvpPatch();
   void googleFullSyncReplacementIsAtomic();
@@ -888,6 +889,25 @@ void ProviderTest::googleOccurrenceMutationTargeting() {
   target = google::googleOccurrenceMutationTarget(invalid);
   QCOMPARE(target.kind, google::GoogleOccurrenceMutationTargetKind::Invalid);
   QVERIFY(target.remoteId.isEmpty());
+}
+
+void ProviderTest::googleRequestsNeverFollowCrossOriginRedirects() {
+  const QNetworkRequest request = google::googleApiRequest(
+      google::taskListsRequestUrl({}), QStringLiteral("access-token"),
+      QStringLiteral("\"etag-1\""));
+  // NoLessSafeRedirectPolicy would forward the bearer token to any other
+  // HTTPS host a redirect names.
+  QCOMPARE(request.attribute(QNetworkRequest::RedirectPolicyAttribute).toInt(),
+           static_cast<int>(QNetworkRequest::SameOriginRedirectPolicy));
+  QCOMPARE(request.rawHeader(QByteArrayLiteral("Authorization")),
+           QByteArrayLiteral("Bearer access-token"));
+  QCOMPARE(request.rawHeader(QByteArrayLiteral("If-Match")),
+           QByteArrayLiteral("\"etag-1\""));
+  QVERIFY(request.maximumRedirectsAllowed() <= 3);
+  QVERIFY(
+      google::googleApiRequest(google::taskListsRequestUrl({}), QStringLiteral("token"))
+          .rawHeader(QByteArrayLiteral("If-Match"))
+          .isEmpty());
 }
 
 void ProviderTest::googleRequestConstructionAndHydrationBounds() {

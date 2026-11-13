@@ -43,6 +43,11 @@ class CalDavClient final : public QObject {
     return 256 * 1024;
   }
   [[nodiscard]] static QList<QStringList> batchMultiGetHrefs(const QStringList& hrefs);
+  // Wall-clock deadline for one request, including a server that keeps the
+  // connection alive by trickling bytes. Adjustable for tests.
+  [[nodiscard]] static constexpr int defaultRequestTimeoutMs() { return 120000; }
+  void setRequestTimeout(int milliseconds);
+  [[nodiscard]] int requestTimeout() const { return m_requestTimeoutMs; }
   void setCredentials(const QString& accountId, const QString& username,
                       const QString& password, const QUrl& endpoint);
   void forgetCredentials(const QString& accountId);
@@ -95,6 +100,7 @@ class CalDavClient final : public QObject {
 
   QHash<QString, Credential> m_credentials;
   QNetworkAccessManager m_network;
+  int m_requestTimeoutMs = defaultRequestTimeoutMs();
 };
 
 }  // namespace omacalendar::caldav

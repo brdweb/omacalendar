@@ -2,6 +2,7 @@
 #include <QEventLoop>
 #include <QFile>
 #include <QHash>
+#include <QPointer>
 #include <QScopeGuard>
 #include <QStringList>
 #include <QTcpServer>
@@ -531,6 +532,7 @@ class CalDavHardeningTest final : public QObject {
   void crossOriginCredentialsAreRejected();
   void oversizedResponseIsRejectedBeforeBuffering();
   void crossOriginRedirectIsNotFollowed();
+  void stalledCalDavResponseTimesOut();
   void schedulingRequiresProof();
   void calendarRevisionTimestampsRespectMethodAndPrecision();
   void excessiveComponentStructureIsRejected();
@@ -1051,6 +1053,56 @@ void CalDavHardeningTest::oversizedResponseIsRejectedBeforeBuffering() {
       });
   QCOMPARE(result.errorCode, QStringLiteral("response_too_large"));
   QVERIFY(result.body.isEmpty());
+}
+
+void CalDavHardeningTest::stalledCalDavResponseTimesOut() {
+  // The server answers with headers and then trickles one body byte every
+  // 50 ms, which keeps Qt's per-transfer inactivity timeout from ever firing.
+  QTcpServer server;
+  QVERIFY(server.listen(QHostAddress::LocalHost, 0));
+  QTimer trickle;
+  trickle.setInterval(50);
+  QList<QPointer<QTcpSocket>> sockets;
+  connect(&server, &QTcpServer::newConnection, &server, [&]() {
+    while (QTcpSocket* socket = server.nextPendingConnection()) {
+      sockets.append(socket);
+      connect(socket, &QTcpSocket::readyRead, socket, [socket]() {
+        socket->readAll();
+        socket->write(QByteArrayLiteral(
+            "HTTP/1.1 207 Multi-Status\r\nContent-Length: 100000\r\n\r\n"));
+      });
+    }
+  });
+  connect(&trickle, &QTimer::timeout, &server, [&sockets]() {
+    for (const QPointer<QTcpSocket>& socket : std::as_const(sockets)) {
+      if (socket != nullptr && socket->state() == QAbstractSocket::ConnectedState) {
+        socket->write(QByteArrayLiteral("x"));
+      }
+    }
+  });
+  trickle.start();
+
+  QUrl url;
+  url.setScheme(QStringLiteral("http"));
+  url.setHost(QStringLiteral("127.0.0.1"));
+  url.setPort(server.serverPort());
+  url.setPath(QStringLiteral("/dav/"));
+  caldav::CalDavClient client;
+  QCOMPARE(client.requestTimeout(), caldav::CalDavClient::defaultRequestTimeoutMs());
+  client.setRequestTimeout(400);
+  client.setCredentials(QStringLiteral("account"), QStringLiteral("alice"),
+                        QStringLiteral("secret"), url);
+  QElapsedTimer elapsed;
+  elapsed.start();
+  const caldav::DavResponse result =
+      awaitResponse([&](caldav::CalDavClient::Callback callback) {
+        client.discoverPrincipal(QStringLiteral("account"), url, std::move(callback));
+      });
+  QCOMPARE(result.errorCode, QStringLiteral("timeout"));
+  QVERIFY(result.retryable);
+  QVERIFY(!result.ok);
+  QVERIFY(elapsed.elapsed() < 4000);
+  QVERIFY(!sockets.isEmpty());
 }
 
 void CalDavHardeningTest::crossOriginRedirectIsNotFollowed() {

@@ -17,6 +17,7 @@ QByteArray timestamp(const QDateTime& dateTime) {
 struct ReplyBody final {
   QByteArray value;
   bool tooLarge = false;
+  bool timedOut = false;
 };
 
 int effectivePort(const QUrl& url) {
@@ -28,10 +29,17 @@ int effectivePort(const QUrl& url) {
 }
 
 DavResponse responseFromReply(QNetworkReply* reply, const QByteArray& body,
-                              const bool tooLarge) {
+                              const bool tooLarge, const bool timedOut) {
   DavResponse result;
   result.httpStatus =
       reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+  if (timedOut) {
+    result.httpStatus = 0;
+    result.errorCode = QStringLiteral("timeout");
+    result.errorMessage = QStringLiteral("The CalDAV request timed out");
+    result.retryable = true;
+    return result;
+  }
   if (tooLarge) {
     result.errorCode = QStringLiteral("response_too_large");
     result.errorMessage =
@@ -162,6 +170,10 @@ QByteArray etagListBody() {
 }  // namespace
 
 CalDavClient::CalDavClient(QObject* parent) : QObject(parent) {}
+
+void CalDavClient::setRequestTimeout(const int milliseconds) {
+  m_requestTimeoutMs = milliseconds > 0 ? milliseconds : defaultRequestTimeoutMs();
+}
 
 bool CalDavClient::validateEndpoint(const QUrl& endpoint, QString* errorMessage) {
   if (!endpoint.isValid() || endpoint.host().isEmpty() || endpoint.isRelative()) {
@@ -490,8 +502,17 @@ void CalDavClient::request(const QString& accountId, const QByteArray& verb,
   QNetworkReply* reply = m_network.sendCustomRequest(networkRequest, verb, body);
   reply->setReadBufferSize(64 * 1024);
   const auto responseBody = std::make_shared<ReplyBody>();
+  // setTransferTimeout() only fires after 30 s without any bytes; a server
+  // that trickles a response would otherwise hold the request open forever.
+  auto* deadline = new QTimer(reply);
+  deadline->setSingleShot(true);
+  connect(deadline, &QTimer::timeout, reply, [reply, responseBody]() {
+    responseBody->timedOut = true;
+    reply->abort();
+  });
+  deadline->start(m_requestTimeoutMs);
   const auto consume = [reply, responseBody]() {
-    if (responseBody->tooLarge) {
+    if (responseBody->tooLarge || responseBody->timedOut) {
       return;
     }
     const qint64 remaining = static_cast<qint64>(CalDavClient::maximumResponseBytes() -
@@ -525,7 +546,8 @@ void CalDavClient::request(const QString& accountId, const QByteArray& verb,
           [reply, responseBody, consume, callback = std::move(callback)]() mutable {
             consume();
             const DavResponse response =
-                responseFromReply(reply, responseBody->value, responseBody->tooLarge);
+                responseFromReply(reply, responseBody->value, responseBody->tooLarge,
+                                  responseBody->timedOut);
             reply->deleteLater();
             callback(response);
           });

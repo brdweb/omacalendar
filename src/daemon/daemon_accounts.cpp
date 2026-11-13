@@ -186,9 +186,11 @@ QJsonValue Daemon::onAccountsAddIcs(const QJsonObject& params, ipc::Error* error
     }
     return {};
   }
-  return QJsonObject{{QStringLiteral("account"), toJson(account)},
-                     {QStringLiteral("refreshing"), true},
-                     {QStringLiteral("revision"), m_database.changeRevision()}};
+  return QJsonObject{
+      {QStringLiteral("account"), toJson(account)},
+      {QStringLiteral("refreshing"), true},
+      {QStringLiteral("privateNetwork"), ics::IcsService::isPrivateNetworkFeed(url)},
+      {QStringLiteral("revision"), m_database.changeRevision()}};
 }
 
 QJsonValue Daemon::onAccountsRemove(const QJsonObject& params, ipc::Error* error) {

@@ -27,7 +27,7 @@ from typing import Any
 
 
 PROTOCOL_MAJOR = 2
-PROTOCOL_MINOR = 2
+PROTOCOL_MINOR = 3
 SCHEMA_VERSION = 3
 
 
@@ -1288,7 +1288,17 @@ def run_account_lifecycle_contract(
             ics_account_result.get("refreshing") is True,
             "ICS add response did not advertise refresh",
         )
+        require(
+            ics_account_result.get("privateNetwork") is True,
+            "ICS add response did not flag a loopback feed (IPC 2.3)",
+        )
         ics_id = ics_account["id"]
+        ics_status = harness.call("ics.status", {"accountId": ics_id})
+        require(
+            isinstance(ics_status, dict)
+            and ics_status.get("privateNetwork") is True,
+            "ics.status did not flag a loopback feed (IPC 2.3)",
+        )
         _ = wait_for_account(
             harness,
             ics_id,
