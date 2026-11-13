@@ -9,6 +9,7 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QProcess>
+#include <QStandardPaths>
 #include <QTime>
 #include <QTimeZone>
 #include <QTimer>
@@ -43,9 +44,16 @@ QString notificationPrivacy(const Database* database) {
                                    .toString();
 }
 
+// The freedesktop notification summary is plain text (servers escape it
+// themselves), so titles go there verbatim. Bodies may carry markup and get
+// the escaped form.
 QString eventTitle(const Event& event) {
   return event.summary.trimmed().isEmpty() ? QStringLiteral("Calendar event")
-                                           : event.summary.toHtmlEscaped();
+                                           : event.summary;
+}
+
+QString escapedEventTitle(const Event& event) {
+  return eventTitle(event).toHtmlEscaped();
 }
 
 QString invitationDigestFingerprint(QStringList memberFingerprints,
@@ -160,13 +168,35 @@ void FreedesktopNotificationBackend::onActionInvoked(const uint notificationId,
   emit actionInvoked(notificationId, action);
 }
 
+QStringList ReminderScheduler::linkOpenerCommand(const QUrl& url,
+                                                 const bool underSystemd,
+                                                 const QString& systemdRun) {
+  const QString target = url.toString(QUrl::FullyEncoded);
+  if (underSystemd && !systemdRun.isEmpty()) {
+    // A sandboxed service must not become the parent of the browser or
+    // meeting client: start xdg-open in its own transient user unit instead.
+    return {systemdRun,
+            QStringLiteral("--user"),
+            QStringLiteral("--quiet"),
+            QStringLiteral("--collect"),
+            QStringLiteral("--no-block"),
+            QStringLiteral("--"),
+            QStringLiteral("xdg-open"),
+            target};
+  }
+  return {QStringLiteral("xdg-open"), target};
+}
+
 ReminderScheduler::ReminderScheduler(Database* database, QObject* parent)
     : ReminderScheduler(
           database, new FreedesktopNotificationBackend(),
           []() { return QDateTime::currentDateTimeUtc(); },
           [](const QUrl& url) {
-            return QProcess::startDetached(QStringLiteral("xdg-open"),
-                                           {url.toString(QUrl::FullyEncoded)});
+            QStringList command = linkOpenerCommand(
+                url, qEnvironmentVariableIsSet("INVOCATION_ID"),
+                QStandardPaths::findExecutable(QStringLiteral("systemd-run")));
+            const QString program = command.takeFirst();
+            return QProcess::startDetached(program, command);
           },
           parent) {
   m_backend->setParent(this);
@@ -800,12 +830,12 @@ CalendarNotification ReminderScheduler::invitationNotification(
     notification.summary = QStringLiteral("Invitation cancelled");
   }
   if (privacy == QStringLiteral("full_details")) {
-    notification.body = eventTitle(event);
+    notification.body = escapedEventTitle(event);
     if (!event.location.isEmpty()) {
       notification.body += QStringLiteral(" — ") + event.location.toHtmlEscaped();
     }
   } else if (privacy == QStringLiteral("title_only")) {
-    notification.body = eventTitle(event);
+    notification.body = escapedEventTitle(event);
   } else {
     notification.body = changed ? QStringLiteral("A calendar invitation changed")
                                 : QStringLiteral("You received an invitation");
@@ -842,7 +872,7 @@ CalendarNotification ReminderScheduler::invitationDigestNotification(
       privacy == QStringLiteral("title_only")) {
     QStringList titles;
     for (const Event& event : events) {
-      titles.append(eventTitle(event));
+      titles.append(escapedEventTitle(event));
     }
     notification.body = titles.join(QStringLiteral(", "));
   } else {

@@ -71,6 +71,13 @@ class ReminderScheduler final : public QObject {
                     NowProvider nowProvider, LinkOpener linkOpener,
                     QObject* parent = nullptr);
 
+  // The program and arguments the default LinkOpener runs for `url`. Under a
+  // systemd service (`underSystemd`) with systemd-run available, xdg-open is
+  // launched in a transient user unit so the opened application does not
+  // inherit the service's sandbox or lifetime. Public for contract tests.
+  [[nodiscard]] static QStringList linkOpenerCommand(const QUrl& url, bool underSystemd,
+                                                     const QString& systemdRun);
+
   void start();
   void stop();
   void checkNow();

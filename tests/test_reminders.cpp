@@ -300,8 +300,9 @@ class ReminderSchedulerTest final : public QObject {
              qPrintable(error));
     scheduler.checkNow();
     QCOMPARE(backend.sent.size(), 1);
-    QCOMPARE(backend.sent.constLast().summary,
-             QStringLiteral("&lt;b&gt;Board &amp; Budget&lt;/b&gt;"));
+    // The freedesktop summary is plain text: servers render it literally, so
+    // pre-escaping it showed "&amp;" to the user. Bodies stay escaped below.
+    QCOMPARE(backend.sent.constLast().summary, QStringLiteral("<b>Board & Budget</b>"));
     QVERIFY(backend.sent.constLast().body.contains(
         QStringLiteral("&lt;img src='file:///etc/passwd'&gt; &amp; room")));
     QVERIFY(!backend.sent.constLast().body.contains(QStringLiteral("<img")));
@@ -318,6 +319,30 @@ class ReminderSchedulerTest final : public QObject {
                             "&lt;b&gt;Secret room&lt;/b&gt;"));
     QVERIFY(!backend.sent.constLast().body.contains(QStringLiteral("<a")));
     QVERIFY(!backend.sent.constLast().body.contains(QStringLiteral("<b")));
+  }
+
+  void openerCommandEscapesServiceSandbox() {
+    const QUrl url(QStringLiteral("https://meet.example.test/room?id=a b&x=1"));
+    const QString encoded = url.toString(QUrl::FullyEncoded);
+    QCOMPARE(ReminderScheduler::linkOpenerCommand(
+                 url, true, QStringLiteral("/usr/bin/systemd-run")),
+             (QStringList{QStringLiteral("/usr/bin/systemd-run"),
+                          QStringLiteral("--user"), QStringLiteral("--quiet"),
+                          QStringLiteral("--collect"), QStringLiteral("--no-block"),
+                          QStringLiteral("--"), QStringLiteral("xdg-open"), encoded}));
+    // Outside a service, or without systemd-run, fall back to plain xdg-open.
+    QCOMPARE(ReminderScheduler::linkOpenerCommand(
+                 url, false, QStringLiteral("/usr/bin/systemd-run")),
+             (QStringList{QStringLiteral("xdg-open"), encoded}));
+    QCOMPARE(ReminderScheduler::linkOpenerCommand(url, true, {}),
+             (QStringList{QStringLiteral("xdg-open"), encoded}));
+    // A hostile URL stays a single argument after the "--" separator.
+    const QUrl hostile(QStringLiteral("https://example.test/--user;rm -rf"));
+    const QStringList command = ReminderScheduler::linkOpenerCommand(
+        hostile, true, QStringLiteral("systemd-run"));
+    QCOMPARE(command.size(), 8);
+    QCOMPARE(command.at(5), QStringLiteral("--"));
+    QCOMPARE(command.last(), hostile.toString(QUrl::FullyEncoded));
   }
 
   void multipleAlarmsPrivacyAndDuplicateSuppression() {
