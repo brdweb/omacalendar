@@ -130,8 +130,8 @@ def schema_two_version(path: Path) -> None:
 
 def assert_series_bounds(path: Path, ids: list[str]) -> None:
     with sqlite3.connect(path) as connection:
-        equal(connection.execute("PRAGMA user_version").fetchone()[0], 3,
-              "candidate did not migrate to schema 3")
+        equal(connection.execute("PRAGMA user_version").fetchone()[0], 4,
+              "candidate did not migrate to schema 4")
         for event_id in ids:
             row = connection.execute(
                 "SELECT series_until_utc,series_until_date FROM events WHERE id=?",
@@ -248,8 +248,8 @@ def upgrade(previous: Path, candidate: Path, old_version: str, new_version: str,
                 h.start()
                 require(h.call("system.info")["version"] == new_version, "wrong candidate")
                 require(h.call("system.health")["ok"], "candidate unhealthy")
-                require(h.call("system.info")["schemaVersion"] == 3,
-                        "candidate did not report schema 3")
+                require(h.call("system.info")["schemaVersion"] == 4,
+                        "candidate did not report schema 4")
                 equal(h.call("events.list", historical_range)["events"], historical_before,
                       f"candidate restart {number + 1} changed finite recurrence")
                 equal(snapshot(h, ids, settings, interval), before, f"candidate restart {number + 1} changed profile")
@@ -331,7 +331,7 @@ def schema_one(candidate: Path, version: str, work: Path, logs: Path | None) -> 
                     staging.rmdir()
                 h.start()
                 info = h.call("system.info")
-                require(info["version"] == version and info["schemaVersion"] == 3, "wrong migrated runtime")
+                require(info["version"] == version and info["schemaVersion"] == 4, "wrong migrated runtime")
                 accounts = h.call("accounts.list")["accounts"]
                 require(len(accounts) == 1 and accounts[0]["provider"] == "local", "transition did not reset to local-only state")
                 archives = list(h.database_path.parent.glob("*.pre-v2-*.backup"))
@@ -350,7 +350,7 @@ def schema_one(candidate: Path, version: str, work: Path, logs: Path | None) -> 
                 require(len(list(h.database_path.parent.glob("*.pre-v2-*.backup"))) == len(archives), "schema-2 restart repeated archival")
                 require(not staging.exists(), "schema staging path remained")
                 h.stop()
-                print(f"PASS: {label}; private recoverable archive, schema-3 local reset, explicit synthetic "
+                print(f"PASS: {label}; private recoverable archive, schema-4 local reset, explicit synthetic "
                       "CalDAV reconnect/sync, idempotent restart" + (", failed initialization preserves original and retries successfully" if blocked else ""))
             finally:
                 h.stop()
