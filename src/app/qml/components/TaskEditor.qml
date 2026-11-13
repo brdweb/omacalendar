@@ -13,7 +13,8 @@ Dialog {
     anchors.centerIn: Overlay.overlay
     width: Math.min(460, Overlay.overlay ? Overlay.overlay.width - 48 : 460)
     padding: Theme.spacingLG
-    closePolicy: Popup.CloseOnEscape
+    // Escape is handled by dismissShortcut so unsaved edits are not lost.
+    closePolicy: Popup.NoAutoClose
     title: editing ? qsTr("Edit task") : qsTr("New task")
 
     property var taskLists: []
@@ -31,9 +32,40 @@ Dialog {
     readonly property bool readOnly: editing && sourceList.readOnly === true
     property bool deleteArmed: false
     property string validationError: ""
+    property string cleanSnapshot: ""
+    property bool discardArmed: false
 
     signal saveRequested(var task)
     signal removeRequested(string taskId)
+
+    function formSnapshot() {
+        return JSON.stringify([titleField.text, notesField.text, dueField.text,
+                               doneBox.checked, listBox.currentIndex])
+    }
+
+    function markClean() {
+        cleanSnapshot = formSnapshot()
+        discardArmed = false
+    }
+
+    function hasUnsavedChanges() {
+        return opened && !readOnly && cleanSnapshot.length > 0
+                && formSnapshot() !== cleanSnapshot
+    }
+
+    function requestDismiss() {
+        if (discardArmed || !hasUnsavedChanges()) {
+            discardChanges()
+            return
+        }
+        discardArmed = true
+    }
+
+    function discardChanges() {
+        discardArmed = false
+        cleanSnapshot = ""
+        close()
+    }
 
     function openNew(listId, dueDate) {
         taskData = ({"listId": listId || ""})
@@ -44,6 +76,7 @@ Dialog {
         listBox.currentIndex = Math.max(0, listIndex(listId))
         deleteArmed = false
         validationError = ""
+        markClean()
         open()
         titleField.forceActiveFocus()
     }
@@ -57,6 +90,7 @@ Dialog {
         listBox.currentIndex = Math.max(0, listIndex(taskData.listId))
         deleteArmed = false
         validationError = ""
+        markClean()
         open()
         titleField.forceActiveFocus()
     }
@@ -106,6 +140,8 @@ Dialog {
             task.listId = String(writableLists[listBox.currentIndex].id)
         }
         taskEditor.saveRequested(task)
+        cleanSnapshot = ""
+        discardArmed = false
         taskEditor.close()
     }
 
@@ -126,6 +162,19 @@ Dialog {
 
     contentItem: ColumnLayout {
         spacing: Theme.spacingMD
+        Shortcut {
+            objectName: "taskEditorDismissShortcut"
+            sequence: "Escape"
+            enabled: taskEditor.opened
+            context: Qt.ApplicationShortcut
+            onActivated: taskEditor.requestDismiss()
+        }
+        Shortcut {
+            sequences: ["Ctrl+Return", "Ctrl+Enter", "Ctrl+S"]
+            enabled: taskEditor.opened && !taskEditor.readOnly
+            context: Qt.ApplicationShortcut
+            onActivated: taskEditor.submit()
+        }
 
         AppTextField {
             id: titleField
@@ -223,6 +272,32 @@ Dialog {
             font.pixelSize: Theme.smallFontSize
         }
         RowLayout {
+            objectName: "taskDiscardPrompt"
+            visible: taskEditor.discardArmed
+            Layout.fillWidth: true
+            spacing: Theme.spacingSM
+            Text {
+                textFormat: Text.PlainText
+                Layout.fillWidth: true
+                text: qsTr("Discard your unsaved changes?")
+                color: Theme.warning
+                wrapMode: Text.Wrap
+                Accessible.role: Accessible.AlertMessage
+                Accessible.name: text
+            }
+            AppButton {
+                text: qsTr("Keep editing")
+                quiet: true
+                onClicked: taskEditor.discardArmed = false
+            }
+            AppButton {
+                objectName: "taskDiscard"
+                text: qsTr("Discard")
+                destructive: true
+                onClicked: taskEditor.discardChanges()
+            }
+        }
+        RowLayout {
             Layout.fillWidth: true
             AppButton {
                 objectName: "taskDelete"
@@ -235,7 +310,7 @@ Dialog {
             AppButton {
                 text: qsTr("Cancel")
                 quiet: true
-                onClicked: taskEditor.close()
+                onClicked: taskEditor.requestDismiss()
             }
             AppButton {
                 objectName: "taskSave"
@@ -246,4 +321,5 @@ Dialog {
             }
         }
     }
+
 }

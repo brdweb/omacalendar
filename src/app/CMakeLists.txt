@@ -30,6 +30,7 @@ qt_add_qml_module(omacalendar
     qml/Main.qml
     qml/Theme.qml
     qml/components/AppShortcuts.qml
+    qml/components/ShortcutHelpDialog.qml
     qml/components/AppButton.qml
     qml/components/AppAccordionSection.qml
     qml/components/AppCheckBox.qml
