@@ -226,6 +226,11 @@ inline constexpr int kStaleReminderGraceSeconds = 2 * 3600;
 // persistence must derive identical fingerprints for the same event.
 QString invitationFingerprint(const Event& event);
 
+// Outlook and Exchange name zones with Windows ids such as "Pacific Standard
+// Time". Returns the default IANA id for such a name, or an empty string when
+// |timeZone| is not a known Windows zone id.
+QString ianaIdForWindowsTimeZone(const QString& timeZone);
+
 // RFC 5545 recurrence IDs are commonly represented in either iCalendar basic
 // form (20260904T090000), ISO form, or with TZID/RANGE parameters.  Providers
 // are allowed to choose any of those equivalent spellings.  These helpers

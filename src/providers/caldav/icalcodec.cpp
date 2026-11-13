@@ -75,20 +75,137 @@ QString propertyText(icalcomponent* component, icalproperty_kind kind) {
   return fromIcal(icalproperty_get_value_as_string(property));
 }
 
-QString recurrenceProperties(icalcomponent* component) {
+icaltimezone* builtinTimeZone(const QByteArray& name) {
+  icaltimezone* zone = icaltimezone_get_builtin_timezone(name.constData());
+  if (zone == nullptr) {
+    zone = icaltimezone_get_builtin_timezone_from_tzid(name.constData());
+  }
+  return zone;
+}
+
+QString unfoldedPropertyLine(icalproperty* property) {
+  char* encoded = icalproperty_as_ical_string_r(property);
+  if (encoded == nullptr) {
+    return {};
+  }
+  QString line = QString::fromUtf8(encoded);
+  icalmemory_free_buffer(encoded);
+  line.replace(QStringLiteral("\r\n "), QString());
+  line.replace(QStringLiteral("\r\n\t"), QString());
+  return line.trimmed();
+}
+
+// A local date-time in |zone| as a UTC basic-format value. DATE values,
+// durations and values already in UTC pass through unchanged.
+QByteArray utcDateTimeText(const QByteArray& text, icaltimezone* zone) {
+  if (text.startsWith('P') || text.startsWith('+') || text.startsWith('-')) {
+    return text;
+  }
+  icaltimetype value = icaltime_from_string(text.constData());
+  if (icaltime_is_null_time(value) || !icaltime_is_valid_time(value)) {
+    return {};
+  }
+  if (icaltime_is_date(value) || icaltime_is_utc(value)) {
+    return text;
+  }
+  icaltime_set_timezone(&value, zone);
+  const icaltimetype utc =
+      icaltime_convert_to_zone(value, icaltimezone_get_utc_timezone());
+  char* encoded = icaltime_as_ical_string_r(utc);
+  if (encoded == nullptr) {
+    return {};
+  }
+  const QByteArray result(encoded);
+  icalmemory_free_buffer(encoded);
+  return result;
+}
+
+// EXDATE or RDATE with values in |zone| rewritten to UTC and without TZID, or
+// an empty string when a value cannot be converted.
+QString utcRecurrenceDateLine(icalproperty* property, icaltimezone* zone) {
+  const char* encoded = icalproperty_get_value_as_string(property);
+  if (encoded == nullptr) {
+    return {};
+  }
+  QList<QByteArray> converted;
+  for (const QByteArray& rawValue : QByteArray(encoded).split(',')) {
+    const QByteArray value = rawValue.trimmed();
+    if (value.isEmpty()) {
+      continue;
+    }
+    QList<QByteArray> parts = value.split('/');
+    for (QByteArray& part : parts) {
+      part = utcDateTimeText(part, zone);
+      if (part.isEmpty()) {
+        return {};
+      }
+    }
+    converted.append(parts.join('/'));
+  }
+  icalproperty* clone = icalproperty_clone(property);
+  if (clone == nullptr) {
+    return {};
+  }
+  icalproperty_remove_parameter_by_kind(clone, ICAL_TZID_PARAMETER);
+  const QString line = unfoldedPropertyLine(clone);
+  icalproperty_free(clone);
+  // The property name and parameters end at the first colon outside quotes.
+  bool quoted = false;
+  for (qsizetype index = 0; index < line.size(); ++index) {
+    if (line.at(index) == QLatin1Char('"')) {
+      quoted = !quoted;
+    } else if (line.at(index) == QLatin1Char(':') && !quoted) {
+      return line.left(index + 1) + QString::fromLatin1(converted.join(','));
+    }
+  }
+  return {};
+}
+
+// Subscriptions and imports keep only the recurrence lines, not the
+// VTIMEZONEs they reference. Make EXDATE and RDATE stand alone: map a Windows
+// zone name to its IANA zone, and rewrite values in a zone only the calendar
+// defines to UTC.
+QString recurrenceDateLine(icalproperty* property, icalcomponent* calendar) {
+  icalparameter* tzid = icalproperty_get_first_parameter(property, ICAL_TZID_PARAMETER);
+  const QByteArray zoneName =
+      tzid == nullptr ? QByteArray() : QByteArray(icalparameter_get_tzid(tzid));
+  if (zoneName.isEmpty() || builtinTimeZone(zoneName) != nullptr) {
+    return unfoldedPropertyLine(property);
+  }
+  const QByteArray iana = QTimeZone::windowsIdToDefaultIanaId(zoneName);
+  if (!iana.isEmpty() && builtinTimeZone(iana) != nullptr) {
+    icalproperty* clone = icalproperty_clone(property);
+    if (clone == nullptr) {
+      return {};
+    }
+    icalproperty_set_parameter(clone, icalparameter_new_tzid(iana.constData()));
+    const QString line = unfoldedPropertyLine(clone);
+    icalproperty_free(clone);
+    return line;
+  }
+  icaltimezone* zone = icalcomponent_get_timezone(calendar, zoneName.constData());
+  if (zone != nullptr) {
+    const QString line = utcRecurrenceDateLine(property, zone);
+    if (!line.isEmpty()) {
+      return line;
+    }
+  }
+  return unfoldedPropertyLine(property);
+}
+
+QString recurrenceProperties(icalcomponent* component, icalcomponent* calendar) {
   QStringList lines;
   for (const auto kind : {ICAL_RRULE_PROPERTY, ICAL_RDATE_PROPERTY,
                           ICAL_EXDATE_PROPERTY, ICAL_EXRULE_PROPERTY}) {
     for (auto* property = icalcomponent_get_first_property(component, kind);
          property != nullptr;
          property = icalcomponent_get_next_property(component, kind)) {
-      char* encoded = icalproperty_as_ical_string_r(property);
-      if (encoded == nullptr) continue;
-      QString line = QString::fromUtf8(encoded);
-      icalmemory_free_buffer(encoded);
-      line.replace(QStringLiteral("\r\n "), QString());
-      line.replace(QStringLiteral("\r\n\t"), QString());
-      lines.append(line.trimmed());
+      const QString line = kind == ICAL_RDATE_PROPERTY || kind == ICAL_EXDATE_PROPERTY
+                               ? recurrenceDateLine(property, calendar)
+                               : unfoldedPropertyLine(property);
+      if (!line.isEmpty()) {
+        lines.append(line);
+      }
     }
   }
   // Preserve the historical representation for the common single-RRULE case.
@@ -301,7 +418,17 @@ ParsedTime parseTime(icalproperty* property, icalcomponent* calendar) {
   }
 
   if (!result.timeZone.isEmpty()) {
-    const QTimeZone qtZone(result.timeZone.toUtf8());
+    QTimeZone qtZone(result.timeZone.toUtf8());
+    if (!qtZone.isValid()) {
+      // The editor accepts IANA zones only; keep a Windows zone name as the
+      // IANA zone it stands for. Other names stay as sent.
+      const QString iana = ianaIdForWindowsTimeZone(result.timeZone);
+      const QTimeZone mapped(iana.toUtf8());
+      if (mapped.isValid()) {
+        result.timeZone = iana;
+        qtZone = mapped;
+      }
+    }
     if (qtZone.isValid()) {
       result.utc = QDateTime(result.date, time, qtZone).toUTC();
       return result;
@@ -1292,7 +1419,7 @@ ICalendarParseResult ICalendarCodec::parse(const QByteArray& payload) {
 
     // ICS caches and local imports intentionally discard the whole feed body.
     // Retain the complete recurrence set without copying that body per event.
-    event.recurrenceRule = recurrenceProperties(component);
+    event.recurrenceRule = recurrenceProperties(component, calendar.get());
     event.recurrenceId = recurrenceId(component);
     for (icalcomponent* alarm : alarmComponents(component)) {
       const std::optional<QJsonObject> reminder = reminderFromAlarm(alarm);

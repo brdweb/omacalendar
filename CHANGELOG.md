@@ -6,6 +6,16 @@ Versioning once public releases begin.
 
 ## [Unreleased]
 
+### Fixed
+
+- Recurring events from Outlook and Exchange that name a Windows time zone
+  (such as `Pacific Standard Time`) or a zone defined only by the calendar's
+  own VTIMEZONE now keep deleted occurrences deleted and place extra dates
+  at the right time, instead of reading those dates as UTC. Edited series
+  and ICS subscriptions keep their wall-clock time across daylight-saving
+  changes, and occurrence edits addressed with such a zone match their
+  occurrence. Windows zone names are stored as their IANA zone.
+
 ### Security
 
 - The app opens a Google sign-in link from the background service only when it

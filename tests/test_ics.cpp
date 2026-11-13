@@ -55,6 +55,7 @@ class IcsServiceTest final : public QObject {
   void rejectsCrossOriginRedirects();
   void boundsNetworkPayloadBeforeAppend();
   void preservesCompleteRecurrenceAcrossFeedRefreshAndImport();
+  void subscriptionWithWindowsTzidHonoursExdate();
 };
 
 void IcsServiceTest::preservesCompleteRecurrenceAcrossFeedRefreshAndImport() {
@@ -159,6 +160,96 @@ void IcsServiceTest::preservesCompleteRecurrenceAcrossFeedRefreshAndImport() {
   verify(reopened, QStringLiteral("recurrence-feed-calendar"));
   verify(reopened, QStringLiteral("local-default"));
   verify(reopened, QStringLiteral("round-trip"));
+}
+
+void IcsServiceTest::subscriptionWithWindowsTzidHonoursExdate() {
+  // Exchange feeds name Windows zones and embed their VTIMEZONE; subscriptions
+  // drop the raw body, so the stored recurrence set must stand on its own.
+  const QByteArray payload = QByteArrayLiteral(
+      "BEGIN:VCALENDAR\r\nVERSION:2.0\r\n"
+      "BEGIN:VTIMEZONE\r\nTZID:Pacific Standard Time\r\n"
+      "BEGIN:STANDARD\r\nDTSTART:16010101T020000\r\nTZOFFSETFROM:-0700\r\n"
+      "TZOFFSETTO:-0800\r\nRRULE:FREQ=YEARLY;INTERVAL=1;BYDAY=1SU;BYMONTH=11\r\n"
+      "END:STANDARD\r\n"
+      "BEGIN:DAYLIGHT\r\nDTSTART:16010101T020000\r\nTZOFFSETFROM:-0800\r\n"
+      "TZOFFSETTO:-0700\r\nRRULE:FREQ=YEARLY;INTERVAL=1;BYDAY=2SU;BYMONTH=3\r\n"
+      "END:DAYLIGHT\r\nEND:VTIMEZONE\r\n"
+      "BEGIN:VTIMEZONE\r\nTZID:Custom/Office\r\n"
+      "BEGIN:STANDARD\r\nDTSTART:19700101T000000\r\nTZOFFSETFROM:+0530\r\n"
+      "TZOFFSETTO:+0530\r\nEND:STANDARD\r\nEND:VTIMEZONE\r\n"
+      "BEGIN:VEVENT\r\nUID:windows-zone@example.test\r\n"
+      "DTSTART;TZID=Pacific Standard Time:20260223T100000\r\n"
+      "DTEND;TZID=Pacific Standard Time:20260223T110000\r\n"
+      "RRULE:FREQ=WEEKLY;COUNT=4\r\n"
+      "EXDATE;TZID=Pacific Standard Time:20260302T100000\r\n"
+      "RDATE;TZID=Pacific Standard Time:20260304T100000\r\n"
+      "SUMMARY:Windows zone\r\nEND:VEVENT\r\n"
+      "BEGIN:VEVENT\r\nUID:custom-zone@example.test\r\n"
+      "DTSTART;TZID=Custom/Office:20260223T090000\r\n"
+      "DTEND;TZID=Custom/Office:20260223T100000\r\n"
+      "RRULE:FREQ=WEEKLY;COUNT=3\r\n"
+      "EXDATE;TZID=Custom/Office:20260302T090000\r\n"
+      "SUMMARY:Custom zone\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n");
+  QTemporaryDir directory;
+  Database database;
+  QString error;
+  QVERIFY2(database.open(directory.filePath(QStringLiteral("calendar.sqlite")), &error),
+           qPrintable(error));
+  Account account;
+  account.id = QStringLiteral("windows-zone-feed");
+  account.provider = ProviderKind::Ics;
+  QVERIFY(database.upsertAccount(account, &error));
+  Calendar calendar;
+  calendar.id = QStringLiteral("windows-zone-calendar");
+  calendar.accountId = account.id;
+  calendar.name = QStringLiteral("Exchange");
+  calendar.readOnly = true;
+  QVERIFY2(database.upsertCalendar(calendar, &error), qPrintable(error));
+  IcsSubscription subscription;
+  subscription.accountId = account.id;
+  subscription.url = QStringLiteral("https://calendar.example.test/exchange.ics");
+  QVERIFY(database.upsertIcsSubscription(subscription, &error));
+  ics::IcsService service(&database);
+  ChunkedSyncApply::Request batch;
+  QVERIFY2(service.prepareFeed(subscription, payload, QStringLiteral("one"), {}, &batch,
+                               &error),
+           qPrintable(error));
+  ChunkedSyncApply apply(&database);
+  bool completed = false;
+  bool succeeded = false;
+  apply.start(std::move(batch), [&](const bool ok, const QString& message) {
+    succeeded = ok;
+    error = message;
+    completed = true;
+  });
+  QTRY_VERIFY_WITH_TIMEOUT(completed, 5000);
+  QVERIFY2(succeeded, qPrintable(error));
+
+  const auto utc = [](const int month, const int day, const int hour,
+                      const int minute = 0) {
+    return QDateTime(QDate(2026, month, day), QTime(hour, minute), QTimeZone::UTC);
+  };
+  const auto events =
+      database.eventsBetween(utc(2, 20, 0), utc(3, 20, 0), {calendar.id}, &error);
+  QVERIFY2(error.isEmpty(), qPrintable(error));
+  QList<QDateTime> windowsStarts;
+  QList<QDateTime> customStarts;
+  for (const auto& event : events) {
+    (event.uid.startsWith(QStringLiteral("windows")) ? windowsStarts : customStarts)
+        .append(event.startUtc);
+  }
+  std::sort(windowsStarts.begin(), windowsStarts.end());
+  std::sort(customStarts.begin(), customStarts.end());
+  // 10:00 Pacific is 18:00Z before 8 March and 17:00Z after it.
+  QCOMPARE(windowsStarts, QList<QDateTime>({utc(2, 23, 18), utc(3, 4, 18),
+                                            utc(3, 9, 17), utc(3, 16, 17)}));
+  QCOMPARE(customStarts, QList<QDateTime>({utc(2, 23, 3, 30), utc(3, 9, 3, 30)}));
+
+  // The editor accepts IANA zones only, so the Windows name is mapped.
+  const auto parsed = caldav::ICalendarCodec::parse(payload);
+  QVERIFY(parsed.ok());
+  QCOMPARE(parsed.events.at(0).startTimeZone, QStringLiteral("America/Los_Angeles"));
+  QCOMPARE(parsed.events.at(1).startTimeZone, QStringLiteral("Custom/Office"));
 }
 
 void IcsServiceTest::rejectsCrossOriginRedirects() {
