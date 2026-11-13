@@ -15,6 +15,7 @@
 
 #include "core/database.h"
 #include "core/recurrenceexpander.h"
+#include "providers/caldav/caldavtimekinds.h"
 
 using namespace omacalendar;
 
@@ -2488,7 +2489,7 @@ class DatabaseTest final : public QObject {
       return true;
     };
     const auto builder = [&resolver](const QByteArray& payload,
-                                     Database::CalDavTimeKindLookup* lookup,
+                                     caldav::CalDavTimeKindLookup* lookup,
                                      QString* message) {
       if (payload != QByteArrayLiteral("retained floating source")) {
         if (message != nullptr) {
@@ -2501,10 +2502,10 @@ class DatabaseTest final : public QObject {
       return true;
     };
     int calls = 0;
-    QVERIFY(!db.refreshCalDavTimeKinds(
-        account.id,
+    QVERIFY(!caldav::refreshCalDavTimeKinds(
+        db, account.id,
         [&calls, &resolver](const QByteArray& payload,
-                            Database::CalDavTimeKindLookup* lookup, QString*) {
+                            caldav::CalDavTimeKindLookup* lookup, QString*) {
           if (payload != QByteArrayLiteral("retained floating source")) return false;
           *lookup = [&calls, &resolver](const Event& value, TimeKind* kind,
                                         QString* message) {
@@ -2541,7 +2542,7 @@ class DatabaseTest final : public QObject {
           "WHEN new.key='caldav_time_kind_version' BEGIN SELECT "
           "RAISE(ABORT,'checkpoint unavailable'); END")));
       error.clear();
-      QVERIFY(!db.refreshCalDavTimeKinds(account.id, builder, &error));
+      QVERIFY(!caldav::refreshCalDavTimeKinds(db, account.id, builder, &error));
       QVERIFY(error.contains(QStringLiteral("checkpoint unavailable")));
       QCOMPARE(toStorageJson(db.event(first.id)), beforeEvent);
       QCOMPARE(db.outboxItems().first().payload, queued.payload);
@@ -2553,7 +2554,8 @@ class DatabaseTest final : public QObject {
     db.close();
     QVERIFY(db.open(path, &error));
     error.clear();
-    QVERIFY2(db.refreshCalDavTimeKinds(account.id, builder, &error), qPrintable(error));
+    QVERIFY2(caldav::refreshCalDavTimeKinds(db, account.id, builder, &error),
+             qPrintable(error));
     QJsonObject expected = beforeEvent;
     expected.insert(QStringLiteral("timeKind"), QStringLiteral("floating"));
     QCOMPARE(toStorageJson(db.event(first.id)), expected);
@@ -2586,9 +2588,9 @@ class DatabaseTest final : public QObject {
         1);
     db.close();
     QVERIFY(db.open(path, &error));
-    QVERIFY(db.refreshCalDavTimeKinds(
-        account.id,
-        [](const QByteArray&, Database::CalDavTimeKindLookup*, QString*) {
+    QVERIFY(caldav::refreshCalDavTimeKinds(
+        db, account.id,
+        [](const QByteArray&, caldav::CalDavTimeKindLookup*, QString*) {
           return false;
         },
         &error));
@@ -2648,10 +2650,9 @@ class DatabaseTest final : public QObject {
     int builderCalls = 0;
     int lookupCalls = 0;
     QSet<QByteArray> observedPayloads;
-    const Database::CalDavTimeKindLookupBuilder builder =
+    const caldav::CalDavTimeKindLookupBuilder builder =
         [&builderCalls, &lookupCalls, &observedPayloads](
-            const QByteArray& payload, Database::CalDavTimeKindLookup* lookup,
-            QString*) {
+            const QByteArray& payload, caldav::CalDavTimeKindLookup* lookup, QString*) {
           ++builderCalls;
           observedPayloads.insert(payload);
           *lookup = [&lookupCalls](const Event&, TimeKind* kind, QString*) {
@@ -2661,7 +2662,8 @@ class DatabaseTest final : public QObject {
           };
           return true;
         };
-    QVERIFY2(db.refreshCalDavTimeKinds(account.id, builder, &error), qPrintable(error));
+    QVERIFY2(caldav::refreshCalDavTimeKinds(db, account.id, builder, &error),
+             qPrintable(error));
     QCOMPARE(builderCalls, 2);
     QCOMPARE(lookupCalls, kEventCount);
     QCOMPARE(observedPayloads,
@@ -2670,7 +2672,7 @@ class DatabaseTest final : public QObject {
       QCOMPARE(db.event(event.id).timeKind, TimeKind::Floating);
     }
 
-    QVERIFY(db.refreshCalDavTimeKinds(account.id, builder, &error));
+    QVERIFY(caldav::refreshCalDavTimeKinds(db, account.id, builder, &error));
     QCOMPARE(builderCalls, 2);
     QCOMPARE(lookupCalls, kEventCount);
   }

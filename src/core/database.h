@@ -366,15 +366,21 @@ class Database final {
   bool clearProviderState(const QString& accountId, const QString& calendarId = {},
                           QString* errorMessage = nullptr);
 
-  // Reclassifies legacy CalDAV time metadata from retained provider source,
-  // without replacing local edits. Rows, active mutation/conflict snapshots,
-  // derived instances and the per-profile version checkpoint commit together.
-  using CalDavTimeKindLookup = std::function<bool(const Event&, TimeKind*, QString*)>;
-  using CalDavTimeKindLookupBuilder =
-      std::function<bool(const QByteArray&, CalDavTimeKindLookup*, QString*)>;
-  bool refreshCalDavTimeKinds(const QString& accountId,
-                              const CalDavTimeKindLookupBuilder& buildLookup,
-                              QString* errorMessage = nullptr);
+  // Runs `classify` over every cached event row of the account and over the
+  // event snapshots in its active outbox mutations and unresolved conflicts.
+  // The classifier may change only `timeKind`; it must not edit other fields.
+  // Changed rows get their series bounds, instances and reminder jobs rebuilt;
+  // changed snapshots get only their "timeKind" key patched, so local edits
+  // and mutation bookkeeping are kept verbatim. On success the provider-state
+  // checkpoint `checkpointKey` is set to `checkpointVersion` in the same
+  // savepoint: rows, snapshots, derived data and checkpoint commit together.
+  using EventTimeKindClassifier = std::function<bool(Event*, QString*)>;
+  bool reclassifyEventTimeKinds(const QString& accountId,
+                                const EventTimeKindClassifier& classify,
+                                const QString& checkpointKey, int checkpointVersion,
+                                QString* errorMessage = nullptr);
+  // Fills an event's empty raw payload from its retained provider resource.
+  bool hydrateProviderResource(Event* event, QString* errorMessage = nullptr) const;
 
   bool upsertIcsSubscription(const IcsSubscription& subscription,
                              QString* errorMessage = nullptr);
@@ -469,7 +475,6 @@ class Database final {
   bool upsertProviderResource(const ProviderResource& resource, QString* errorMessage);
   bool removeOrphanedProviderResources(const QString& calendarId,
                                        QString* errorMessage);
-  bool hydrateProviderResource(Event* event, QString* errorMessage = nullptr) const;
   bool hydrateProviderResources(QList<Event>* events,
                                 QString* errorMessage = nullptr) const;
   [[nodiscard]] static QString providerResourceKey(const QString& remoteId);

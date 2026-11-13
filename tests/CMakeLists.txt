@@ -18,6 +18,8 @@ target_link_libraries(omacalendar-database-test
     Qt6::Core
     Qt6::Sql
     omacalendar_core
+    # The CalDAV time-kind refresh lives in the provider module.
+    omacalendar_sync
 )
 add_test(NAME database_test COMMAND omacalendar-database-test)
 

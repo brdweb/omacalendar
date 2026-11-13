@@ -14,6 +14,7 @@
 #include <memory>
 
 #include "core/domain.h"
+#include "providers/caldav/caldavtimekinds.h"
 #include "providers/caldav/caldavxml.h"
 #include "providers/caldav/icalcodec.h"
 #include "sync/chunkedsyncapply.h"
@@ -571,10 +572,9 @@ void CalDavSync::handleCredentialFailure(const QString& accountId,
 
 bool CalDavSync::refreshCachedTimeKinds(const QString& accountId,
                                         QString* errorMessage) {
-  return m_database->refreshCalDavTimeKinds(
-      accountId,
-      [](const QByteArray& payload, Database::CalDavTimeKindLookup* lookup,
-         QString* error) {
+  return refreshCalDavTimeKinds(
+      *m_database, accountId,
+      [](const QByteArray& payload, CalDavTimeKindLookup* lookup, QString* error) {
         const ICalendarParseResult parsed = ICalendarCodec::parse(payload);
         if (!parsed.ok()) {
           if (error != nullptr) {

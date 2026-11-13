@@ -1,6 +1,5 @@
 #include "core/database.h"
 
-#include <QCryptographicHash>
 #include <QFile>
 #include <QFileInfo>
 #include <QJsonDocument>
@@ -3297,104 +3296,17 @@ EventSearchPage Database::searchEvents(const EventSearchQuery& search,
   return result;
 }
 
-bool Database::refreshCalDavTimeKinds(const QString& accountId,
-                                      const CalDavTimeKindLookupBuilder& buildLookup,
-                                      QString* errorMessage) {
-  const QString key = QStringLiteral("caldav_time_kind_version");
-  QString error;
-  if (providerState(accountId, {}, key, 0, &error).toInt() >= 1) {
-    return true;
-  }
-  if (!error.isEmpty() || account(accountId, &error).provider != ProviderKind::CalDav) {
-    if (errorMessage != nullptr) {
-      *errorMessage =
-          error.isEmpty() ? QStringLiteral("CalDAV account required") : error;
-    }
-    return false;
-  }
-  if (!execute(QStringLiteral("SAVEPOINT refresh_caldav_time_kinds"), errorMessage)) {
+bool Database::reclassifyEventTimeKinds(const QString& accountId,
+                                        const EventTimeKindClassifier& classify,
+                                        const QString& checkpointKey,
+                                        int checkpointVersion, QString* errorMessage) {
+  if (!execute(QStringLiteral("SAVEPOINT reclassify_event_time_kinds"), errorMessage)) {
     return false;
   }
   const auto rollback = [this]() {
-    execute(QStringLiteral("ROLLBACK TO refresh_caldav_time_kinds"), nullptr);
-    execute(QStringLiteral("RELEASE refresh_caldav_time_kinds"), nullptr);
+    execute(QStringLiteral("ROLLBACK TO reclassify_event_time_kinds"), nullptr);
+    execute(QStringLiteral("RELEASE reclassify_event_time_kinds"), nullptr);
     return false;
-  };
-  struct CachedLookup final {
-    QByteArray payload;
-    CalDavTimeKindLookup lookup;
-  };
-  QHash<QByteArray, QList<CachedLookup>> payloadLookups;
-  QHash<QString, CalDavTimeKindLookup> resourceLookups;
-  const auto lookupForPayload = [&buildLookup, &payloadLookups, errorMessage](
-                                    const QByteArray& payload,
-                                    CalDavTimeKindLookup* lookup) {
-    const QByteArray digest =
-        QCryptographicHash::hash(payload, QCryptographicHash::Sha256);
-    const auto cached = payloadLookups.constFind(digest);
-    if (cached != payloadLookups.constEnd()) {
-      for (const CachedLookup& candidate : *cached) {
-        if (candidate.payload == payload) {
-          *lookup = candidate.lookup;
-          return true;
-        }
-      }
-    }
-    CalDavTimeKindLookup built;
-    if (!buildLookup(payload, &built, errorMessage)) {
-      return false;
-    }
-    if (!built) {
-      if (errorMessage != nullptr) {
-        *errorMessage =
-            QStringLiteral("CalDAV time metadata lookup builder returned no lookup");
-      }
-      return false;
-    }
-    payloadLookups[digest].append({payload, built});
-    *lookup = std::move(built);
-    return true;
-  };
-  const auto lookupFor = [this, &lookupForPayload, &resourceLookups, errorMessage](
-                             const Event& value, CalDavTimeKindLookup* lookup) {
-    if (!value.rawPayload.isEmpty()) {
-      return lookupForPayload(value.rawPayload.toUtf8(), lookup);
-    }
-    const QString resourceIdentity =
-        value.calendarId + QLatin1Char('\n') + providerResourceKey(value.remoteId);
-    const auto cached = resourceLookups.constFind(resourceIdentity);
-    if (cached != resourceLookups.constEnd()) {
-      *lookup = *cached;
-      return true;
-    }
-    Event hydrated = value;
-    if (!hydrateProviderResource(&hydrated, errorMessage)) {
-      return false;
-    }
-    CalDavTimeKindLookup built;
-    if (!lookupForPayload(hydrated.rawPayload.toUtf8(), &built)) {
-      return false;
-    }
-    resourceLookups.insert(resourceIdentity, built);
-    *lookup = std::move(built);
-    return true;
-  };
-  const auto normalize = [&lookupFor, errorMessage](Event* value) {
-    // A nonempty timezone may be an intentional local conversion. New local
-    // events without provider source are also left as explicitly authored.
-    if (value->timeKind != TimeKind::Zoned || !value->startTimeZone.isEmpty() ||
-        !value->endTimeZone.isEmpty()) {
-      return true;
-    }
-    if (value->allDay) {
-      value->timeKind = TimeKind::AllDay;
-      return true;
-    }
-    if (value->rawPayload.isEmpty() && value->remoteId.isEmpty()) {
-      return true;
-    }
-    CalDavTimeKindLookup lookup;
-    return lookupFor(*value, &lookup) && lookup(*value, &value->timeKind, errorMessage);
   };
   QSqlQuery events(m_database);
   events.prepare(
@@ -3410,7 +3322,7 @@ bool Database::refreshCalDavTimeKinds(const QString& accountId,
   while (events.next()) {
     Event value = eventFromQuery(events);
     const TimeKind previous = value.timeKind;
-    if (!normalize(&value)) return rollback();
+    if (!classify(&value, errorMessage)) return rollback();
     if (value.timeKind == previous) continue;
     if (!hydrateProviderResource(&value, errorMessage)) return rollback();
     const RecurrenceStoredBounds bounds = recurrenceBounds(value);
@@ -3436,12 +3348,13 @@ bool Database::refreshCalDavTimeKinds(const QString& accountId,
   }
   // Patch just the metadata key, preserving unknown mutation fields and every
   // operation identifier/revision, timestamp, lease and retry state verbatim.
-  const auto normalizeSnapshot = [this, &normalize, &accountId](QJsonObject* object) {
+  const auto classifySnapshot = [this, &classify, &accountId,
+                                 errorMessage](QJsonObject* object) {
     if (object->isEmpty()) return true;
     Event value = eventFromJson(*object);
     if (calendar(value.calendarId).accountId != accountId) return true;
     const TimeKind previous = value.timeKind;
-    if (!normalize(&value)) return false;
+    if (!classify(&value, errorMessage)) return false;
     if (value.timeKind != previous) {
       object->insert(QStringLiteral("timeKind"), timeKindToString(value.timeKind));
     }
@@ -3460,12 +3373,12 @@ bool Database::refreshCalDavTimeKinds(const QString& accountId,
   while (mutations.next()) {
     QJsonObject payload = parseObject(mutations.value(1).toString());
     const QJsonObject original = payload;
-    if (!normalizeSnapshot(&payload)) return rollback();
+    if (!classifySnapshot(&payload)) return rollback();
     if (payload.contains(QStringLiteral("_move"))) {
       QJsonObject move = payload.value(QStringLiteral("_move")).toObject();
       QJsonObject source = move.value(QStringLiteral("sourceEvent")).toObject();
       const QJsonObject oldSource = source;
-      if (!normalizeSnapshot(&source)) return rollback();
+      if (!classifySnapshot(&source)) return rollback();
       if (source != oldSource) {
         move.insert(QStringLiteral("sourceEvent"), source);
         payload.insert(QStringLiteral("_move"), move);
@@ -3499,7 +3412,7 @@ bool Database::refreshCalDavTimeKinds(const QString& accountId,
     QJsonObject remote = parseObject(conflicts.value(2).toString());
     const QJsonObject oldLocal = local;
     const QJsonObject oldRemote = remote;
-    if (!normalizeSnapshot(&local) || !normalizeSnapshot(&remote)) return rollback();
+    if (!classifySnapshot(&local) || !classifySnapshot(&remote)) return rollback();
     if (local == oldLocal && remote == oldRemote) continue;
     QSqlQuery update(m_database);
     update.prepare(
@@ -3515,9 +3428,10 @@ bool Database::refreshCalDavTimeKinds(const QString& accountId,
     }
     changed = true;
   }
-  if (!setProviderState(accountId, {}, key, 1, errorMessage) ||
+  if (!setProviderState(accountId, {}, checkpointKey, checkpointVersion,
+                        errorMessage) ||
       (changed && !bumpChangeRevision(errorMessage)) ||
-      !execute(QStringLiteral("RELEASE refresh_caldav_time_kinds"), errorMessage)) {
+      !execute(QStringLiteral("RELEASE reclassify_event_time_kinds"), errorMessage)) {
     return rollback();
   }
   return true;

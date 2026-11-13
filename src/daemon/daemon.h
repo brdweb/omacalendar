@@ -79,6 +79,10 @@ class Daemon final : public QObject {
   [[nodiscard]] QJsonValue onEventsGet(const QJsonObject& params, ipc::Error* error);
   [[nodiscard]] QJsonValue onEventsCreate(const QJsonObject& params, ipc::Error* error);
   [[nodiscard]] QJsonValue onEventsUpdate(const QJsonObject& params, ipc::Error* error);
+  // Builds the events.update draft: the full event, or a patch merged onto the
+  // stored event (or onto the referenced occurrence for occurrence scopes).
+  bool resolveUpdatePayload(const QJsonObject& params, QJsonObject* eventPayload,
+                            ipc::Error* error);
   [[nodiscard]] QJsonValue onEventsRemove(const QJsonObject& params, ipc::Error* error);
   [[nodiscard]] QJsonValue onEventsUndo(const QJsonObject& params, ipc::Error* error);
   [[nodiscard]] QJsonValue onEventsSearch(const QJsonObject& params, ipc::Error* error);

@@ -192,6 +192,8 @@ add_library(omacalendar_sync STATIC
   src/providers/caldav/caldavclient.h
   src/providers/caldav/caldavsync.cpp
   src/providers/caldav/caldavsync.h
+  src/providers/caldav/caldavtimekinds.cpp
+  src/providers/caldav/caldavtimekinds.h
   src/providers/caldav/caldavtasksync.cpp
   src/providers/caldav/caldavtasksync.h
   src/providers/caldav/caldavxml.cpp
