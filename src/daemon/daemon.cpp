@@ -251,6 +251,10 @@ void Daemon::registerHandlers() {
                            [this](const QJsonObject& params, ipc::Error* error) {
                              return onSystemSubscribe(params, error);
                            });
+  m_router.registerHandler(QStringLiteral("system.backup"),
+                           [this](const QJsonObject& params, ipc::Error* error) {
+                             return onSystemBackup(params, error);
+                           });
   m_router.registerHandler(QStringLiteral("accounts.list"),
                            [this](const QJsonObject& params, ipc::Error* error) {
                              return onAccountsList(params, error);
@@ -648,6 +652,26 @@ QJsonValue Daemon::onSystemSubscribe(const QJsonObject& params,
       {QStringLiteral("catchUpRequired"), since >= 0 && since < current},
       {QStringLiteral("protocolMajor"), kIpcProtocolMajor},
       {QStringLiteral("protocolMinor"), kIpcProtocolMinor},
+  };
+}
+
+QJsonValue Daemon::onSystemBackup(const QJsonObject&, ipc::Error* error) {
+  // Older copies beyond this many are pruned after each successful backup.
+  constexpr int kBackupsKept = 5;
+  DatabaseBackup backup;
+  QString dbError;
+  if (!m_database.createBackup(paths::backupDirectory(), kBackupsKept,
+                               QDateTime::currentDateTimeUtc(), &backup, &dbError)) {
+    if (error != nullptr) {
+      *error = {QStringLiteral("backup_failed"), dbError, false};
+    }
+    return {};
+  }
+  return QJsonObject{
+      {QStringLiteral("path"), backup.path},
+      {QStringLiteral("sizeBytes"), backup.sizeBytes},
+      {QStringLiteral("createdAt"), backup.createdAt.toString(Qt::ISODate)},
+      {QStringLiteral("kept"), kBackupsKept},
   };
 }
 

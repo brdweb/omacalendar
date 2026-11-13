@@ -10,6 +10,7 @@ QString configDirectory();
 QString cacheDirectory();
 QString runtimeDirectory();
 QString databaseFile();
+QString backupDirectory();
 QString socketFile();
 bool ensureRuntimeDirectory(QString* errorMessage = nullptr);
 bool ensureDirectories(QString* errorMessage = nullptr);

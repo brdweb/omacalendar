@@ -12,6 +12,12 @@ omacalendarctl \- command-line client for the OmaCalendar service
 .BR today " | " agenda " [" \-\-days
 .IR N "] | " add
 .IR TEXT " | " sync " | " methods
+.br
+.B omacalendarctl
+.RI [ options ]
+.B backup
+.RB [ \-\-copy\-to
+.IR PATH ]
 .SH DESCRIPTION
 .B omacalendarctl
 talks to
@@ -46,6 +52,15 @@ Sync every account and wait for it to finish (default timeout 120 seconds).
 .TP
 .B methods
 List the IPC methods the running service supports.
+.TP
+.B backup
+Save a consistent copy of the calendar database to
+.I $XDG_DATA_HOME/omacalendar/backups/calendar\-<UTC time>.sqlite3
+with owner-only permissions; the newest 5 backups are kept there. With
+.BR \-\-copy\-to ,
+also copy it to a file or into a directory. The backup holds calendars, events,
+tasks and settings but no passwords or sign-in tokens, which stay in the
+keyring; after restoring on another machine, sign in to each account again.
 .SH OPTIONS
 .TP
 .BR \- ", " \-\-params\-stdin
@@ -55,7 +70,9 @@ process list and saved in shell history.
 .TP
 .BI \-\-timeout " SECONDS"
 Wait up to SECONDS (1 to 3600) for each response. The default is 5, or 120 for
-.BR sync .
+.B sync
+and
+.BR backup .
 .TP
 .B \-\-watch
 After the response, keep the connection open and print notifications as JSON
@@ -75,6 +92,12 @@ Number of days for
 Calendar for
 .BR add .
 .TP
+.BI \-\-copy\-to " PATH"
+For
+.BR backup :
+also copy the backup to PATH, or into PATH when it is a directory. An existing
+file is never overwritten.
+.TP
 .B \-\-version
 Print the version.
 .TP
@@ -85,6 +108,7 @@ Print a usage summary.
 omacalendarctl today
 omacalendarctl agenda \-\-days 14
 omacalendarctl add "Dentist tue 9:30 for 45 min"
+omacalendarctl backup \-\-copy\-to ~/Backups/
 omacalendarctl system.info
 omacalendarctl \-\-watch system.subscribe '{"topics":["events"]}'
 printf '%s' "$params" | omacalendarctl accounts.addCalDav \-

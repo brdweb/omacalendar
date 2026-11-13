@@ -317,6 +317,7 @@ QString AppController::lastErrorAction() const { return m_lastErrorAction; }
 QString AppController::lastErrorAccountId() const { return m_lastErrorAccountId; }
 QString AppController::googleSignInState() const { return m_googleSignInState; }
 QString AppController::googleSignInAccountId() const { return m_googleSignInAccountId; }
+QString AppController::lastBackupPath() const { return m_lastBackupPath; }
 QVariantList AppController::accounts() const { return m_accounts; }
 QVariantMap AppController::accountSyncStates() const { return m_accountSyncStates; }
 QVariantList AppController::calendars() const { return m_calendars; }
@@ -2464,6 +2465,21 @@ void AppController::previewDiagnostics() {
     }
     QDesktopServices::openUrl(QUrl::fromLocalFile(path));
     setStatus(tr("Opened privacy-safe diagnostics preview"));
+  });
+}
+
+void AppController::backupDatabase() {
+  send(QStringLiteral("system.backup"), {}, [this](const QJsonValue& value) {
+    const QString path = value.toObject().value(QStringLiteral("path")).toString();
+    if (path.isEmpty()) {
+      setError(tr("The backup did not report where it was saved"));
+      return;
+    }
+    if (m_lastBackupPath != path) {
+      m_lastBackupPath = path;
+      emit lastBackupPathChanged();
+    }
+    setStatus(tr("Backed up the calendar database"));
   });
 }
 

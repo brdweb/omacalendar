@@ -1866,6 +1866,7 @@ def run_contract(harness: DaemonHarness) -> None:
         "system.info",
         "system.health",
         "system.subscribe",
+        "system.backup",
         "accounts.reauthorize",
         "calendars.list",
         "calendars.upsert",
@@ -2849,6 +2850,76 @@ def run_occurrence_patch_contract(harness: DaemonHarness) -> None:
     print("PASS: nonexistent occurrence patch rejected without durable mutation")
 
 
+def files_under(root: Path) -> set[Path]:
+    return {path for path in root.rglob("*") if not path.is_dir()}
+
+
+def run_backup_contract(
+    harness: DaemonHarness,
+    run: Any,
+) -> None:
+    """backupMethodWritesOnlyInsideDataDir: system.backup and `backup`."""
+    data_dir = harness.database_path.parent
+    backup_dir = data_dir / "backups"
+    external = harness.root / "external-copy"
+    external.mkdir(mode=0o700)
+    before = files_under(harness.root)
+
+    backup = harness.call("system.backup")
+    path = Path(backup["path"])
+    require(path.parent == backup_dir, f"backup was written outside {backup_dir}: {path}")
+    require(path.name.startswith("calendar-") and path.suffix == ".sqlite3",
+            f"unexpected backup name {path.name}")
+    require(backup["sizeBytes"] == path.stat().st_size and backup["sizeBytes"] > 0,
+            "backup size does not match the file")
+    created = datetime.fromisoformat(backup["createdAt"].replace("Z", "+00:00"))
+    require(created.utcoffset() == timedelta(0), "createdAt is not UTC")
+    assert_mode(path, 0o600)
+    assert_mode(backup_dir, 0o700)
+    schema, _ = read_schema(path)
+    require(schema == SCHEMA_VERSION, "backup has the wrong schema version")
+    connection = sqlite3.connect(f"{path.as_uri()}?mode=ro", uri=True)
+    try:
+        require(connection.execute("PRAGMA integrity_check").fetchone()[0] == "ok",
+                "backup failed the integrity check")
+        events = connection.execute("SELECT COUNT(*) FROM events").fetchone()[0]
+        require(events > 0, "backup is missing the cached events")
+    finally:
+        connection.close()
+
+    # Every new file is a backup; nothing else appeared anywhere under the
+    # disposable XDG roots (the database's own WAL files already existed).
+    created_files = files_under(harness.root) - before
+    stray = [item for item in created_files if item.parent != backup_dir]
+    require(not stray, f"system.backup wrote outside the backup directory: {stray}")
+
+    # The CLI command prints the path; --copy-to copies it client-side.
+    human = run(["backup"])
+    require(human.returncode == 0 and str(backup_dir) in human.stdout,
+            f"backup failed: {human.stdout!r} {human.stderr!r}")
+    copied = run(["backup", "--json", "--copy-to", str(external)])
+    require(copied.returncode == 0, f"backup --copy-to failed: {copied.stderr}")
+    result = json.loads(copied.stdout)
+    copy = Path(result["copiedTo"])
+    require(copy.parent == external and copy.name == Path(result["path"]).name,
+            f"--copy-to wrote {copy}")
+    assert_mode(copy, 0o600)
+    require(copy.read_bytes() == Path(result["path"]).read_bytes(),
+            "the copy differs from the backup")
+    again = run(["backup", "--copy-to", str(copy)])
+    require(again.returncode != 0, "--copy-to overwrote an existing file")
+    misplaced = run(["today", "--copy-to", str(external)])
+    require(misplaced.returncode != 0, "--copy-to was accepted without backup")
+
+    # Retention keeps the newest five.
+    for _ in range(6):
+        harness.call("system.backup")
+    kept = sorted(item.name for item in backup_dir.iterdir())
+    require(len(kept) == 5, f"retention kept {kept}")
+    require(all(name.startswith("calendar-") for name in kept),
+            f"partial files were left behind: {kept}")
+
+
 def run_cli_contract(harness: DaemonHarness) -> None:
     """The CLI's stdin params, timeout, version and human commands."""
 
@@ -2917,6 +2988,8 @@ def run_cli_contract(harness: DaemonHarness) -> None:
         # stdout of a raw call carries exactly one JSON response line.
         ping = run(["system.ping"])
         require(len(ping.stdout.strip().splitlines()) == 1, "raw output was not one line")
+
+        run_backup_contract(harness, run)
     finally:
         harness.stop()
 

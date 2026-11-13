@@ -9,6 +9,7 @@ _omacalendarctl() {
     'add:create an event from quick-add text'
     'sync:sync every account'
     'methods:list IPC methods'
+    'backup:save a copy of the calendar database'
   )
   _arguments -C \
     '(-h --help)'{-h,--help}'[show help]' \
@@ -19,6 +20,7 @@ _omacalendarctl() {
     '--json[print results as JSON]' \
     '--days[days for agenda]:days:' \
     '--calendar[calendar for add]:calendar id:' \
+    '--copy-to[also copy the backup here]:path:_files' \
     '1:command:->command' \
     '*::argument:->argument'
   case ${state} in

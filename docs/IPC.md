@@ -71,6 +71,19 @@ replaces the connection's prior list and may contain `*`, a family such as
 ### System
 
 - `system.ping`, `system.info`, `system.health`, `system.subscribe`
+- `system.backup` (added in IPC 2.3, not yet released)
+
+`system.backup` takes no params. It writes a consistent copy of the database
+with SQLite `VACUUM INTO` to
+`$XDG_DATA_HOME/omacalendar/backups/calendar-<UTC yyyyMMddTHHmmssZ>.sqlite3`
+(a `-2`, `-3`, ... suffix when several are made in one second). The directory
+is created mode `0700` and the file is mode `0600` from creation; nothing is
+written outside that directory. After a successful backup only the newest
+`kept` backups (5) remain. The result is
+`{"path", "sizeBytes", "createdAt", "kept"}` with `createdAt` in UTC ISO 8601.
+On failure the error code is `backup_failed`. Keyring credentials are never in
+the database, so they are not in the backup either. Clients find it in
+`system.info` `methods`; an older daemon answers `method_not_found`.
 
 ### Accounts
 
