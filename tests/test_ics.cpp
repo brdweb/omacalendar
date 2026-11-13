@@ -1,6 +1,9 @@
 #include <QBuffer>
 #include <QElapsedTimer>
 #include <QFile>
+#include <QJsonArray>
+#include <QJsonObject>
+#include <QSet>
 #include <QTemporaryDir>
 #include <QtTest>
 #include <algorithm>
@@ -57,6 +60,8 @@ class IcsServiceTest final : public QObject {
   void boundsNetworkPayloadBeforeAppend();
   void preservesCompleteRecurrenceAcrossFeedRefreshAndImport();
   void subscriptionWithWindowsTzidHonoursExdate();
+  void newIcsSubscriptionIgnoresAlarmsByDefault();
+  void feedAlarmsAreDedupedAndCappedPerEvent();
 };
 
 void IcsServiceTest::preservesCompleteRecurrenceAcrossFeedRefreshAndImport() {
@@ -251,6 +256,92 @@ void IcsServiceTest::subscriptionWithWindowsTzidHonoursExdate() {
   QVERIFY(parsed.ok());
   QCOMPARE(parsed.events.at(0).startTimeZone, QStringLiteral("America/Los_Angeles"));
   QCOMPARE(parsed.events.at(1).startTimeZone, QStringLiteral("Custom/Office"));
+}
+
+void IcsServiceTest::newIcsSubscriptionIgnoresAlarmsByDefault() {
+  Database database;
+  QString error;
+  QVERIFY2(database.open(QStringLiteral(":memory:"), &error), qPrintable(error));
+  ics::IcsService service(&database);
+  Account account;
+  QVERIFY2(service.addSubscription(QStringLiteral("https://calendar.invalid/feed.ics"),
+                                   QStringLiteral("Public feed"), 3600, {}, {},
+                                   &account, &error),
+           qPrintable(error));
+  // The first refresh is queued on the event loop; pause the account so the
+  // test never reaches the network.
+  Account paused = database.account(account.id);
+  paused.enabled = false;
+  QVERIFY(database.upsertAccount(paused, &error));
+
+  const QList<Calendar> calendars = database.calendars(account.id, &error);
+  QVERIFY2(error.isEmpty(), qPrintable(error));
+  QCOMPARE(calendars.size(), 1);
+  QVERIFY(calendars.first().ignoreAlerts);
+
+  // The user's choice is kept: unmuting survives a later feed refresh, which
+  // writes the stored calendar row back.
+  QVERIFY2(database.updateCalendarPreferences(calendars.first().id, true, {}, 0, false,
+                                              &error),
+           qPrintable(error));
+  IcsSubscription subscription = database.icsSubscription(account.id, &error);
+  ChunkedSyncApply::Request batch;
+  QVERIFY2(service.prepareFeed(subscription, twoEventCalendar(), QStringLiteral("r1"),
+                               {}, &batch, &error),
+           qPrintable(error));
+  QVERIFY(!batch.calendar.ignoreAlerts);
+}
+
+void IcsServiceTest::feedAlarmsAreDedupedAndCappedPerEvent() {
+  QByteArray payload = QByteArrayLiteral(
+      "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\n"
+      "UID:alarm-flood@example.test\r\n"
+      "DTSTART:20260901T130000Z\r\nDTEND:20260901T140000Z\r\n"
+      "SUMMARY:Alarm flood\r\n");
+  // Two copies of 30 distinct triggers: 60 VALARMs in all.
+  for (int copy = 0; copy < 2; ++copy) {
+    for (int minutes = 1; minutes <= 30; ++minutes) {
+      payload += QStringLiteral(
+                     "BEGIN:VALARM\r\nTRIGGER:-PT%1M\r\nACTION:DISPLAY\r\n"
+                     "DESCRIPTION:Reminder\r\nEND:VALARM\r\n")
+                     .arg(minutes)
+                     .toUtf8();
+    }
+  }
+  payload += QByteArrayLiteral("END:VEVENT\r\nEND:VCALENDAR\r\n");
+
+  Database database;
+  QString error;
+  QVERIFY2(database.open(QStringLiteral(":memory:"), &error), qPrintable(error));
+  Account account;
+  account.id = QStringLiteral("alarm-feed");
+  account.provider = ProviderKind::Ics;
+  QVERIFY(database.upsertAccount(account, &error));
+  Calendar calendar;
+  calendar.id = QStringLiteral("alarm-feed-calendar");
+  calendar.accountId = account.id;
+  calendar.name = QStringLiteral("Alarm feed");
+  calendar.readOnly = true;
+  QVERIFY2(database.upsertCalendar(calendar, &error), qPrintable(error));
+  IcsSubscription subscription;
+  subscription.accountId = account.id;
+  subscription.url = QStringLiteral("https://calendar.example.test/alarms.ics");
+  QVERIFY(database.upsertIcsSubscription(subscription, &error));
+  ics::IcsService service(&database);
+  ChunkedSyncApply::Request batch;
+  QVERIFY2(service.prepareFeed(subscription, payload, QStringLiteral("one"), {}, &batch,
+                               &error),
+           qPrintable(error));
+  QCOMPARE(batch.events.size(), 1);
+  const QJsonArray reminders = batch.events.first().reminders;
+  QCOMPARE(reminders.size(), qsizetype(kMaximumRemindersPerEvent));
+  QSet<int> minutes;
+  for (const QJsonValue& reminder : reminders) {
+    minutes.insert(reminder.toObject().value(QStringLiteral("minutes")).toInt());
+  }
+  QCOMPARE(minutes.size(), kMaximumRemindersPerEvent);
+  QVERIFY(minutes.contains(1));
+  QVERIFY(minutes.contains(10));
 }
 
 void IcsServiceTest::rejectsCrossOriginRedirects() {
