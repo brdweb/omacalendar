@@ -6,6 +6,13 @@ Versioning once public releases begin.
 
 ## [Unreleased]
 
+### Security
+
+- The app opens a Google sign-in link from the background service only when it
+  is an HTTPS page on `accounts.google.com`.
+- Notes fields in the event editor, task editor and conflict merge dialog are
+  explicitly plain text, so provider-supplied notes can never render as markup.
+
 ## [2.0.2] - 2026-10-12
 
 A security hardening update. No IPC, schema, packaging, or feature change.

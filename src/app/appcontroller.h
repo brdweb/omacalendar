@@ -81,6 +81,11 @@ class AppController final : public QObject {
  public:
   explicit AppController(QObject* parent = nullptr);
 
+  // Replaces how external URLs (the Google sign-in page) are opened. Tests
+  // use it to observe the URL instead of launching a browser.
+  using UrlOpener = std::function<bool(const QUrl&)>;
+  void setUrlOpenerForTesting(UrlOpener opener);
+
   [[nodiscard]] bool connected() const;
   [[nodiscard]] bool busy() const;
   [[nodiscard]] QString statusText() const;
@@ -418,6 +423,7 @@ class AppController final : public QObject {
   QUrl m_pendingDeepLink;
   bool m_interactive = false;
   QVariantMap m_freeBusy;
+  UrlOpener m_urlOpener;
   QVariantMap m_eventAttachments;
   struct PdfExportJob;
   void requestPdfPage(const std::shared_ptr<PdfExportJob>& job, int offset, int limit);

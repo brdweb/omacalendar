@@ -336,11 +336,13 @@ Dialog {
             }
             TextArea {
                 id: mergeNotesField
+                objectName: "mergeNotes"
                 Layout.fillWidth: true
                 Layout.preferredHeight: 100
                 placeholderText: qsTr("Notes")
                 color: Theme.text
                 wrapMode: TextEdit.Wrap
+                textFormat: TextEdit.PlainText
                 Accessible.name: qsTr("Merged event notes")
             }
             Text {
