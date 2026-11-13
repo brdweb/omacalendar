@@ -2839,6 +2839,78 @@ def run_occurrence_patch_contract(harness: DaemonHarness) -> None:
     print("PASS: nonexistent occurrence patch rejected without durable mutation")
 
 
+def run_cli_contract(harness: DaemonHarness) -> None:
+    """The CLI's stdin params, timeout, version and human commands."""
+
+    def run(args: list[str], stdin: str | None = None) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            [str(harness.cli), *args],
+            cwd=str(harness.root),
+            env=harness.env,
+            input=stdin,
+            capture_output=True,
+            text=True,
+            timeout=30.0,
+            check=False,
+        )
+
+    harness.stop()
+    harness.start()
+    try:
+        version = run(["--version"])
+        require(version.returncode == 0 and version.stdout.startswith("omacalendarctl "),
+                f"--version failed: {version.stdout!r} {version.stderr!r}")
+
+        # Params on stdin never reach the command line, where other local
+        # users could read them from /proc/<pid>/cmdline.
+        secret = "stdin-only-secret-7f3a"
+        piped = run(["settings.get", "-"],
+                    json.dumps({"key": "cliProbe", "fallback": secret}))
+        require(piped.returncode == 0, f"stdin params failed: {piped.stderr}")
+        response = json_objects(piped.stdout)
+        require(len(response) == 1 and response[0]["result"]["value"] == secret,
+                f"stdin params were not used: {piped.stdout!r}")
+        flag = run(["--params-stdin", "settings.get"],
+                   json.dumps({"key": "cliProbe", "fallback": "flag"}))
+        require(json_objects(flag.stdout)[0]["result"]["value"] == "flag",
+                "--params-stdin was not used")
+        both = run(["settings.get", "{}", "--params-stdin"], "{}")
+        require(both.returncode != 0, "params on both argv and stdin were accepted")
+
+        bad_timeout = run(["--timeout", "0", "system.ping"])
+        require(bad_timeout.returncode != 0 and "--timeout" in bad_timeout.stderr,
+                "an invalid --timeout was accepted")
+        slow_ok = run(["--timeout", "30", "system.ping"])
+        require(slow_ok.returncode == 0, "--timeout 30 system.ping failed")
+
+        unknown = run(["bogus"])
+        require(unknown.returncode != 0 and "Unknown command" in unknown.stderr,
+                "an unknown command was not rejected")
+
+        methods = run(["methods"])
+        require(methods.returncode == 0 and "events.list" in methods.stdout.split(),
+                "methods did not list events.list")
+
+        added = run(["add", "CLI contract lunch today 12:30 @ Cafe"])
+        require(added.returncode == 0 and "CLI contract lunch" in added.stdout,
+                f"add failed: {added.stdout!r} {added.stderr!r}")
+        today = run(["today"])
+        require(today.returncode == 0 and "CLI contract lunch @ Cafe" in today.stdout
+                and "12:30" in today.stdout,
+                f"today did not show the new event: {today.stdout!r} {today.stderr!r}")
+        agenda = run(["agenda", "--days", "2", "--json"])
+        require(agenda.returncode == 0, f"agenda --json failed: {agenda.stderr}")
+        listing = json.loads(agenda.stdout)
+        require(any(item.get("summary") == "CLI contract lunch"
+                    for item in listing["events"]), "agenda --json missed the event")
+        require(listing["days"] == 2, "agenda --json did not echo --days")
+        # stdout of a raw call carries exactly one JSON response line.
+        ping = run(["system.ping"])
+        require(len(ping.stdout.strip().splitlines()) == 1, "raw output was not one line")
+    finally:
+        harness.stop()
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--daemon", required=True, type=Path)
@@ -2868,6 +2940,8 @@ def main() -> int:
                 if not args.occurrence_patch_only:
                     run_contract(harness)
                 run_occurrence_patch_contract(harness)
+                if not args.occurrence_patch_only:
+                    run_cli_contract(harness)
             except Exception as error:  # noqa: BLE001 - show diagnostics
                 harness.stop()
                 print(f"daemon contract failed: {error}", file=sys.stderr)

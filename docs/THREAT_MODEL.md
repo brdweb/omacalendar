@@ -26,7 +26,7 @@ exposed.
 
 | Threat | Required mitigation |
 |---|---|
-| Credential theft through storage/logs | Secret Service only; stdin credential handoff; structured redaction; fixture scanning |
+| Credential theft through storage/logs | Secret Service only; stdin credential handoff (`omacalendarctl METHOD -`); structured redaction; fixture scanning |
 | Cross-user IPC/database access | User-only directories/socket/database, bounded framing, protocol/version validation |
 | Credential leak on redirect | TLS verification and same-origin credential forwarding only |
 | Malicious ICS/XML/JSON | Bounded responses/depth/fields, parser errors without content reflection, no shell or HTML execution |

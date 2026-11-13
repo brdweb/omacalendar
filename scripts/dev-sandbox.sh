@@ -49,7 +49,7 @@ fi
 daemon=$!
 trap 'kill "${daemon}" 2>/dev/null || true; wait "${daemon}" 2>/dev/null || true' EXIT
 export PATH="${build_dir}:${PATH}"
-for _ in $(seq 1 50); do
+for _ in $(seq 1 300); do
   [[ -S "${XDG_RUNTIME_DIR}/omacalendar/daemon.sock" ]] && break
   sleep 0.1
 done

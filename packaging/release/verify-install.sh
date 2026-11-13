@@ -12,6 +12,10 @@ required_paths=(
   usr/bin/omacalendar-widgetctl
   usr/bin/omacalendarctl
   usr/bin/omacalendard
+  usr/share/man/man1/omacalendarctl.1
+  usr/share/bash-completion/completions/omacalendarctl
+  usr/share/zsh/site-functions/_omacalendarctl
+  usr/share/fish/vendor_completions.d/omacalendarctl.fish
   usr/lib/systemd/user/omacalendard.service
   usr/lib/systemd/user/omacalendard.socket
   usr/share/applications/org.omacalendar.OmaCalendar.desktop
