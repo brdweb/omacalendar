@@ -19,6 +19,10 @@ Item {
     property string selectedEventReference: ""
     property int firstDayOfWeek: 1
     property bool showWeekNumbers: false
+    // 7 shows the week; 2 to 6 show that many days from currentDate.
+    property int dayCount: 7
+    // Saturday and Sunday columns are left out.
+    property bool hideWeekends: false
     property int firstHour: 0
     property int lastHour: 24
     property int workDayStart: 8
@@ -45,12 +49,17 @@ Item {
     property int allDayHoverIndex: -1
 
     readonly property date weekStart: startOfWeek(currentDate)
+    readonly property var dayDates: DateRange.visibleDays(currentDate, firstDayOfWeek,
+                                                          dayCount, hideWeekends)
+    readonly property date firstShownDate: dayDates.length > 0 ? dayDates[0] : weekStart
+    // How far the "‹ week" and "week ›" drop targets move an event.
+    readonly property int periodDays: DateRange.weekViewDayCount(dayCount)
 
     function initialScrollY() {
         if (savedScrollY >= 0)
             return savedScrollY
         const now = new Date()
-        const shown = now >= weekStart && now < addDays(weekStart, 7)
+        const shown = dayDates.some(function(day) { return sameDate(day, now) })
         const hour = shown ? Math.max(workDayStart, now.getHours()) : workDayStart
         return Math.max(0, (hour - 1 - firstHour) * pixelsPerHour)
     }
@@ -73,23 +82,23 @@ Item {
                 Layout.fillHeight: true
                 textFormat: Text.PlainText
                 text: root.showWeekNumbers
-                      ? qsTr("W%1").arg(DateRange.rowWeekNumber(root.weekStart)) : ""
+                      ? qsTr("W%1").arg(DateRange.rowWeekNumber(root.startOfWeek(root.firstShownDate))) : ""
                 color: Theme.mutedText
                 horizontalAlignment: Text.AlignHCenter
                 verticalAlignment: Text.AlignVCenter
                 font.pixelSize: Theme.smallFontSize
                 font.weight: Font.DemiBold
                 Accessible.name: root.showWeekNumbers
-                                 ? qsTr("Week %1").arg(DateRange.rowWeekNumber(root.weekStart))
+                                 ? qsTr("Week %1").arg(DateRange.rowWeekNumber(root.startOfWeek(root.firstShownDate)))
                                  : ""
             }
             Repeater {
-                model: 7
+                model: root.dayDates.length
                 delegate: ItemDelegate {
                     id: dayHeader
                     objectName: "weekDayHeader-" + index
                     required property int index
-                    readonly property date dateValue: root.addDays(root.weekStart, index)
+                    readonly property date dateValue: root.dayDates[index] || root.weekStart
                     Layout.preferredWidth: 0
                     Layout.minimumWidth: 0
                     Layout.fillWidth: true
@@ -159,12 +168,12 @@ Item {
                     font.pixelSize: Theme.microFontSize
                 }
                 Repeater {
-                    model: 7
+                    model: root.dayDates.length
                     delegate: Item {
                         id: allDayColumn
                         objectName: "weekAllDayColumn-" + index
                         required property int index
-                        readonly property date dateValue: root.addDays(root.weekStart, index)
+                        readonly property date dateValue: root.dayDates[index] || root.weekStart
                         readonly property var dayEvents: root.headerEventsForDate(dateValue)
                         Layout.preferredWidth: 0
                         Layout.minimumWidth: 0
@@ -243,7 +252,7 @@ Item {
                 z: 30
                 keys: ["omacalendar-event"]
                 onDropped: drop => {
-                    root.dropHeaderEventByDays(drop, -7)
+                    root.dropHeaderEventByDays(drop, -root.periodDays)
                     root.headerDragActive = false
                 }
                 Rectangle {
@@ -254,7 +263,8 @@ Item {
                     Text {
                         textFormat: Text.PlainText
                         anchors.centerIn: parent
-                        text: qsTr("‹ week")
+                        text: root.periodDays === 7 ? qsTr("‹ week")
+                                                    : qsTr("‹ %n days", "", root.periodDays)
                         color: Theme.text
                         font.pixelSize: Theme.microFontSize
                         font.weight: Font.DemiBold
@@ -274,7 +284,7 @@ Item {
                 z: 30
                 keys: ["omacalendar-event"]
                 onDropped: drop => {
-                    root.dropHeaderEventByDays(drop, 7)
+                    root.dropHeaderEventByDays(drop, root.periodDays)
                     root.headerDragActive = false
                 }
                 Rectangle {
@@ -285,7 +295,8 @@ Item {
                     Text {
                         textFormat: Text.PlainText
                         anchors.centerIn: parent
-                        text: qsTr("week ›")
+                        text: root.periodDays === 7 ? qsTr("week ›")
+                                                    : qsTr("%n days ›", "", root.periodDays)
                         color: Theme.text
                         font.pixelSize: Theme.microFontSize
                         font.weight: Font.DemiBold
@@ -417,12 +428,12 @@ Item {
                     spacing: 0
 
                     Repeater {
-                        model: 7
+                        model: root.dayDates.length
                         delegate: Item {
                             id: dayTimeline
                             objectName: "weekTimelineDay-" + index
                             required property int index
-                            readonly property date dateValue: root.addDays(root.weekStart, index)
+                            readonly property date dateValue: root.dayDates[index] || root.weekStart
                             readonly property var dayEvents: root.eventsForDate(dateValue, false)
                             Layout.preferredWidth: 0
                             Layout.minimumWidth: 0
@@ -601,8 +612,14 @@ Item {
                         dateValue.getDate() + days)
     }
 
+    // The date dayOffset columns from column sourceIndex. Columns skip hidden
+    // weekends, so a move past the last column counts calendar days instead.
     function targetDateForMove(sourceIndex, dayOffset) {
-        return addDays(weekStart, sourceIndex + dayOffset)
+        const target = sourceIndex + dayOffset
+        if (target >= 0 && target < dayDates.length)
+            return dayDates[target]
+        const source = dayDates[Math.max(0, Math.min(dayDates.length - 1, sourceIndex))]
+        return addDays(source || weekStart, dayOffset)
     }
 
     function eventStart(value) {

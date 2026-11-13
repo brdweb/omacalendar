@@ -19,6 +19,8 @@ Item {
     property string selectedEventReference: ""
     property int firstDayOfWeek: 1
     property bool showWeekNumbers: false
+    // Saturday and Sunday columns are left out.
+    property bool hideWeekends: false
     property string timeFormat: "system"
     property var activeOverflowPopup: null
     signal eventActivated(var eventData)
@@ -29,6 +31,8 @@ Item {
     readonly property date monthStart: new Date(currentDate.getFullYear(),
                                                 currentDate.getMonth(), 1)
     readonly property date gridStart: firstGridDate(monthStart)
+    // Day offsets, within each grid row, of the columns shown.
+    readonly property var columnOffsets: DateRange.rowColumnOffsets(gridStart, hideWeekends)
 
     ColumnLayout {
         anchors.fill: parent
@@ -44,12 +48,14 @@ Item {
                 Layout.preferredWidth: 28
             }
             Repeater {
-                model: 7
+                model: root.columnOffsets.length
                 delegate: Text {
                     textFormat: Text.PlainText
                     required property int index
+                    objectName: "monthWeekdayHeader-" + index
                     Layout.fillWidth: true
-                    text: Qt.formatDate(root.addDays(root.gridStart, index), "ddd").toUpperCase()
+                    text: Qt.formatDate(root.addDays(root.gridStart, root.columnOffsets[index]),
+                                        "ddd").toUpperCase()
                     color: Theme.mutedText
                     horizontalAlignment: Text.AlignHCenter
                     font.pixelSize: Theme.microFontSize
@@ -94,17 +100,22 @@ Item {
                 id: monthLayout
                 Layout.fillWidth: true
                 Layout.fillHeight: true
-                columns: 7
+                columns: root.columnOffsets.length
                 rows: 6
                 columnSpacing: 0
                 rowSpacing: 0
 
                 Repeater {
-                    model: 42
+                    model: 6 * root.columnOffsets.length
                     delegate: Rectangle {
                         id: dayCell
                         required property int index
-                        readonly property date dateValue: root.addDays(root.gridStart, index)
+                        // The cell's position in the full seven-column grid,
+                        // so names and dates do not shift when weekends hide.
+                        readonly property int dayIndex:
+                            Math.floor(index / root.columnOffsets.length) * 7
+                            + root.columnOffsets[index % root.columnOffsets.length]
+                        readonly property date dateValue: root.addDays(root.gridStart, dayIndex)
                         readonly property var dayEvents: root.eventsForDate(dateValue)
                         readonly property bool inMonth: dateValue.getMonth()
                                                         === root.monthStart.getMonth()
@@ -142,7 +153,7 @@ Item {
 
                         DropArea {
                             id: monthDrop
-                            objectName: "monthDropArea-" + dayCell.index
+                            objectName: "monthDropArea-" + dayCell.dayIndex
                             anchors.fill: parent
                             keys: ["omacalendar-event"]
                             onDropped: drop => {
@@ -210,7 +221,7 @@ Item {
                                 model: dayCell.dayEvents.slice(0, 3)
                                 delegate: EventChip {
                                     required property var modelData
-                                    objectName: "monthEvent-" + dayCell.index + "-"
+                                    objectName: "monthEvent-" + dayCell.dayIndex + "-"
                                                 + String(modelData.id || "")
                                     Layout.fillWidth: true
                                     eventData: modelData
@@ -226,7 +237,7 @@ Item {
 
                             Button {
                                 id: overflowButton
-                                objectName: "monthMore-" + dayCell.index
+                                objectName: "monthMore-" + dayCell.dayIndex
                                 visible: dayCell.dayEvents.length > 3
                                 Layout.fillWidth: true
                                 text: "+" + (dayCell.dayEvents.length - 3) + qsTr(" more")
@@ -273,7 +284,7 @@ Item {
 
                         Popup {
                             id: overflowPopup
-                            objectName: "monthOverflow-" + dayCell.index
+                            objectName: "monthOverflow-" + dayCell.dayIndex
                             property bool closedByActivation: false
                             parent: Overlay.overlay
                             readonly property point cellOrigin: dayCell.mapToItem(
@@ -342,7 +353,7 @@ Item {
 
                                             AppButton {
                                                 objectName: "monthOverflowPrevious-"
-                                                            + dayCell.index + "-"
+                                                            + dayCell.dayIndex + "-"
                                                             + String(
                                                                 overflowEventRow.modelData.id
                                                                 || "")
@@ -367,7 +378,7 @@ Item {
 
                                             EventChip {
                                                 objectName: "monthOverflowEvent-"
-                                                            + dayCell.index + "-"
+                                                            + dayCell.dayIndex + "-"
                                                             + String(
                                                                 overflowEventRow.modelData.id
                                                                 || "")
@@ -392,7 +403,7 @@ Item {
 
                                             AppButton {
                                                 objectName: "monthOverflowNext-"
-                                                            + dayCell.index + "-"
+                                                            + dayCell.dayIndex + "-"
                                                             + String(
                                                                 overflowEventRow.modelData.id
                                                                 || "")

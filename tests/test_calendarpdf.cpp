@@ -129,6 +129,25 @@ class CalendarPdfTest : public QObject {
     QCOMPARE(pageObjects(path), 2);
   }
 
+  void monthLayoutStartsOnSaturday() {
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    PrintOptions options;
+    options.layout = PrintLayout::Month;
+    // August 2026 starts on a Saturday: no leading days, five rows.
+    options.firstDate = QDate(2026, 8, 1);
+    options.lastDate = QDate(2026, 8, 31);
+    options.firstDayOfWeek = 6;
+    const QString path = directory.filePath(QStringLiteral("saturday.pdf"));
+    QString error;
+    QCOMPARE(writeCalendarPdf(path,
+                              {timed(QStringLiteral("Market"),
+                                     QDateTime(QDate(2026, 8, 1), QTime(9, 0)), 60)},
+                              options, &error),
+             1);
+    QCOMPARE(pageObjects(path), 1);
+  }
+
   void replacesAnExistingFileOnlyOnSuccess() {
     QTemporaryDir directory;
     QVERIFY(directory.isValid());

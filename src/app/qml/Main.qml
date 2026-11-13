@@ -82,7 +82,8 @@ ApplicationWindow {
     property int agendaDayCount: 31
 
     readonly property var decoratedEvents: decorateEvents(App.events)
-    readonly property var visibleEvents: filterVisibleEvents(decoratedEvents)
+    readonly property var visibleEvents: EventIndex.withoutDeclined(
+                                             filterVisibleEvents(decoratedEvents), hideDeclined)
     readonly property var calendarSets: appList("calendarSets")
     readonly property var sidebarCalendars: CalendarVisibility.calendarsForSidebar(
                                                 appList("calendars"), calendarSets,
@@ -115,6 +116,19 @@ ApplicationWindow {
     // Stored settings round-trip as JSON, so accept a boolean or its text.
     readonly property bool showWeekNumbers: preferences.showWeekNumbers === true
                                             || preferences.showWeekNumbers === "true"
+    readonly property bool hideWeekends: preferences.hideWeekends === true
+                                         || preferences.hideWeekends === "true"
+    readonly property bool hideDeclined: preferences.hideDeclined === true
+                                         || preferences.hideDeclined === "true"
+    readonly property int weekViewDays: DateRange.weekViewDayCount(preferences.weekViewDays)
+    // "Week", "Work week" or "3 days": what the week view shows.
+    readonly property string weekViewLabel: weekViewDays < 7
+                                            ? qsTr("%n days", "", weekViewDays)
+                                            : hideWeekends ? qsTr("Work week") : qsTr("Week")
+    readonly property string weekViewName: weekViewDays < 7
+                                           ? qsTr("%n-day view", "", weekViewDays)
+                                           : hideWeekends ? qsTr("Work week view")
+                                                          : qsTr("Week view")
     // Recomputed per selected date and on any preference change (including
     // the display zone), so offsets follow DST in both zones.
     readonly property var secondaryTime: {
@@ -127,6 +141,9 @@ ApplicationWindow {
     readonly property var latestSyncDate: latestCalendarSync()
 
     onWidthChanged: updateSidebarForWidth()
+    // A different run of days may need events outside the loaded range.
+    onWeekViewDaysChanged: reloadWeekRange()
+    onHideWeekendsChanged: reloadWeekRange()
     // Tells the daemon to poll providers more often while this window is in
     // use.
     onActiveChanged: window.callApp("setInteractive", [window.active])
@@ -242,7 +259,7 @@ ApplicationWindow {
                         model: [
                             {"id": "agenda", "label": qsTr("Agenda"), "key": "1"},
                             {"id": "day", "label": qsTr("Day"), "key": "2"},
-                            {"id": "week", "label": qsTr("Week"), "key": "3"},
+                            {"id": "week", "label": window.weekViewLabel, "key": "3"},
                             {"id": "month", "label": qsTr("Month"), "key": "4"},
                             {"id": "year", "label": qsTr("Year"), "key": "5"}
                         ]
@@ -529,6 +546,8 @@ ApplicationWindow {
                                     selectedEventReference: window.selectedEventReference
                                     firstDayOfWeek: window.firstDayOfWeek
                                     showWeekNumbers: window.showWeekNumbers
+                                    dayCount: window.weekViewDays
+                                    hideWeekends: window.hideWeekends
                                     workDayStart: Number(window.preferences.workDayStart || 8)
                                     secondaryTime: window.secondaryTime
                                     workDayEnd: Number(window.preferences.workDayEnd || 18)
@@ -567,6 +586,7 @@ ApplicationWindow {
                                     selectedEventReference: window.selectedEventReference
                                     firstDayOfWeek: window.firstDayOfWeek
                                     showWeekNumbers: window.showWeekNumbers
+                                    hideWeekends: window.hideWeekends
                                     timeFormat: String(window.preferences.timeFormat || "system")
                                     onEventActivated: value => window.openEvent(value)
                                     onDateSelected: dateValue => window.selectDate(dateValue)
@@ -1363,9 +1383,9 @@ ApplicationWindow {
             end = new Date(anchorDate.getFullYear(), anchorDate.getMonth(),
                            anchorDate.getDate() + 2)
         } else if (viewName === "week") {
-            start = startOfWeek(anchorDate)
-            start.setDate(start.getDate() - 1)
-            end = new Date(start.getFullYear(), start.getMonth(), start.getDate() + 10)
+            const days = weekViewDates(anchorDate)
+            start = DateRange.addDays(days[0], -1)
+            end = DateRange.addDays(days[days.length - 1], 3)
         } else if (viewName === "agenda") {
             start = new Date(anchorDate.getFullYear(), anchorDate.getMonth(),
                              anchorDate.getDate() - 7)
@@ -1389,11 +1409,8 @@ ApplicationWindow {
         if (currentView === "day")
             return {"first": anchor, "last": anchor, "layout": "list"}
         if (currentView === "week") {
-            const first = startOfWeek(anchor)
-            return {"first": first,
-                    "last": new Date(first.getFullYear(), first.getMonth(),
-                                     first.getDate() + 6),
-                    "layout": "list"}
+            const days = weekViewDates(anchor)
+            return {"first": days[0], "last": days[days.length - 1], "layout": "list"}
         }
         if (currentView === "agenda")
             return {"first": anchor,
@@ -1423,13 +1440,28 @@ ApplicationWindow {
         return DateRange.startOfWeek(dateValue, firstDayOfWeek)
     }
 
+    function reloadWeekRange() {
+        if (currentView === "week")
+            loadRangeFor(App.selectedDate, currentView)
+    }
+
+    // The days the week view shows when dateValue is selected.
+    function weekViewDates(dateValue) {
+        return DateRange.visibleDays(dateValue, firstDayOfWeek, weekViewDays, hideWeekends)
+    }
+
     function navigatePeriod(direction) {
         const dateValue = new Date(App.selectedDate.getFullYear(),
                                    App.selectedDate.getMonth(),
                                    App.selectedDate.getDate())
+        if (currentView === "week") {
+            selectDate(DateRange.shiftAnchor(dateValue, firstDayOfWeek, weekViewDays,
+                                             hideWeekends, direction))
+            return
+        }
         if (currentView === "day")
             dateValue.setDate(dateValue.getDate() + direction)
-        else if (currentView === "week" || currentView === "agenda")
+        else if (currentView === "agenda")
             dateValue.setDate(dateValue.getDate() + 7 * direction)
         else if (currentView === "year")
             dateValue.setFullYear(dateValue.getFullYear() + direction)
@@ -1446,8 +1478,9 @@ ApplicationWindow {
         if (currentView === "day")
             return Qt.formatDate(App.selectedDate, "dddd, MMMM d")
         if (currentView === "week") {
-            const start = startOfWeek(App.selectedDate)
-            const end = new Date(start.getFullYear(), start.getMonth(), start.getDate() + 6)
+            const days = weekViewDates(App.selectedDate)
+            const start = days[0]
+            const end = days[days.length - 1]
             return start.getMonth() === end.getMonth()
                     ? Qt.formatDate(start, "MMMM d") + "–" + end.getDate()
                     : Qt.formatDate(start, "MMM d") + " – " + Qt.formatDate(end, "MMM d")
@@ -1465,7 +1498,7 @@ ApplicationWindow {
         if (currentView === "year")
             return qsTr("Year overview")
         if (currentView === "week")
-            return qsTr("Week view")
+            return weekViewName
         return qsTr("Day view")
     }
 
@@ -1873,9 +1906,8 @@ ApplicationWindow {
             return {"start": day, "end": new Date(day.getFullYear(), day.getMonth(),
                                                   day.getDate() + 1)}
         if (currentView === "week") {
-            const start = startOfWeek(day)
-            return {"start": start, "end": new Date(start.getFullYear(), start.getMonth(),
-                                                    start.getDate() + 7)}
+            const days = weekViewDates(day)
+            return {"start": days[0], "end": DateRange.addDays(days[days.length - 1], 1)}
         }
         if (currentView === "agenda")
             return {"start": day, "end": new Date(day.getFullYear(), day.getMonth(),
@@ -1897,7 +1929,7 @@ ApplicationWindow {
                 ++count
         }
         const labels = {"agenda": qsTr("Agenda"), "day": qsTr("Day view"),
-                        "week": qsTr("Week view"), "month": qsTr("Month view"),
+                        "week": weekViewName, "month": qsTr("Month view"),
                         "year": qsTr("Year view")}
         const period = currentView === "agenda"
                 ? qsTr("from %1").arg(Qt.formatDate(bounds.start, "dddd, MMMM d"))

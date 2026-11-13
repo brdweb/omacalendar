@@ -401,6 +401,114 @@ Item {
                     [0, 1, 2, 2, 3, 3, 4, 4])
         }
 
+        function test_week_view_hides_weekends_and_shows_n_days() {
+            // Wednesday September 30 2026, in a week that starts on Saturday.
+            const week = createTemporaryObject(weekFactory, scene, {
+                "width": 900, "height": 700, "currentDate": new Date(2026, 8, 30),
+                "firstDayOfWeek": 6, "showWeekNumbers": true, "events": [],
+                "visible": true})
+            wait(0)
+            compare(week.dayDates.length, 7)
+            compare(Qt.formatDate(findChild(week, "weekDayHeader-0").dateValue,
+                                  "yyyy-MM-dd"), "2026-09-26", "Saturday opens the week")
+            compare(Qt.formatDate(findChild(week, "weekTimelineDay-6").dateValue,
+                                  "yyyy-MM-dd"), "2026-10-02")
+            compare(findChild(week, "weekNumberLabel").text, "W40")
+
+            week.hideWeekends = true
+            wait(0)
+            compare(week.dayDates.length, 5)
+            tryVerify(function() { return findChild(week, "weekDayHeader-5") === null })
+            compare(Qt.formatDate(findChild(week, "weekDayHeader-0").dateValue,
+                                  "yyyy-MM-dd"), "2026-09-28", "weekend columns are gone")
+            compare(Qt.formatDate(findChild(week, "weekAllDayColumn-4").dateValue,
+                                  "yyyy-MM-dd"), "2026-10-02")
+            compare(Qt.formatDate(week.targetDateForMove(4, -1), "yyyy-MM-dd"),
+                    "2026-10-01", "moves count visible columns")
+
+            week.dayCount = 4
+            wait(0)
+            compare(week.dayDates.map(function(day) {
+                return Qt.formatDate(day, "yyyy-MM-dd") }),
+                    ["2026-09-30", "2026-10-01", "2026-10-02", "2026-10-05"])
+            compare(Qt.formatDate(week.targetDateForMove(2, 1), "yyyy-MM-dd"),
+                    "2026-10-05", "dragging past Friday lands on Monday")
+            compare(week.periodDays, 4)
+            compare(findChild(week, "weekNumberLabel").text, "W40")
+
+            week.hideWeekends = false
+            week.dayCount = 2
+            wait(0)
+            compare(week.dayDates.length, 2)
+            tryVerify(function() { return findChild(week, "weekTimelineDay-2") === null })
+            compare(Qt.formatDate(findChild(week, "weekTimelineDay-1").dateValue,
+                                  "yyyy-MM-dd"), "2026-10-01")
+            verifyFiniteGeometry(week, "two-day week view")
+        }
+
+        function test_month_view_hides_weekends() {
+            const events = representativeEvents()
+            const month = createTemporaryObject(monthFactory, scene, {
+                "width": 900, "height": 700, "currentDate": new Date(2026, 7, 17),
+                "firstDayOfWeek": 1, "events": events, "visible": true})
+            wait(0)
+            verify(findChild(month, "monthDropArea-5") !== null,
+                   "Saturday shows by default")
+            compare(findChild(month, "monthWeekdayHeader-6").text, "SUN")
+            month.hideWeekends = true
+            wait(0)
+            tryVerify(function() { return findChild(month, "monthDropArea-5") === null })
+            verify(findChild(month, "monthDropArea-6") === null)
+            verify(findChild(month, "monthDropArea-7") !== null, "the next Monday stays")
+            verify(findChild(month, "monthWeekdayHeader-5") === null)
+            compare(findChild(month, "monthWeekdayHeader-4").text, "FRI")
+            verify(findChild(month, "monthEvent-21-event-all-day") !== null,
+                   "cells keep their names when columns hide")
+            verifyFiniteGeometry(month, "month without weekends")
+        }
+
+        function test_view_preferences_in_settings() {
+            const settings = createTemporaryObject(settingsFactory, scene, {
+                "preferences": {"firstDayOfWeek": 6, "hideWeekends": true,
+                                "hideDeclined": "true", "weekViewDays": 3}
+            })
+            verify(settings !== null)
+            settings.open()
+            tryCompare(settings, "opened", true)
+            const root = scene.Window.window.contentItem
+            const weekStart = findChild(root, "firstDayOfWeek")
+            verify(weekStart !== null)
+            compare(weekStart.count, 4)
+            compare(weekStart.currentText, "Saturday")
+            const weekViewDays = findChild(root, "weekViewDays")
+            verify(weekViewDays !== null)
+            compare(weekViewDays.currentValue, 3)
+            const showWeekends = findChild(root, "showWeekends")
+            verify(showWeekends !== null)
+            verify(!showWeekends.checked)
+            const showDeclined = findChild(root, "showDeclined")
+            verify(showDeclined !== null)
+            verify(!showDeclined.checked, "a stored text value is read too")
+
+            preferenceChangedSpy.target = settings
+            preferenceChangedSpy.clear()
+            weekStart.activated(2)
+            weekStart.activated(3)
+            weekViewDays.currentIndex = 0
+            weekViewDays.activated(0)
+            showWeekends.click()
+            showDeclined.click()
+            compare(preferenceChangedSpy.count, 5)
+            const changes = preferenceChangedSpy.signalArguments.map(function(args) {
+                return [args[0], args[1]] })
+            compare(changes, [["firstDayOfWeek", 7], ["firstDayOfWeek", 6],
+                              ["weekViewDays", 7], ["hideWeekends", false],
+                              ["hideDeclined", false]])
+            preferenceChangedSpy.target = null
+            settings.close()
+            tryCompare(settings, "opened", false)
+        }
+
         function test_drag_between_all_day_lane_and_timeline() {
             const allDay = representativeEvents().filter(function(value) {
                 return value.allDay })[0]

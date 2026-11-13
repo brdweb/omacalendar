@@ -120,3 +120,26 @@ function eventsForDate(index, dateValue) {
 function countForDate(index, dateValue) {
     return entriesForDate(index, dateValue).length
 }
+
+// True when the user's own attendee entry (the daemon marks it "self")
+// declined. Google reports "declined", CalDAV PARTSTAT "DECLINED".
+function declinedBySelf(value) {
+    const attendees = value && value.attendees ? value.attendees : []
+    for (let index = 0; index < attendees.length; ++index) {
+        const attendee = attendees[index]
+        if (!attendee || attendee.self !== true)
+            continue
+        const status = String(attendee.responseStatus || attendee.partstat || "")
+        return status.toLowerCase() === "declined"
+    }
+    return false
+}
+
+// values without the events the user declined, or values itself when
+// declined events are shown.
+function withoutDeclined(values, hideDeclined) {
+    const list = values || []
+    if (!hideDeclined)
+        return list
+    return list.filter(function(value) { return !declinedBySelf(value) })
+}

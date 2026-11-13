@@ -124,7 +124,10 @@ AppController::AppController(QObject* parent)
       {QStringLiteral("currentView"), QStringLiteral("month")},
       {QStringLiteral("widgetConsentDecision"), QStringLiteral("")},
       {QStringLiteral("showWeekNumbers"), false},
-      {QStringLiteral("secondaryTimeZone"), QStringLiteral("")}};
+      {QStringLiteral("secondaryTimeZone"), QStringLiteral("")},
+      {QStringLiteral("hideWeekends"), false},
+      {QStringLiteral("hideDeclined"), false},
+      {QStringLiteral("weekViewDays"), 7}};
   m_client.setAutoReconnect(true);
   connect(&m_client, &ipc::IpcClient::connectedChanged, this, [this]() {
     emit connectedChanged();
@@ -682,7 +685,9 @@ QStringList AppController::preferenceKeys() {
           QStringLiteral("displayTimeZone"),   QStringLiteral("defaultDuration"),
           QStringLiteral("defaultCalendarId"), QStringLiteral("notificationPrivacy"),
           QStringLiteral("currentView"),       QStringLiteral("widgetConsentDecision"),
-          QStringLiteral("showWeekNumbers"),   QStringLiteral("secondaryTimeZone")};
+          QStringLiteral("showWeekNumbers"),   QStringLiteral("secondaryTimeZone"),
+          QStringLiteral("hideWeekends"),      QStringLiteral("hideDeclined"),
+          QStringLiteral("weekViewDays")};
 }
 
 void AppController::markPreferencesLoaded() {
