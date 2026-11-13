@@ -2,12 +2,19 @@
 
 | App version | IPC | Schema | Distribution |
 |---|---:|---:|---|
-| `2.0.2` | 2.2 | 3 | Current x86-64 Arch/Omarchy |
-| `2.0.1` | 2.2 | 3 | Previous x86-64 Arch/Omarchy release |
+| `2.1.0` | 2.3 | 4 | Current x86-64 Arch/Omarchy |
+| `2.0.2` | 2.2 | 3 | Previous x86-64 Arch/Omarchy release |
+| `2.0.1` | 2.2 | 3 | Earlier x86-64 Arch/Omarchy release |
 | `2.0.0` | 2.2 | 3 | Earlier x86-64 Arch/Omarchy release |
 | `1.1.1` | 2.1 | 2 | Earlier x86-64 Arch/Omarchy release |
 | `1.1.0` | 2.1 | 2 | Earlier x86-64 Arch/Omarchy release |
 | `1.0.0` | 2.0 | 2 | Earlier x86-64 Arch/Omarchy release |
+
+2.1.0 migrates the calendar database from schema 3 to 4 the first time its
+daemon opens it, adding per-event colours and a reminder index. The migration
+is one-way: a 2.0.x daemon refuses a schema-4 database, so back up first if you
+may need to go back (`omacalendarctl backup` makes a copy while the service
+runs).
 
 2.0.0 and later migrate the calendar database from schema 2 to 3 the first
 time their daemon opens it. The migration is one-way: an earlier daemon refuses
@@ -18,7 +25,8 @@ are asked to sign in again once, because 2.0.0 and later also request the
 
 The app's widget installer installs companion widget 0.2.0, qualified with
 2.0.0. It uses IPC 2.0, adds a Tasks view when the daemon offers IPC 2.2, and
-remains compatible with 1.x daemons. It requires Omarchy 4.0.0 or newer and
+remains compatible with 1.x daemons and with IPC 2.3, whose changes are
+additive. It requires Omarchy 4.0.0 or newer and
 Quickshell 0.3.1 or newer. The app and the widget both connect to the native
 socket-activated service. Previous releases retain their compatibility
 information in their signed source tags.
