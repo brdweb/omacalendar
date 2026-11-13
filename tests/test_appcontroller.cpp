@@ -1261,6 +1261,12 @@ void AppControllerTest::preferencesLoadInOneRequest() {
   QCOMPARE(controller.preferences().value(QStringLiteral("timeFormat")).toString(),
            QStringLiteral("24h"));
   QCOMPARE(controller.preferences().value(QStringLiteral("workDayStart")).toInt(), 8);
+  // View preferences default to today's behaviour when unset.
+  QCOMPARE(controller.preferences().value(QStringLiteral("hideWeekends")).toBool(),
+           false);
+  QCOMPARE(controller.preferences().value(QStringLiteral("hideDeclined")).toBool(),
+           false);
+  QCOMPARE(controller.preferences().value(QStringLiteral("weekViewDays")).toInt(), 7);
 }
 
 void AppControllerTest::preferencesFallBackWithoutGetMany() {
@@ -1273,7 +1279,7 @@ void AppControllerTest::preferencesFallBackWithoutGetMany() {
   QStringList methods = settledMethods(daemon);
   QCOMPARE(methods.count(QStringLiteral("settings.getMany")), 1);
   // One fallback read per preference key.
-  QCOMPARE(methods.count(QStringLiteral("settings.get")), 12);
+  QCOMPARE(methods.count(QStringLiteral("settings.get")), 15);
   QCOMPARE(controller.preferences().value(QStringLiteral("timeFormat")).toString(),
            QStringLiteral("24h"));
   QVERIFY2(controller.lastError().isEmpty(), qPrintable(controller.lastError()));
@@ -1283,7 +1289,7 @@ void AppControllerTest::preferencesFallBackWithoutGetMany() {
   daemon.broadcast(QStringLiteral("calendars.changed"));
   methods = settledMethods(daemon);
   QCOMPARE(methods.count(QStringLiteral("settings.getMany")), 0);
-  QCOMPARE(methods.count(QStringLiteral("settings.get")), 12);
+  QCOMPARE(methods.count(QStringLiteral("settings.get")), 15);
 }
 
 void AppControllerTest::contactSuggestionsAreRelayed() {

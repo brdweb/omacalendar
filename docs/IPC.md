@@ -107,6 +107,17 @@ resolved exactly as `settings.get` resolves it. Clients find it in
 `system.info` `methods`; a daemon without it answers `method_not_found`, and
 clients fall back to `settings.get`.
 
+Settings are free-form JSON values keyed by name; the daemon stores any key and
+validates only `defaultCalendarId`. The desktop app reads its display
+preferences in one `settings.getMany`. App 2.1 adds three keys, which need no
+daemon change and are ignored by older apps: `hideWeekends` (boolean, default
+`false`: leave Saturday and Sunday out of the week and month views),
+`hideDeclined` (boolean, default `false`: hide events whose `self` attendee
+declined), and `weekViewDays` (integer 2 to 7, default 7: 7 shows the whole
+week, fewer shows that many days from the selected date). `firstDayOfWeek`
+(0 follows the system locale, otherwise 1 = Monday to 7 = Sunday) now also
+accepts 6, Saturday, from the settings UI.
+
 `calendars.probeThisAndFuture` creates a temporary test resource on the selected
 server, checks that `RANGE=THISANDFUTURE` survives a write and readback, and
 removes the resource before enabling the capability. It does not edit an

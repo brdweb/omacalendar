@@ -76,4 +76,32 @@ TestCase {
         compare(EventIndex.eventsForDate(EventIndex.build(undefined), new Date()), [])
         compare(EventIndex.eventsForDate(null, new Date()), [])
     }
+
+    function test_declined_filter_uses_the_users_own_response() {
+        const declinedGoogle = timed("declined-google", "2026-08-17T09:00:00",
+                                     "2026-08-17T10:00:00")
+        declinedGoogle.attendees = [
+            {"email": "me@example.com", "self": true, "responseStatus": "declined"},
+            {"email": "you@example.com", "responseStatus": "accepted"}]
+        const declinedCaldav = timed("declined-caldav", "2026-08-17T11:00:00",
+                                     "2026-08-17T12:00:00")
+        declinedCaldav.attendees = [{"uri": "mailto:me@example.com", "self": true,
+                                     "partstat": "DECLINED"}]
+        const otherDeclined = timed("other-declined", "2026-08-17T13:00:00",
+                                    "2026-08-17T14:00:00")
+        otherDeclined.attendees = [
+            {"email": "me@example.com", "self": true, "responseStatus": "accepted"},
+            {"email": "you@example.com", "responseStatus": "declined"}]
+        const noGuests = timed("no-guests", "2026-08-17T15:00:00", "2026-08-17T16:00:00")
+        const values = [declinedGoogle, declinedCaldav, otherDeclined, noGuests]
+        verify(EventIndex.declinedBySelf(declinedGoogle))
+        verify(EventIndex.declinedBySelf(declinedCaldav))
+        verify(!EventIndex.declinedBySelf(otherDeclined),
+               "another guest declining does not hide the event")
+        verify(!EventIndex.declinedBySelf(noGuests))
+        compare(ids(EventIndex.withoutDeclined(values, false)), ids(values))
+        compare(ids(EventIndex.withoutDeclined(values, true)),
+                ["other-declined", "no-guests"])
+        compare(EventIndex.withoutDeclined(null, true), [])
+    }
 }

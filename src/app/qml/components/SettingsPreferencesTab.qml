@@ -40,14 +40,38 @@ ScrollView {
                                      "timeFormat", ["system", "12h", "24h"][index])
                 }
                 AppComboBox {
+                    objectName: "firstDayOfWeek"
                     Layout.fillWidth: true
-                    model: [qsTr("System week start"), qsTr("Monday"), qsTr("Sunday")]
-                    currentIndex: Math.max(0, [0, 1, 7].indexOf(
+                    model: [qsTr("System week start"), qsTr("Monday"), qsTr("Sunday"),
+                            qsTr("Saturday")]
+                    currentIndex: Math.max(0, [0, 1, 7, 6].indexOf(
                                                Number(tab.drawer.preferences.firstDayOfWeek
                                                       || 0)))
                     Accessible.name: qsTr("First day of week")
                     onActivated: index => tab.drawer.preferenceChanged(
-                                     "firstDayOfWeek", [0, 1, 7][index])
+                                     "firstDayOfWeek", [0, 1, 7, 6][index])
+                }
+                AppComboBox {
+                    objectName: "weekViewDays"
+                    Layout.fillWidth: true
+                    model: [
+                        {"text": qsTr("Week view: whole week"), "value": 7},
+                        {"text": qsTr("Week view: 6 days"), "value": 6},
+                        {"text": qsTr("Week view: 5 days"), "value": 5},
+                        {"text": qsTr("Week view: 4 days"), "value": 4},
+                        {"text": qsTr("Week view: 3 days"), "value": 3},
+                        {"text": qsTr("Week view: 2 days"), "value": 2}
+                    ]
+                    textRole: "text"
+                    valueRole: "value"
+                    currentIndex: Math.max(0, [7, 6, 5, 4, 3, 2].indexOf(
+                                               Number(tab.drawer.preferences.weekViewDays
+                                                      || 7)))
+                    Accessible.name: qsTr("Days in the week view")
+                    ToolTip.visible: hovered
+                    ToolTip.delay: 600
+                    ToolTip.text: qsTr("Fewer than seven days start at the selected date")
+                    onActivated: tab.drawer.preferenceChanged("weekViewDays", currentValue)
                 }
                 AppCheckBox {
                     objectName: "showWeekNumbers"
@@ -55,6 +79,22 @@ ScrollView {
                     checked: tab.drawer.preferences.showWeekNumbers === true
                              || tab.drawer.preferences.showWeekNumbers === "true"
                     onToggled: tab.drawer.preferenceChanged("showWeekNumbers", checked)
+                }
+                // Stored inverted (hideWeekends, hideDeclined) so an unset
+                // key keeps today's behaviour.
+                AppCheckBox {
+                    objectName: "showWeekends"
+                    text: qsTr("Show weekends in week and month views")
+                    checked: !(tab.drawer.preferences.hideWeekends === true
+                               || tab.drawer.preferences.hideWeekends === "true")
+                    onToggled: tab.drawer.preferenceChanged("hideWeekends", !checked)
+                }
+                AppCheckBox {
+                    objectName: "showDeclined"
+                    text: qsTr("Show events I declined")
+                    checked: !(tab.drawer.preferences.hideDeclined === true
+                               || tab.drawer.preferences.hideDeclined === "true")
+                    onToggled: tab.drawer.preferenceChanged("hideDeclined", !checked)
                 }
                 AppComboBox {
                     id: displayTimeZoneBox
