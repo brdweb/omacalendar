@@ -670,6 +670,22 @@ QString eventIdForClientMutation(const QString& clientMutationId) {
       .left(32);
 }
 
+QJsonObject eventToGoogleUpdateJson(const Event& event, const bool occurrenceScope) {
+  QJsonObject payload = eventToGoogleJson(event);
+  if (occurrenceScope) {
+    payload.remove(QStringLiteral("recurrence"));
+  } else if (!payload.contains(QStringLiteral("recurrence")) &&
+             event.recurrenceId.isEmpty() &&
+             !parsedRawPayload(event)
+                  .value(QStringLiteral("recurrence"))
+                  .toArray()
+                  .isEmpty()) {
+    // Google keeps a series' rule unless the PATCH replaces it.
+    payload.insert(QStringLiteral("recurrence"), QJsonArray{});
+  }
+  return payload;
+}
+
 QJsonObject eventToGoogleCreateJson(const Event& event,
                                     const QString& clientMutationId) {
   QJsonObject payload = eventToGoogleJson(event);

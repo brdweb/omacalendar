@@ -1925,10 +1925,8 @@ void GoogleSync::dispatchMutation(SyncJob* job, const OutboxItem& item,
                             callback);
     return;
   }
-  QJsonObject payload = eventToGoogleJson(event);
-  if (item.recurrenceScope == QStringLiteral("occurrence")) {
-    payload.remove(QStringLiteral("recurrence"));
-  }
+  const QJsonObject payload = eventToGoogleUpdateJson(
+      event, item.recurrenceScope == QStringLiteral("occurrence"));
   m_client.updateEvent(accountId, calendar.remoteId, remoteId, item.expectedRevision,
                        payload, item.sendUpdates, callback);
 }
@@ -1957,12 +1955,9 @@ void GoogleSync::handleMoveHydration(SyncJob* job, const OutboxItem& item,
   desired.etag = remote.etag;
   desired.rawPayload = remote.rawPayload;
   desired.rawFormat = remote.rawFormat;
-  QJsonObject desiredPayload = eventToGoogleJson(desired);
-  QJsonObject remotePayload = eventToGoogleJson(remote);
-  if (item.recurrenceScope == QStringLiteral("occurrence")) {
-    desiredPayload.remove(QStringLiteral("recurrence"));
-    remotePayload.remove(QStringLiteral("recurrence"));
-  }
+  const bool occurrenceScope = item.recurrenceScope == QStringLiteral("occurrence");
+  const QJsonObject desiredPayload = eventToGoogleUpdateJson(desired, occurrenceScope);
+  const QJsonObject remotePayload = eventToGoogleUpdateJson(remote, occurrenceScope);
   if (desiredPayload == remotePayload) {
     handleMutationResult(job, item, desiredEvent, response);
     return;
