@@ -720,27 +720,27 @@
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/components/AppColorPicker.qml" line="35"/>
+        <location filename="../qml/components/AppColorPicker.qml" line="42"/>
         <source>Choose %1</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/components/AppColorPicker.qml" line="103"/>
+        <location filename="../qml/components/AppColorPicker.qml" line="16"/>
         <source>%1 calendar color</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/components/AppColorPicker.qml" line="137"/>
+        <location filename="../qml/components/AppColorPicker.qml" line="14"/>
         <source>Provider color</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/components/AppColorPicker.qml" line="147"/>
+        <location filename="../qml/components/AppColorPicker.qml" line="156"/>
         <source>Custom…</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/components/AppColorPicker.qml" line="166"/>
+        <location filename="../qml/components/AppColorPicker.qml" line="17"/>
         <source>Choose calendar color</source>
         <translation type="unfinished"></translation>
     </message>
@@ -1592,33 +1592,33 @@ spanning</source>
 <context>
     <name>EventChip</name>
     <message>
-        <location filename="../qml/components/EventChip.qml" line="48"/>
+        <location filename="../qml/components/EventChip.qml" line="49"/>
         <source>Conflict</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/components/EventChip.qml" line="50"/>
+        <location filename="../qml/components/EventChip.qml" line="51"/>
         <source>Retrying</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/components/EventChip.qml" line="52"/>
+        <location filename="../qml/components/EventChip.qml" line="53"/>
         <source>Failed</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/components/EventChip.qml" line="54"/>
+        <location filename="../qml/components/EventChip.qml" line="55"/>
         <source>Pending</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/components/EventChip.qml" line="56"/>
+        <location filename="../qml/components/EventChip.qml" line="57"/>
         <source>Read only</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/components/EventChip.qml" line="65"/>
-        <location filename="../qml/components/EventChip.qml" line="129"/>
+        <location filename="../qml/components/EventChip.qml" line="66"/>
+        <location filename="../qml/components/EventChip.qml" line="130"/>
         <source>Untitled event</source>
         <translation type="unfinished"></translation>
     </message>
@@ -1626,371 +1626,392 @@ spanning</source>
 <context>
     <name>EventEditor</name>
     <message>
-        <location filename="../qml/components/EventEditor.qml" line="455"/>
+        <location filename="../qml/components/EventEditor.qml" line="466"/>
         <source>That wall time does not exist in the selected time zone.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/components/EventEditor.qml" line="480"/>
+        <location filename="../qml/components/EventEditor.qml" line="491"/>
         <source>This event belongs to a read-only calendar.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/components/EventEditor.qml" line="482"/>
+        <location filename="../qml/components/EventEditor.qml" line="493"/>
         <source>Add an event title.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/components/EventEditor.qml" line="484"/>
+        <location filename="../qml/components/EventEditor.qml" line="495"/>
         <source>Choose a writable calendar.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/components/EventEditor.qml" line="488"/>
+        <location filename="../qml/components/EventEditor.qml" line="499"/>
         <source>Enter valid start and end dates.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/components/EventEditor.qml" line="491"/>
+        <location filename="../qml/components/EventEditor.qml" line="502"/>
         <source>The end date must be on or after the start date.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/components/EventEditor.qml" line="496"/>
+        <location filename="../qml/components/EventEditor.qml" line="507"/>
         <source>Enter valid start and end times.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/components/EventEditor.qml" line="498"/>
+        <location filename="../qml/components/EventEditor.qml" line="509"/>
         <source>The event must end after it starts.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/components/EventEditor.qml" line="501"/>
+        <location filename="../qml/components/EventEditor.qml" line="512"/>
         <source>Enter a valid IANA time zone.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/components/EventEditor.qml" line="513"/>
+        <location filename="../qml/components/EventEditor.qml" line="524"/>
         <source>This calendar cannot write recurring events.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/components/EventEditor.qml" line="515"/>
+        <location filename="../qml/components/EventEditor.qml" line="526"/>
         <source>This calendar cannot write guests or invitations.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/components/EventEditor.qml" line="517"/>
+        <location filename="../qml/components/EventEditor.qml" line="528"/>
         <source>Choose which recurring events this change applies to.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/components/EventEditor.qml" line="519"/>
+        <location filename="../qml/components/EventEditor.qml" line="530"/>
         <source>Choose whether guests should be notified.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/components/EventEditor.qml" line="618"/>
+        <location filename="../qml/components/EventEditor.qml" line="629"/>
         <source>Email</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/components/EventEditor.qml" line="620"/>
+        <location filename="../qml/components/EventEditor.qml" line="631"/>
         <source>Audio</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/components/EventEditor.qml" line="621"/>
+        <location filename="../qml/components/EventEditor.qml" line="632"/>
         <source>Popup</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/components/EventEditor.qml" line="715"/>
+        <location filename="../qml/components/EventEditor.qml" line="726"/>
         <source>Close event editor</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/components/EventEditor.qml" line="724"/>
+        <location filename="../qml/components/EventEditor.qml" line="735"/>
         <source>Event details</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/components/EventEditor.qml" line="724"/>
+        <location filename="../qml/components/EventEditor.qml" line="735"/>
         <source>New event</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/components/EventEditor.qml" line="741"/>
+        <location filename="../qml/components/EventEditor.qml" line="752"/>
         <source>Conflict</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/components/EventEditor.qml" line="742"/>
+        <location filename="../qml/components/EventEditor.qml" line="753"/>
         <source>Read only</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/components/EventEditor.qml" line="743"/>
+        <location filename="../qml/components/EventEditor.qml" line="754"/>
         <source>Pending</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/components/EventEditor.qml" line="796"/>
+        <location filename="../qml/components/EventEditor.qml" line="807"/>
         <source>A newer local or remote update is being selected in the background.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/components/EventEditor.qml" line="797"/>
+        <location filename="../qml/components/EventEditor.qml" line="808"/>
         <source>This calendar is read-only. You can inspect details or duplicate the event into a writable calendar.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/components/EventEditor.qml" line="804"/>
+        <location filename="../qml/components/EventEditor.qml" line="815"/>
         <source>EVENT</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/components/EventEditor.qml" line="809"/>
-        <location filename="../qml/components/EventEditor.qml" line="810"/>
+        <location filename="../qml/components/EventEditor.qml" line="820"/>
+        <location filename="../qml/components/EventEditor.qml" line="821"/>
         <source>Event title</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/components/EventEditor.qml" line="825"/>
+        <location filename="../qml/components/EventEditor.qml" line="836"/>
         <source>Calendar</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/components/EventEditor.qml" line="830"/>
+        <location filename="../qml/components/EventEditor.qml" line="863"/>
         <source>All day</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/components/EventEditor.qml" line="832"/>
+        <location filename="../qml/components/EventEditor.qml" line="865"/>
         <source>All-day event</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/components/EventEditor.qml" line="836"/>
+        <location filename="../qml/components/EventEditor.qml" line="869"/>
         <source>DATE &amp; TIME</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/components/EventEditor.qml" line="845"/>
+        <location filename="../qml/components/EventEditor.qml" line="878"/>
         <source>Starts</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/components/EventEditor.qml" line="854"/>
+        <location filename="../qml/components/EventEditor.qml" line="887"/>
         <source>Start date</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/components/EventEditor.qml" line="864"/>
+        <location filename="../qml/components/EventEditor.qml" line="897"/>
         <source>Start time</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/components/EventEditor.qml" line="872"/>
+        <location filename="../qml/components/EventEditor.qml" line="905"/>
         <source>Ends</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/components/EventEditor.qml" line="881"/>
+        <location filename="../qml/components/EventEditor.qml" line="914"/>
         <source>End date</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/components/EventEditor.qml" line="276"/>
+        <location filename="../qml/components/EventEditor.qml" line="285"/>
         <source>Still checking who is free.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/components/EventEditor.qml" line="297"/>
+        <location filename="../qml/components/EventEditor.qml" line="306"/>
         <source>No time in the next week when everyone checked is free.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/components/EventEditor.qml" line="305"/>
+        <location filename="../qml/components/EventEditor.qml" line="314"/>
         <source>Everyone checked is free at this time.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/components/EventEditor.qml" line="306"/>
+        <location filename="../qml/components/EventEditor.qml" line="315"/>
         <source>Moved to the next time everyone checked is free.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/components/EventEditor.qml" line="628"/>
+        <location filename="../qml/components/EventEditor.qml" line="639"/>
         <source>%1 at %2</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/components/EventEditor.qml" line="891"/>
+        <location filename="../qml/components/EventEditor.qml" line="846"/>
+        <source>Event color</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../qml/components/EventEditor.qml" line="846"/>
+        <location filename="../qml/components/EventEditor.qml" line="847"/>
+        <source>Calendar color</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../qml/components/EventEditor.qml" line="848"/>
+        <source>%1 event color</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../qml/components/EventEditor.qml" line="849"/>
+        <source>Choose event color</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../qml/components/EventEditor.qml" line="924"/>
         <source>End time</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/components/EventEditor.qml" line="904"/>
+        <location filename="../qml/components/EventEditor.qml" line="937"/>
         <source>Zoned time</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/components/EventEditor.qml" line="905"/>
+        <location filename="../qml/components/EventEditor.qml" line="938"/>
         <source>Floating time</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/components/EventEditor.qml" line="910"/>
+        <location filename="../qml/components/EventEditor.qml" line="943"/>
         <source>Event time type</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/components/EventEditor.qml" line="913"/>
+        <location filename="../qml/components/EventEditor.qml" line="946"/>
         <source>Keeps the same wall-clock time in every time zone</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/components/EventEditor.qml" line="914"/>
+        <location filename="../qml/components/EventEditor.qml" line="947"/>
         <source>Keeps the event at one absolute moment</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/components/EventEditor.qml" line="922"/>
+        <location filename="../qml/components/EventEditor.qml" line="955"/>
         <source>Time zone</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/components/EventEditor.qml" line="927"/>
+        <location filename="../qml/components/EventEditor.qml" line="960"/>
         <source>DETAILS</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/components/EventEditor.qml" line="931"/>
-        <location filename="../qml/components/EventEditor.qml" line="932"/>
+        <location filename="../qml/components/EventEditor.qml" line="964"/>
+        <location filename="../qml/components/EventEditor.qml" line="965"/>
         <source>Location</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/components/EventEditor.qml" line="940"/>
-        <location filename="../qml/components/EventEditor.qml" line="941"/>
+        <location filename="../qml/components/EventEditor.qml" line="973"/>
+        <location filename="../qml/components/EventEditor.qml" line="974"/>
         <source>Meeting or event URL</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/components/EventEditor.qml" line="947"/>
-        <location filename="../qml/components/EventEditor.qml" line="964"/>
+        <location filename="../qml/components/EventEditor.qml" line="980"/>
+        <location filename="../qml/components/EventEditor.qml" line="997"/>
         <source>Join</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/components/EventEditor.qml" line="957"/>
+        <location filename="../qml/components/EventEditor.qml" line="990"/>
         <source>Video call: %1</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/components/EventEditor.qml" line="974"/>
+        <location filename="../qml/components/EventEditor.qml" line="1007"/>
         <source>Add Google Meet video conferencing</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/components/EventEditor.qml" line="982"/>
+        <location filename="../qml/components/EventEditor.qml" line="1015"/>
         <source>Notes</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/components/EventEditor.qml" line="989"/>
+        <location filename="../qml/components/EventEditor.qml" line="1022"/>
         <source>Event notes</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/components/EventEditor.qml" line="1000"/>
+        <location filename="../qml/components/EventEditor.qml" line="1033"/>
         <source>ATTACHMENTS</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/components/EventEditor.qml" line="1015"/>
+        <location filename="../qml/components/EventEditor.qml" line="1048"/>
         <source>Open</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/components/EventEditor.qml" line="1017"/>
+        <location filename="../qml/components/EventEditor.qml" line="1050"/>
         <source>Open %1</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/components/EventEditor.qml" line="1032"/>
+        <location filename="../qml/components/EventEditor.qml" line="1065"/>
         <source>Busy</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/components/EventEditor.qml" line="1033"/>
+        <location filename="../qml/components/EventEditor.qml" line="1066"/>
         <source>Free</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/components/EventEditor.qml" line="1038"/>
+        <location filename="../qml/components/EventEditor.qml" line="1071"/>
         <source>Availability</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/components/EventEditor.qml" line="1044"/>
+        <location filename="../qml/components/EventEditor.qml" line="1077"/>
         <source>Default visibility</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/components/EventEditor.qml" line="1045"/>
+        <location filename="../qml/components/EventEditor.qml" line="1078"/>
         <source>Public</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/components/EventEditor.qml" line="1046"/>
+        <location filename="../qml/components/EventEditor.qml" line="1079"/>
         <source>Private</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/components/EventEditor.qml" line="1047"/>
+        <location filename="../qml/components/EventEditor.qml" line="1080"/>
         <source>Confidential</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/components/EventEditor.qml" line="1052"/>
+        <location filename="../qml/components/EventEditor.qml" line="1085"/>
         <source>Visibility</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/components/EventEditor.qml" line="1056"/>
+        <location filename="../qml/components/EventEditor.qml" line="1089"/>
         <source>REPEAT</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/components/EventEditor.qml" line="1098"/>
+        <location filename="../qml/components/EventEditor.qml" line="1131"/>
         <source>Support check failed: %1. This and future changes remain disabled.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/components/EventEditor.qml" line="1099"/>
+        <location filename="../qml/components/EventEditor.qml" line="1132"/>
         <source>The server could not be verified</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/components/EventEditor.qml" line="1101"/>
+        <location filename="../qml/components/EventEditor.qml" line="1134"/>
         <source>Check server support to enable this and future changes. The check creates and removes a temporary test event; your events are unchanged.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/components/EventEditor.qml" line="1102"/>
+        <location filename="../qml/components/EventEditor.qml" line="1135"/>
         <source>This calendar does not support changing this and future occurrences.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/components/EventEditor.qml" line="1112"/>
+        <location filename="../qml/components/EventEditor.qml" line="1145"/>
         <source>Check this-and-future support</source>
         <translation type="unfinished"></translation>
     </message>
     <message numerus="yes">
-        <location filename="../qml/components/EventEditor.qml" line="1233"/>
+        <location filename="../qml/components/EventEditor.qml" line="1266"/>
         <source>%n minute(s) before</source>
         <translation>
             <numerusform>%n minute before</numerusform>
@@ -1998,7 +2019,7 @@ spanning</source>
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../qml/components/EventEditor.qml" line="1234"/>
+        <location filename="../qml/components/EventEditor.qml" line="1267"/>
         <source>%n hour(s) before</source>
         <translation>
             <numerusform>%n hour before</numerusform>
@@ -2006,7 +2027,7 @@ spanning</source>
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../qml/components/EventEditor.qml" line="1263"/>
+        <location filename="../qml/components/EventEditor.qml" line="1296"/>
         <source>%n minute(s)</source>
         <translation>
             <numerusform>%n minute</numerusform>
@@ -2014,7 +2035,7 @@ spanning</source>
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../qml/components/EventEditor.qml" line="1265"/>
+        <location filename="../qml/components/EventEditor.qml" line="1298"/>
         <source>%n hour(s)</source>
         <translation>
             <numerusform>%n hour</numerusform>
@@ -2022,181 +2043,181 @@ spanning</source>
         </translation>
     </message>
     <message>
-        <location filename="../qml/components/EventEditor.qml" line="1076"/>
-        <location filename="../qml/components/EventEditor.qml" line="1081"/>
+        <location filename="../qml/components/EventEditor.qml" line="1109"/>
+        <location filename="../qml/components/EventEditor.qml" line="1114"/>
         <source>Choose recurrence scope…</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/components/EventEditor.qml" line="1077"/>
-        <location filename="../qml/components/EventEditor.qml" line="1082"/>
+        <location filename="../qml/components/EventEditor.qml" line="1110"/>
+        <location filename="../qml/components/EventEditor.qml" line="1115"/>
         <source>This occurrence</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/components/EventEditor.qml" line="1078"/>
+        <location filename="../qml/components/EventEditor.qml" line="1111"/>
         <source>This and future occurrences</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/components/EventEditor.qml" line="1079"/>
-        <location filename="../qml/components/EventEditor.qml" line="1083"/>
+        <location filename="../qml/components/EventEditor.qml" line="1112"/>
+        <location filename="../qml/components/EventEditor.qml" line="1116"/>
         <source>Entire series</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/components/EventEditor.qml" line="1087"/>
+        <location filename="../qml/components/EventEditor.qml" line="1120"/>
         <source>Recurring event edit scope</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/components/EventEditor.qml" line="1096"/>
+        <location filename="../qml/components/EventEditor.qml" line="1129"/>
         <source>This and future occurrences cannot be moved between calendars. Choose this occurrence or the entire series.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/components/EventEditor.qml" line="1120"/>
+        <location filename="../qml/components/EventEditor.qml" line="1153"/>
         <source>This calendar cannot write recurring events. Existing recurrence data is preserved.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/components/EventEditor.qml" line="1126"/>
+        <location filename="../qml/components/EventEditor.qml" line="1159"/>
         <source>GUESTS</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/components/EventEditor.qml" line="1163"/>
+        <location filename="../qml/components/EventEditor.qml" line="1196"/>
         <source>Choose guest notification policy…</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/components/EventEditor.qml" line="1164"/>
+        <location filename="../qml/components/EventEditor.qml" line="1197"/>
         <source>Do not notify guests</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/components/EventEditor.qml" line="1165"/>
+        <location filename="../qml/components/EventEditor.qml" line="1198"/>
         <source>Notify external guests only</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/components/EventEditor.qml" line="1166"/>
+        <location filename="../qml/components/EventEditor.qml" line="1199"/>
         <source>Notify all guests</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/components/EventEditor.qml" line="1170"/>
+        <location filename="../qml/components/EventEditor.qml" line="1203"/>
         <source>Guest notification policy</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/components/EventEditor.qml" line="1177"/>
+        <location filename="../qml/components/EventEditor.qml" line="1210"/>
         <source>This CalDAV server did not advertise scheduling, so guest and RSVP writes are disabled. Existing attendee data is preserved.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/components/EventEditor.qml" line="1178"/>
+        <location filename="../qml/components/EventEditor.qml" line="1211"/>
         <source>This calendar does not support guest or invitation writes. Existing attendee data is preserved.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/components/EventEditor.qml" line="1188"/>
+        <location filename="../qml/components/EventEditor.qml" line="1221"/>
         <source>REMINDERS</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/components/EventEditor.qml" line="1192"/>
+        <location filename="../qml/components/EventEditor.qml" line="1225"/>
         <source>Add</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/components/EventEditor.qml" line="1229"/>
+        <location filename="../qml/components/EventEditor.qml" line="1262"/>
         <source>Provider reminder</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/components/EventEditor.qml" line="1231"/>
-        <location filename="../qml/components/EventEditor.qml" line="1262"/>
+        <location filename="../qml/components/EventEditor.qml" line="1264"/>
+        <location filename="../qml/components/EventEditor.qml" line="1295"/>
         <source>At start time</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/components/EventEditor.qml" line="1246"/>
+        <location filename="../qml/components/EventEditor.qml" line="1279"/>
         <source>This absolute reminder is read-only and will be preserved. Remove it to discard it.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/components/EventEditor.qml" line="1247"/>
+        <location filename="../qml/components/EventEditor.qml" line="1280"/>
         <source>This provider reminder format is read-only and will be preserved. Remove it to discard it.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/components/EventEditor.qml" line="1266"/>
+        <location filename="../qml/components/EventEditor.qml" line="1299"/>
         <source>1 day</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/components/EventEditor.qml" line="1276"/>
+        <location filename="../qml/components/EventEditor.qml" line="1309"/>
         <source>Reminder time</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/components/EventEditor.qml" line="1285"/>
+        <location filename="../qml/components/EventEditor.qml" line="1318"/>
         <source>Remove reminder</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/components/EventEditor.qml" line="1294"/>
+        <location filename="../qml/components/EventEditor.qml" line="1327"/>
         <source>This calendar cannot write reminders. Existing provider reminders are preserved.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/components/EventEditor.qml" line="1329"/>
+        <location filename="../qml/components/EventEditor.qml" line="1362"/>
         <source>Discard your unsaved changes?</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/components/EventEditor.qml" line="1336"/>
+        <location filename="../qml/components/EventEditor.qml" line="1369"/>
         <source>Keep editing</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/components/EventEditor.qml" line="1342"/>
+        <location filename="../qml/components/EventEditor.qml" line="1375"/>
         <source>Discard</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/components/EventEditor.qml" line="1354"/>
+        <location filename="../qml/components/EventEditor.qml" line="1387"/>
         <source>Confirm delete</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/components/EventEditor.qml" line="1354"/>
+        <location filename="../qml/components/EventEditor.qml" line="1387"/>
         <source>Delete</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/components/EventEditor.qml" line="1360"/>
+        <location filename="../qml/components/EventEditor.qml" line="1393"/>
         <source>Duplicate</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/components/EventEditor.qml" line="1366"/>
+        <location filename="../qml/components/EventEditor.qml" line="1399"/>
         <source>Export .ics</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/components/EventEditor.qml" line="1372"/>
+        <location filename="../qml/components/EventEditor.qml" line="1405"/>
         <source>Cancel</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/components/EventEditor.qml" line="1377"/>
+        <location filename="../qml/components/EventEditor.qml" line="1410"/>
         <source>Save changes</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/components/EventEditor.qml" line="1377"/>
+        <location filename="../qml/components/EventEditor.qml" line="1410"/>
         <source>Add event</source>
         <translation type="unfinished"></translation>
     </message>
@@ -2234,24 +2255,24 @@ spanning</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/components/EventRow.qml" line="158"/>
+        <location filename="../qml/components/EventRow.qml" line="159"/>
         <source>Organized by %1</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
         <location filename="../qml/components/EventRow.qml" line="54"/>
-        <location filename="../qml/components/EventRow.qml" line="119"/>
         <location filename="../qml/components/EventRow.qml" line="120"/>
+        <location filename="../qml/components/EventRow.qml" line="121"/>
         <source>Untitled event</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/components/EventRow.qml" line="135"/>
+        <location filename="../qml/components/EventRow.qml" line="136"/>
         <source>All day</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/components/EventRow.qml" line="143"/>
+        <location filename="../qml/components/EventRow.qml" line="144"/>
         <source>  ·  Recurring</source>
         <translation type="unfinished"></translation>
     </message>
@@ -4564,33 +4585,33 @@ spanning</source>
 <context>
     <name>TimelineEvent</name>
     <message>
-        <location filename="../qml/components/TimelineEvent.qml" line="77"/>
+        <location filename="../qml/components/TimelineEvent.qml" line="78"/>
         <source>Conflict</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/components/TimelineEvent.qml" line="79"/>
+        <location filename="../qml/components/TimelineEvent.qml" line="80"/>
         <source>Retrying</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/components/TimelineEvent.qml" line="81"/>
+        <location filename="../qml/components/TimelineEvent.qml" line="82"/>
         <source>Failed</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/components/TimelineEvent.qml" line="83"/>
+        <location filename="../qml/components/TimelineEvent.qml" line="84"/>
         <source>Pending</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/components/TimelineEvent.qml" line="85"/>
+        <location filename="../qml/components/TimelineEvent.qml" line="86"/>
         <source>Read only</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../qml/components/TimelineEvent.qml" line="110"/>
-        <location filename="../qml/components/TimelineEvent.qml" line="170"/>
+        <location filename="../qml/components/TimelineEvent.qml" line="111"/>
+        <location filename="../qml/components/TimelineEvent.qml" line="171"/>
         <source>Untitled event</source>
         <translation type="unfinished"></translation>
     </message>
@@ -4768,7 +4789,7 @@ spanning</source>
     </message>
     <message>
         <location filename="../appcontroller.cpp" line="392"/>
-        <location filename="../appcontroller.cpp" line="2714"/>
+        <location filename="../appcontroller.cpp" line="2718"/>
         <source>Synchronizing calendars…</source>
         <translation type="unfinished"></translation>
     </message>
@@ -4789,7 +4810,7 @@ spanning</source>
     </message>
     <message>
         <location filename="../appcontroller.cpp" line="612"/>
-        <location filename="../appcontroller.cpp" line="2238"/>
+        <location filename="../appcontroller.cpp" line="2242"/>
         <source>Calendar service is not connected</source>
         <translation type="unfinished"></translation>
     </message>
@@ -4845,52 +4866,52 @@ spanning</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../appcontroller.cpp" line="1732"/>
+        <location filename="../appcontroller.cpp" line="1736"/>
         <source>This build has no bundled Google OAuth client. Enter a Desktop OAuth client ID in Accounts &amp; settings.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../appcontroller.cpp" line="1762"/>
+        <location filename="../appcontroller.cpp" line="1766"/>
         <source>Enter a Google Desktop OAuth client ID</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../appcontroller.cpp" line="1786"/>
+        <location filename="../appcontroller.cpp" line="1790"/>
         <source>Could not read the selected Google credentials file</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../appcontroller.cpp" line="1792"/>
+        <location filename="../appcontroller.cpp" line="1796"/>
         <source>The selected file is not valid Google credentials JSON</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../appcontroller.cpp" line="1801"/>
+        <location filename="../appcontroller.cpp" line="1805"/>
         <source>Choose OAuth credentials created as a Google Desktop app</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../appcontroller.cpp" line="1820"/>
+        <location filename="../appcontroller.cpp" line="1824"/>
         <source>CalDAV URL, username, and password are required</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../appcontroller.cpp" line="1830"/>
+        <location filename="../appcontroller.cpp" line="1834"/>
         <source>Discovering CalDAV calendars…</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../appcontroller.cpp" line="1864"/>
+        <location filename="../appcontroller.cpp" line="1868"/>
         <source>An account is required</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../appcontroller.cpp" line="1873"/>
+        <location filename="../appcontroller.cpp" line="1877"/>
         <source>Account credentials are being updated…</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../appcontroller.cpp" line="2218"/>
+        <location filename="../appcontroller.cpp" line="2222"/>
         <source>Nothing to undo</source>
         <translation type="unfinished"></translation>
     </message>
@@ -4907,14 +4928,14 @@ spanning</source>
     <message>
         <location filename="../appcontroller.cpp" line="1172"/>
         <location filename="../appcontroller.cpp" line="1293"/>
-        <location filename="../appcontroller.cpp" line="2338"/>
+        <location filename="../appcontroller.cpp" line="2342"/>
         <source>Undone</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
         <location filename="../appcontroller.cpp" line="1172"/>
         <location filename="../appcontroller.cpp" line="1293"/>
-        <location filename="../appcontroller.cpp" line="2338"/>
+        <location filename="../appcontroller.cpp" line="2342"/>
         <source>Redone</source>
         <translation type="unfinished"></translation>
     </message>
@@ -4992,12 +5013,12 @@ spanning</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../appcontroller.cpp" line="1715"/>
+        <location filename="../appcontroller.cpp" line="1719"/>
         <source>The PDF could not be written</source>
         <translation type="unfinished"></translation>
     </message>
     <message numerus="yes">
-        <location filename="../appcontroller.cpp" line="1720"/>
+        <location filename="../appcontroller.cpp" line="1724"/>
         <source>Saved %n page(s) to %1</source>
         <translation>
             <numerusform>Saved %n page to %1</numerusform>
@@ -5005,7 +5026,7 @@ spanning</source>
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../appcontroller.cpp" line="1721"/>
+        <location filename="../appcontroller.cpp" line="1725"/>
         <source>Saved %n page(s) to %1; some events may be missing because calendars are still downloading</source>
         <translation>
             <numerusform>Saved %n page to %1; some events may be missing because calendars are still downloading</numerusform>
@@ -5013,224 +5034,224 @@ spanning</source>
         </translation>
     </message>
     <message>
-        <location filename="../appcontroller.cpp" line="2226"/>
+        <location filename="../appcontroller.cpp" line="2230"/>
         <source>Nothing to redo</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../appcontroller.cpp" line="2234"/>
+        <location filename="../appcontroller.cpp" line="2238"/>
         <source>Still applying the previous undo</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../appcontroller.cpp" line="2312"/>
-        <location filename="../appcontroller.cpp" line="2347"/>
+        <location filename="../appcontroller.cpp" line="2316"/>
+        <location filename="../appcontroller.cpp" line="2351"/>
         <source>The delete can no longer be undone</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../appcontroller.cpp" line="2366"/>
+        <location filename="../appcontroller.cpp" line="2370"/>
         <source>Only valid HTTP or HTTPS event links can be opened</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../appcontroller.cpp" line="2370"/>
+        <location filename="../appcontroller.cpp" line="2374"/>
         <source>The event link could not be opened</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../appcontroller.cpp" line="2379"/>
+        <location filename="../appcontroller.cpp" line="2383"/>
         <source>No verified OmaCalendar widget beta commit is configured</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../appcontroller.cpp" line="2385"/>
-        <location filename="../appcontroller.cpp" line="2428"/>
+        <location filename="../appcontroller.cpp" line="2389"/>
+        <location filename="../appcontroller.cpp" line="2432"/>
         <source>omacalendar-widgetctl is not installed</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../appcontroller.cpp" line="2405"/>
+        <location filename="../appcontroller.cpp" line="2409"/>
         <source>OmaCalendar widget installed</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../appcontroller.cpp" line="2406"/>
+        <location filename="../appcontroller.cpp" line="2410"/>
         <source>Widget activation completed</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../appcontroller.cpp" line="2413"/>
+        <location filename="../appcontroller.cpp" line="2417"/>
         <source>Widget install failed</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../appcontroller.cpp" line="2443"/>
+        <location filename="../appcontroller.cpp" line="2447"/>
         <source>Omarchy clock restored</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../appcontroller.cpp" line="2450"/>
+        <location filename="../appcontroller.cpp" line="2454"/>
         <source>Clock restore failed</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../appcontroller.cpp" line="2484"/>
+        <location filename="../appcontroller.cpp" line="2488"/>
         <source>This OmaCalendar link is not valid</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../appcontroller.cpp" line="2494"/>
+        <location filename="../appcontroller.cpp" line="2498"/>
         <source>Only a readable local .ics file can be imported</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../appcontroller.cpp" line="2503"/>
+        <location filename="../appcontroller.cpp" line="2507"/>
         <source>Only a webcal:// or webcals:// link can be subscribed to</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../appcontroller.cpp" line="2546"/>
+        <location filename="../appcontroller.cpp" line="2550"/>
         <source>The event link is missing an event identifier</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../appcontroller.cpp" line="2602"/>
+        <location filename="../appcontroller.cpp" line="2606"/>
         <source>This OmaCalendar link is not supported</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../appcontroller.cpp" line="2617"/>
+        <location filename="../appcontroller.cpp" line="2621"/>
         <source>Could not create diagnostics preview</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../appcontroller.cpp" line="2629"/>
+        <location filename="../appcontroller.cpp" line="2633"/>
         <source>Could not save diagnostics preview</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../appcontroller.cpp" line="2633"/>
+        <location filename="../appcontroller.cpp" line="2637"/>
         <source>Opened privacy-safe diagnostics preview</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../appcontroller.cpp" line="2641"/>
+        <location filename="../appcontroller.cpp" line="2645"/>
         <source>The backup did not report where it was saved</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../appcontroller.cpp" line="2648"/>
+        <location filename="../appcontroller.cpp" line="2652"/>
         <source>Backed up the calendar database</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../appcontroller.cpp" line="2723"/>
+        <location filename="../appcontroller.cpp" line="2727"/>
         <source>Account sync started</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../appcontroller.cpp" line="2736"/>
+        <location filename="../appcontroller.cpp" line="2740"/>
         <source>This and future occurrences are supported</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../appcontroller.cpp" line="2737"/>
+        <location filename="../appcontroller.cpp" line="2741"/>
         <source>Checking this-and-future support; a temporary test event will be removed after the check</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../appcontroller.cpp" line="2836"/>
+        <location filename="../appcontroller.cpp" line="2840"/>
         <source>Google needs you to sign in again before this account can sync.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../appcontroller.cpp" line="2840"/>
+        <location filename="../appcontroller.cpp" line="2844"/>
         <source>The server did not accept the username or password. Check them in Accounts &amp; settings.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../appcontroller.cpp" line="2846"/>
+        <location filename="../appcontroller.cpp" line="2850"/>
         <source>Sign in to Google again to give OmaCalendar access to calendars, tasks and free/busy.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../appcontroller.cpp" line="2851"/>
+        <location filename="../appcontroller.cpp" line="2855"/>
         <source>Google sign-in was cancelled or access was not granted. Sign in again and allow access to continue.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../appcontroller.cpp" line="2856"/>
+        <location filename="../appcontroller.cpp" line="2860"/>
         <source>Google sign-in timed out before it was finished in the browser. Try again.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../appcontroller.cpp" line="2861"/>
+        <location filename="../appcontroller.cpp" line="2865"/>
         <source>The server refused access. Check the username, password and address in Accounts &amp; settings.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../appcontroller.cpp" line="2867"/>
+        <location filename="../appcontroller.cpp" line="2871"/>
         <source>The system keyring is locked or not running, so the password could not be saved or read. Unlock the keyring, or install a Secret Service such as GNOME Keyring or KeePassXC, then retry.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../appcontroller.cpp" line="2873"/>
+        <location filename="../appcontroller.cpp" line="2877"/>
         <source>The server could not be found. Check the address and your internet connection.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../appcontroller.cpp" line="2879"/>
+        <location filename="../appcontroller.cpp" line="2883"/>
         <source>The server could not be reached. Check your internet connection; OmaCalendar will sync again when it is back.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../appcontroller.cpp" line="2883"/>
+        <location filename="../appcontroller.cpp" line="2887"/>
         <source>The server refused the connection. Check the address and port.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../appcontroller.cpp" line="2887"/>
+        <location filename="../appcontroller.cpp" line="2891"/>
         <source>A secure connection to the server could not be set up. Check the address and your system clock.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../appcontroller.cpp" line="2891"/>
+        <location filename="../appcontroller.cpp" line="2895"/>
         <source>The server took too long to answer. Try again in a moment.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../appcontroller.cpp" line="2896"/>
+        <location filename="../appcontroller.cpp" line="2900"/>
         <source>The server is limiting requests right now. OmaCalendar will try again shortly.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../appcontroller.cpp" line="2901"/>
+        <location filename="../appcontroller.cpp" line="2905"/>
         <source>The server is having trouble right now. Try again later.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../appcontroller.cpp" line="2905"/>
+        <location filename="../appcontroller.cpp" line="2909"/>
         <source>No calendar was found at that address. Check the URL in Accounts &amp; settings.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../appcontroller.cpp" line="2910"/>
+        <location filename="../appcontroller.cpp" line="2914"/>
         <source>The server address is not valid. Use the full https:// address of the calendar server.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../appcontroller.cpp" line="2915"/>
+        <location filename="../appcontroller.cpp" line="2919"/>
         <source>OmaCalendar could not use its local database. Check that the disk is not full, then restart OmaCalendar.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../appcontroller.cpp" line="2934"/>
+        <location filename="../appcontroller.cpp" line="2938"/>
         <source>Waiting for Google sign-in in your browser…</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../appcontroller.cpp" line="2973"/>
+        <location filename="../appcontroller.cpp" line="2977"/>
         <source>Google sign-in cancelled</source>
         <translation type="unfinished"></translation>
     </message>
