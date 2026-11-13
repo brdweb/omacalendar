@@ -84,7 +84,7 @@ jobs:
         run: |
           pacman -Syu --noconfirm --needed \
             appstream clang cmake desktop-file-utils git libical libsecret \
-            ninja pkgconf qt6-base qt6-declarative qt6-networkauth systemd zstd
+            ninja pkgconf qt6-base qt6-declarative qt6-networkauth qt6-tools systemd zstd
 
       - name: Check out source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -136,7 +136,7 @@ jobs:
         run: |
           pacman -Syu --noconfirm --needed \
             clang cmake git libical libsecret ninja pkgconf qt6-base \
-            qt6-declarative qt6-networkauth systemd
+            qt6-declarative qt6-networkauth qt6-tools systemd
 
       - name: Check out source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -182,7 +182,7 @@ jobs:
         run: |
           pacman -Syu --noconfirm --needed \
             clang cmake compiler-rt git libical libsecret ninja pkgconf qt6-base \
-            qt6-declarative qt6-networkauth systemd
+            qt6-declarative qt6-networkauth qt6-tools systemd
 
       - name: Check out source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -241,7 +241,7 @@ jobs:
         run: |
           pacman -Syu --noconfirm --needed \
             appstream cmake desktop-file-utils git libical libsecret ninja \
-            pkgconf qt6-base qt6-declarative qt6-networkauth systemd
+            pkgconf qt6-base qt6-declarative qt6-networkauth qt6-tools systemd
 
       - name: Check out source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7

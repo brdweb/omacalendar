@@ -129,7 +129,7 @@ ItemDelegate {
                 Layout.fillWidth: true
                 text: {
                     const prefix = root.showDate
-                            ? Qt.formatDate(root.eventDate(root.eventData), "ddd, MMM d") + "  ·  "
+                            ? Theme.shortDate(root.eventDate(root.eventData)) + "  ·  "
                             : ""
                     if (root.eventData.allDay)
                         return prefix + qsTr("All day")
@@ -155,8 +155,8 @@ ItemDelegate {
                 Layout.fillWidth: true
                 text: root.continuationText.length > 0
                       ? root.continuationText
-                      : qsTr("Organized by ") + (root.eventData.organizer.displayName
-                                           || root.eventData.organizer.email)
+                      : qsTr("Organized by %1").arg(root.eventData.organizer.displayName
+                                                    || root.eventData.organizer.email)
                 color: Theme.alpha(Theme.mutedText, 0.82)
                 font.pixelSize: Theme.microFontSize
                 elide: Text.ElideRight

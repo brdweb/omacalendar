@@ -24,7 +24,7 @@ Dialog {
     anchors.centerIn: Overlay.overlay
     width: Math.min(480, Overlay.overlay ? Overlay.overlay.width - 48 : 480)
     modal: true
-    title: actionLabel + qsTr("?")
+    title: qsTr("%1?").arg(actionLabel)
     standardButtons: Dialog.Cancel
     closePolicy: Popup.CloseOnEscape
 

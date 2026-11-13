@@ -51,6 +51,10 @@ See [getting started](docs/GETTING_STARTED.md), [backup and recovery](docs/BACKU
 Build dependencies on Arch: CMake, Ninja, a C++20 compiler, Qt 6.9 or newer
 (Base, Declarative and NetworkAuth), libical 4.0 or newer, libsecret, pkgconf
 and systemd. Distributions that still ship libical 3 cannot build OmaCalendar.
+Qt Tools (`qt6-tools`, for Linguist) is a recommended build dependency: it
+compiles the translations, including the English plural forms, into the
+executables. Without it the build succeeds with a warning and counted strings
+read "1 event(s)".
 
 ```bash
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug
@@ -58,6 +62,12 @@ cmake --build build --parallel
 ctest --test-dir build --output-on-failure
 packaging/release/check-qmllint.sh build
 ```
+
+User-visible strings go through `qsTr()`/`tr()`, with `%1` placeholders rather
+than concatenation and `%n` for counts. After changing one, regenerate the
+catalogue with `cmake --build build --target lupdate_ts` and fill in the
+English plural forms (`<numerusform>`) for any new `%n` string in
+`src/app/translations/omacalendar_en.ts`.
 
 See [architecture](docs/ARCHITECTURE.md), [IPC](docs/IPC.md),
 [release procedure](docs/RELEASE.md), and [security reporting](SECURITY.md).

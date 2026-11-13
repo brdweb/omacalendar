@@ -625,7 +625,7 @@ Dialog {
         const parsed = new Date(value)
         const timestamp = isNaN(parsed.getTime())
                 ? String(value) : Qt.formatDateTime(parsed, Locale.ShortFormat)
-        return reminderMethodLabel(method) + qsTr(" at ") + timestamp
+        return qsTr("%1 at %2").arg(reminderMethodLabel(method)).arg(timestamp)
     }
 
     function calendarIndex(calendarId) {
@@ -1230,9 +1230,9 @@ Dialog {
                                         : reminderRow.minutes === 0
                                           ? qsTr("At start time")
                                           : reminderRow.minutes < 60
-                                            ? reminderRow.minutes + qsTr(" minutes before")
-                                            : (reminderRow.minutes / 60)
-                                              + qsTr(" hours before")
+                                            ? qsTr("%n minute(s) before", "", reminderRow.minutes)
+                                            : qsTr("%n hour(s) before", "",
+                                                   reminderRow.minutes / 60)
                                 color: Theme.text
                                 font.pixelSize: Theme.smallFontSize
                                 wrapMode: Text.Wrap
@@ -1260,9 +1260,9 @@ Dialog {
                                 required property var modelData
                                 width: ListView.view.width
                                 text: modelData === 0 ? qsTr("At start time")
-                                                     : modelData < 60 ? modelData + qsTr(" minutes")
+                                                     : modelData < 60 ? qsTr("%n minute(s)", "", modelData)
                                                                       : modelData < 1440
-                                                                        ? (modelData / 60) + qsTr(" hours")
+                                                                        ? qsTr("%n hour(s)", "", modelData / 60)
                                                                         : qsTr("1 day")
                             }
                             onActivated: index => {

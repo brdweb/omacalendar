@@ -1,5 +1,6 @@
 #include "reminders/reminderscheduler.h"
 
+#include <QCoreApplication>
 #include <QCryptographicHash>
 #include <QDBusConnection>
 #include <QDBusInterface>
@@ -8,6 +9,7 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QLocale>
 #include <QProcess>
 #include <QStandardPaths>
 #include <QTime>
@@ -48,8 +50,21 @@ QString notificationPrivacy(const Database* database) {
 // themselves), so titles go there verbatim. Bodies may carry markup and get
 // the escaped form.
 QString eventTitle(const Event& event) {
-  return event.summary.trimmed().isEmpty() ? QStringLiteral("Calendar event")
-                                           : event.summary;
+  return event.summary.trimmed().isEmpty()
+             ? QCoreApplication::translate("omacalendar::ReminderScheduler",
+                                           "Calendar event")
+             : event.summary;
+}
+
+// "Wed 9:30 AM" under the C locale (what the daemon's systemd unit usually
+// gets); the session's weekday names and short time format otherwise.
+QString reminderStartLabel(const QDateTime& start) {
+  const QLocale locale;
+  if (locale.language() == QLocale::C) {
+    return start.toString(QStringLiteral("ddd h:mm AP"));
+  }
+  return locale.toString(start, QStringLiteral("ddd ")) +
+         locale.toString(start.time(), QLocale::ShortFormat);
 }
 
 QString escapedEventTitle(const Event& event) {
@@ -779,37 +794,37 @@ CalendarNotification ReminderScheduler::reminderNotification(
   CalendarNotification notification;
   notification.fingerprint = QStringLiteral("reminder:") + reminder.fingerprint;
   const QString privacy = notificationPrivacy(m_database);
-  notification.summary = QStringLiteral("Calendar reminder");
+  notification.summary = tr("Calendar reminder");
   if (privacy == QStringLiteral("full_details")) {
     notification.summary = eventTitle(event);
     const QDateTime occurrence = dateTimeFromIso(reminder.occurrenceId);
     const QDateTime start =
         occurrence.isValid() ? occurrence.toLocalTime() : event.startUtc.toLocalTime();
-    notification.body = event.allDay ? QStringLiteral("All day")
-                                     : start.toString(QStringLiteral("ddd h:mm AP"));
+    notification.body = event.allDay ? tr("All day") : reminderStartLabel(start);
     if (!event.location.isEmpty()) {
       notification.body += QStringLiteral(" — ") + event.location.toHtmlEscaped();
     }
   } else if (privacy == QStringLiteral("title_only")) {
     notification.summary = eventTitle(event);
   } else {
-    notification.body = QStringLiteral("An event is starting soon");
+    notification.body = tr("An event is starting soon");
   }
-  notification.actions = {QStringLiteral("default"), QStringLiteral("Open")};
+  // Actions are (key, label) pairs: the key is what ActionInvoked reports
+  // back, so only the label is translated.
+  notification.actions = {QStringLiteral("default"), tr("Open")};
   if (joinUrl.isValid()) {
-    notification.actions << QStringLiteral("join") << QStringLiteral("Join meeting");
+    notification.actions << QStringLiteral("join") << tr("Join meeting");
   }
-  notification.actions << QStringLiteral("snooze5") << QStringLiteral("Snooze 5 min")
-                       << QStringLiteral("snooze10") << QStringLiteral("Snooze 10 min");
+  notification.actions << QStringLiteral("snooze5") << tr("Snooze 5 min")
+                       << QStringLiteral("snooze10") << tr("Snooze 10 min");
   // Until start only makes sense while the start is still a minute away.
   if (occurrenceStart.isValid() && occurrenceStart > now().addSecs(60) &&
       occurrenceStart <= now().addDays(1)) {
-    notification.actions << QStringLiteral("snoozeStart")
-                         << QStringLiteral("Remind at start");
+    notification.actions << QStringLiteral("snoozeStart") << tr("Remind at start");
   }
-  notification.actions << QStringLiteral("snooze30") << QStringLiteral("Snooze 30 min")
-                       << QStringLiteral("snooze60") << QStringLiteral("Snooze 1 hour")
-                       << QStringLiteral("dismiss") << QStringLiteral("Dismiss");
+  notification.actions << QStringLiteral("snooze30") << tr("Snooze 30 min")
+                       << QStringLiteral("snooze60") << tr("Snooze 1 hour")
+                       << QStringLiteral("dismiss") << tr("Dismiss");
   notification.hints = {
       {QStringLiteral("desktop-entry"), QString::fromLatin1(kDesktopEntry)},
       {QStringLiteral("category"), QStringLiteral("x-omacalendar.reminder")},
@@ -823,11 +838,11 @@ CalendarNotification ReminderScheduler::invitationNotification(
   CalendarNotification notification;
   notification.fingerprint = fingerprint;
   const QString privacy = notificationPrivacy(m_database);
-  notification.summary = changed ? QStringLiteral("Invitation updated")
-                                 : QStringLiteral("New calendar invitation");
+  notification.summary =
+      changed ? tr("Invitation updated") : tr("New calendar invitation");
   if (event.deleted ||
       event.status.compare(QStringLiteral("cancelled"), Qt::CaseInsensitive) == 0) {
-    notification.summary = QStringLiteral("Invitation cancelled");
+    notification.summary = tr("Invitation cancelled");
   }
   if (privacy == QStringLiteral("full_details")) {
     notification.body = escapedEventTitle(event);
@@ -837,11 +852,11 @@ CalendarNotification ReminderScheduler::invitationNotification(
   } else if (privacy == QStringLiteral("title_only")) {
     notification.body = escapedEventTitle(event);
   } else {
-    notification.body = changed ? QStringLiteral("A calendar invitation changed")
-                                : QStringLiteral("You received an invitation");
+    notification.body = changed ? tr("A calendar invitation changed")
+                                : tr("You received an invitation");
   }
-  notification.actions = {QStringLiteral("default"), QStringLiteral("Open"),
-                          QStringLiteral("dismiss"), QStringLiteral("Dismiss")};
+  notification.actions = {QStringLiteral("default"), tr("Open"),
+                          QStringLiteral("dismiss"), tr("Dismiss")};
   notification.hints = {
       {QStringLiteral("desktop-entry"), QString::fromLatin1(kDesktopEntry)},
       {QStringLiteral("category"), QStringLiteral("x-omacalendar.invitation")},
@@ -865,9 +880,9 @@ CalendarNotification ReminderScheduler::invitationDigestNotification(
   CalendarNotification notification;
   notification.fingerprint = QStringLiteral("invitation-digest");
   const QString privacy = notificationPrivacy(m_database);
-  notification.summary =
-      changedOnly ? QStringLiteral("%1 invitations updated").arg(events.size())
-                  : QStringLiteral("%1 calendar invitations").arg(events.size());
+  const int count = static_cast<int>(events.size());
+  notification.summary = changedOnly ? tr("%n invitation(s) updated", nullptr, count)
+                                     : tr("%n calendar invitation(s)", nullptr, count);
   if (privacy == QStringLiteral("full_details") ||
       privacy == QStringLiteral("title_only")) {
     QStringList titles;
@@ -876,9 +891,9 @@ CalendarNotification ReminderScheduler::invitationDigestNotification(
     }
     notification.body = titles.join(QStringLiteral(", "));
   } else {
-    notification.body = QStringLiteral("Open OmaCalendar to review them");
+    notification.body = tr("Open OmaCalendar to review them");
   }
-  notification.actions = {QStringLiteral("default"), QStringLiteral("Open")};
+  notification.actions = {QStringLiteral("default"), tr("Open")};
   notification.hints = {
       {QStringLiteral("desktop-entry"), QString::fromLatin1(kDesktopEntry)},
       {QStringLiteral("category"), QStringLiteral("x-omacalendar.invitation")},

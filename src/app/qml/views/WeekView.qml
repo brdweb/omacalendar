@@ -232,7 +232,7 @@ Item {
                                 textFormat: Text.PlainText
                                 visible: allDayColumn.dayEvents.length > 2
                                 anchors.horizontalCenter: parent.horizontalCenter
-                                text: "+" + (allDayColumn.dayEvents.length - 2) + qsTr(" more")
+                                text: qsTr("+%1 more").arg(allDayColumn.dayEvents.length - 2)
                                 color: Theme.mutedText
                                 font.pixelSize: Theme.microFontSize
                             }

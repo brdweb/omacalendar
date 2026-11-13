@@ -108,8 +108,10 @@ find_package(Qt6 6.9 REQUIRED COMPONENTS
   QuickControls2
   Sql
 )
-# Optional: only needed for the lupdate_ts translation-extraction target, not
-# for building or running the application.
+# Optional: compiles the translations (including the English plural forms)
+# into the executables and provides the lupdate_ts extraction target. Without
+# it the build still succeeds, but plural strings fall back to their "(s)"
+# source text.
 find_package(Qt6 6.9 QUIET COMPONENTS LinguistTools)
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(LibIcal REQUIRED IMPORTED_TARGET libical>=4.0)
@@ -141,6 +143,8 @@ add_library(omacalendar_core STATIC
   src/core/secretstore.h
   src/core/tasks.cpp
   src/core/tasks.h
+  src/core/translations.cpp
+  src/core/translations.h
   src/core/widgeteventquery.cpp
   src/core/widgeteventquery.h
 )
@@ -254,20 +258,35 @@ target_link_libraries(omacalendarctl
 
 if(OMACALENDAR_BUILD_APP)
   add_subdirectory(src/app)
-  if(Qt6LinguistTools_FOUND)
-    # `ninja lupdate_ts` (or the aggregate `update_translations` target)
-    # regenerates src/app/translations/omacalendar_en.ts from qsTr()/tr()
-    # call sites. Not part of the default build; requires qt6-tools.
-    qt6_add_lupdate(
-      SOURCE_TARGETS omacalendar
-      TS_FILES "${CMAKE_CURRENT_SOURCE_DIR}/src/app/translations/omacalendar_en.ts"
-      LUPDATE_TARGET lupdate_ts
-    )
-  else()
-    message(STATUS
-      "Qt6 LinguistTools not found; the lupdate_ts translation-extraction "
-      "target is unavailable (install qt6-tools to enable it)")
+endif()
+
+if(Qt6LinguistTools_FOUND)
+  # The .qm files are embedded under :/i18n, so the install manifest does not
+  # change. `ninja lupdate_ts` (or the aggregate `update_translations` target)
+  # regenerates src/app/translations/omacalendar_en.ts from qsTr()/tr() call
+  # sites in the app and the daemon; re-run it whenever a string changes.
+  set(OMACALENDAR_TRANSLATION_TARGETS omacalendard)
+  if(TARGET omacalendar)
+    list(PREPEND OMACALENDAR_TRANSLATION_TARGETS omacalendar)
   endif()
+  qt_add_translations(
+    TARGETS ${OMACALENDAR_TRANSLATION_TARGETS}
+    SOURCE_TARGETS ${OMACALENDAR_TRANSLATION_TARGETS}
+    TS_FILES "${CMAKE_CURRENT_SOURCE_DIR}/src/app/translations/omacalendar_en.ts"
+    RESOURCE_PREFIX /i18n
+    LUPDATE_TARGET lupdate_ts
+    LUPDATE_OPTIONS -no-obsolete
+    LRELEASE_TARGET omacalendar_lrelease
+  )
+  set(OMACALENDAR_QM_DIR "${CMAKE_CURRENT_BINARY_DIR}")
+  foreach(target IN LISTS OMACALENDAR_TRANSLATION_TARGETS)
+    target_compile_definitions(${target} PRIVATE OMACALENDAR_HAVE_TRANSLATIONS)
+  endforeach()
+else()
+  message(WARNING
+    "Qt6 LinguistTools not found; building without translations. Plural "
+    "strings show their \"(s)\" source text and the lupdate_ts target is "
+    "unavailable. Install qt6-tools to enable translations.")
 endif()
 
 install(TARGETS omacalendard omacalendarctl

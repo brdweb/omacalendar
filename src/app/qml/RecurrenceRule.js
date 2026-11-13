@@ -173,7 +173,7 @@ function weekdayName(code) {
 function joinNames(names) {
     if (names.length <= 1)
         return names.join("")
-    return names.slice(0, -1).join(", ") + qsTr(" and ") + names[names.length - 1]
+    return qsTr("%1 and %2").arg(names.slice(0, -1).join(", ")).arg(names[names.length - 1])
 }
 
 // A plain-language summary. untilLabel is the end date as the user should read

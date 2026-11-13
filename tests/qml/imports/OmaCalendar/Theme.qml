@@ -32,6 +32,12 @@ QtObject {
     readonly property int displayFontSize: fontSize + 14
     readonly property int iconFontSize: fontSize + 2
 
+    // The C-locale patterns App.datePattern returns under LC_ALL=C.UTF-8.
+    readonly property string monthDayPattern: "MMMM d"
+    readonly property string shortMonthDayPattern: "MMM d"
+    readonly property string weekdayMonthDayPattern: "dddd, MMMM d"
+    readonly property string shortWeekdayMonthDayPattern: "ddd, MMM d"
+
     readonly property int spacingXS: 4
     readonly property int spacingSM: 8
     readonly property int spacingMD: 12
@@ -260,13 +266,25 @@ QtObject {
     function monthDay(value) {
         if (!value || isNaN(value.getTime()))
             return ""
-        return Qt.formatDate(value, "MMMM d")
+        return Qt.formatDate(value, monthDayPattern)
+    }
+
+    function shortMonthDay(value) {
+        if (!value || isNaN(value.getTime()))
+            return ""
+        return Qt.formatDate(value, shortMonthDayPattern)
+    }
+
+    function longDate(value) {
+        if (!value || isNaN(value.getTime()))
+            return ""
+        return Qt.formatDate(value, weekdayMonthDayPattern)
     }
 
     function shortDate(value) {
         if (!value || isNaN(value.getTime()))
             return ""
-        return Qt.formatDate(value, "ddd, MMM d")
+        return Qt.formatDate(value, shortWeekdayMonthDayPattern)
     }
 
     function sameDate(first, second) {
@@ -326,13 +344,13 @@ QtObject {
             return qsTr("just now")
         const minutes = Math.floor(seconds / 60)
         if (minutes < 60)
-            return minutes + qsTr(" min ago")
+            return qsTr("%n min ago", "", minutes)
         const hours = Math.floor(minutes / 60)
         if (hours < 24)
-            return hours + qsTr(" h ago")
+            return qsTr("%n h ago", "", hours)
         const days = Math.floor(hours / 24)
         if (days < 7)
-            return days + qsTr(" d ago")
+            return qsTr("%n d ago", "", days)
         return shortDate(value)
     }
 }

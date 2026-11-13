@@ -11,6 +11,7 @@
 #include <QTemporaryFile>
 #include <QTextStream>
 #include <QTimeZone>
+#include <QTranslator>
 #include <QtTest/QtTest>
 #include <atomic>
 #include <ctime>
@@ -20,6 +21,7 @@
 #include "app/applicationinstance.h"
 #include "app/startuprequest.h"
 #include "core/paths.h"
+#include "core/translations.h"
 #include "ipc/ipcprotocol.h"
 
 using namespace omacalendar;
@@ -396,6 +398,10 @@ class AppControllerTest final : public QObject {
 
  private slots:
   void initTestCase();
+  void pluralFormsRenderSingularAndPlural_data();
+  void pluralFormsRenderSingularAndPlural();
+  void monthDayPatternFollowsLocale_data();
+  void monthDayPatternFollowsLocale();
   void selectedDateKeepsLocalCalendarDate_data();
   void selectedDateKeepsLocalCalendarDate();
   void wallTimeConversionRejectsDstGap();
@@ -459,6 +465,105 @@ void AppControllerTest::initTestCase() {
   qputenv("XDG_CONFIG_HOME", m_xdgRoot.filePath(QStringLiteral("config")).toUtf8());
   qputenv("XDG_RUNTIME_DIR", m_xdgRoot.filePath(QStringLiteral("runtime")).toUtf8());
   qputenv("OMACALENDAR_DISABLE_DAEMON_AUTOSTART", "1");
+}
+
+void AppControllerTest::pluralFormsRenderSingularAndPlural_data() {
+  QTest::addColumn<QString>("locale");
+  // en_US loads the English catalogue directly; C (a systemd unit without
+  // LANG) and de_DE (no German catalogue yet) fall back to it.
+  QTest::newRow("en_US") << QStringLiteral("en_US");
+  QTest::newRow("C") << QStringLiteral("C");
+  QTest::newRow("de_DE") << QStringLiteral("de_DE");
+}
+
+void AppControllerTest::pluralFormsRenderSingularAndPlural() {
+#ifndef OMACALENDAR_TEST_QM_DIR
+  QSKIP("Built without Qt LinguistTools; no catalogue to load");
+#else
+  QFETCH(QString, locale);
+  QTranslator translator;
+  QVERIFY(omacalendar::translations::load(&translator, QLocale(locale),
+                                          QStringLiteral(OMACALENDAR_TEST_QM_DIR)));
+  QVERIFY(QCoreApplication::installTranslator(&translator));
+  const auto uninstall =
+      qScopeGuard([&translator]() { QCoreApplication::removeTranslator(&translator); });
+
+  // C++ (app and daemon) and QML strings share the catalogue.
+  QCOMPARE(QCoreApplication::translate("omacalendar::AppController",
+                                       "Exported %n event(s) to %1", nullptr, 1),
+           QStringLiteral("Exported 1 event to %1"));
+  QCOMPARE(QCoreApplication::translate("omacalendar::AppController",
+                                       "Exported %n event(s) to %1", nullptr, 3),
+           QStringLiteral("Exported 3 events to %1"));
+  QCOMPARE(QCoreApplication::translate("omacalendar::ReminderScheduler",
+                                       "%n calendar invitation(s)", nullptr, 1),
+           QStringLiteral("1 calendar invitation"));
+  QCOMPARE(QCoreApplication::translate("omacalendar::ReminderScheduler",
+                                       "%n calendar invitation(s)", nullptr, 2),
+           QStringLiteral("2 calendar invitations"));
+  QCOMPARE(QCoreApplication::translate("MonthCell", "%n event(s)", nullptr, 1),
+           QStringLiteral("1 event"));
+  QCOMPARE(QCoreApplication::translate("MonthCell", "%n event(s)", nullptr, 0),
+           QStringLiteral("0 events"));
+#endif
+}
+
+void AppControllerTest::monthDayPatternFollowsLocale_data() {
+  QTest::addColumn<QString>("locale");
+  QTest::addColumn<QString>("monthDay");
+  QTest::addColumn<QString>("shortMonthDay");
+  QTest::addColumn<QString>("weekdayMonthDay");
+  QTest::addColumn<QString>("shortWeekdayMonthDay");
+  QTest::addColumn<QString>("formatted");
+  QTest::newRow("C") << QStringLiteral("C") << QStringLiteral("MMMM d")
+                     << QStringLiteral("MMM d") << QStringLiteral("dddd, MMMM d")
+                     << QStringLiteral("ddd, MMM d")
+                     << QStringLiteral("Thursday, March 5");
+  QTest::newRow("en_US") << QStringLiteral("en_US") << QStringLiteral("MMMM d")
+                         << QStringLiteral("MMM d") << QStringLiteral("dddd, MMMM d")
+                         << QStringLiteral("ddd, MMM d")
+                         << QStringLiteral("Thursday, March 5");
+  QTest::newRow("en_GB") << QStringLiteral("en_GB") << QStringLiteral("d MMMM")
+                         << QStringLiteral("d MMM") << QStringLiteral("dddd, d MMMM")
+                         << QStringLiteral("ddd, d MMM")
+                         << QStringLiteral("Thursday, 5 March");
+  QTest::newRow("de_DE") << QStringLiteral("de_DE") << QStringLiteral("d. MMMM")
+                         << QStringLiteral("d. MMM") << QStringLiteral("dddd, d. MMMM")
+                         << QStringLiteral("ddd, d. MMM")
+                         << QStringLiteral("Donnerstag, 5. März");
+  // The year's own suffix goes with it: "2026年" and "2026 г.".
+  QTest::newRow("ja_JP") << QStringLiteral("ja_JP") << QStringLiteral("M月d日")
+                         << QStringLiteral("M月d日") << QStringLiteral("M月d日dddd")
+                         << QStringLiteral("M月d日ddd")
+                         << QStringLiteral("3月5日木曜日");
+  QTest::newRow("ru_RU") << QStringLiteral("ru_RU") << QStringLiteral("d MMMM")
+                         << QStringLiteral("d MMM") << QStringLiteral("dddd, d MMMM")
+                         << QStringLiteral("ddd, d MMM")
+                         << QStringLiteral("четверг, 5 марта");
+}
+
+void AppControllerTest::monthDayPatternFollowsLocale() {
+  QFETCH(QString, locale);
+  QFETCH(QString, monthDay);
+  QFETCH(QString, shortMonthDay);
+  QFETCH(QString, weekdayMonthDay);
+  QFETCH(QString, shortWeekdayMonthDay);
+  QFETCH(QString, formatted);
+  const QLocale target(locale);
+  using omacalendar::AppController;
+  QCOMPARE(AppController::datePatternForLocale(target, QStringLiteral("monthDay")),
+           monthDay);
+  QCOMPARE(AppController::datePatternForLocale(target, QStringLiteral("shortMonthDay")),
+           shortMonthDay);
+  QCOMPARE(
+      AppController::datePatternForLocale(target, QStringLiteral("weekdayMonthDay")),
+      weekdayMonthDay);
+  QCOMPARE(AppController::datePatternForLocale(target,
+                                               QStringLiteral("shortWeekdayMonthDay")),
+           shortWeekdayMonthDay);
+  QCOMPARE(target.toString(QDate(2026, 3, 5), weekdayMonthDay), formatted);
+  // Whatever the locale, no year survives.
+  QVERIFY(!weekdayMonthDay.contains(QLatin1Char('y')));
 }
 
 void AppControllerTest::selectedDateKeepsLocalCalendarDate_data() {

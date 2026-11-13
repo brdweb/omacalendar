@@ -55,8 +55,8 @@ ScrollView {
                         }
                         Text {
                             textFormat: Text.PlainText
-                            text: (setCard.modelData.calendarIds || []).length
-                                  + qsTr(" calendar(s)")
+                            text: qsTr("%n calendar(s)", "",
+                                       (setCard.modelData.calendarIds || []).length)
                             color: Theme.mutedText
                             font.pixelSize: Theme.microFontSize
                         }
@@ -360,10 +360,9 @@ ScrollView {
                             quiet: true
                             enabled: calendarCard.orderIndex > 0
                             toolTipText: qsTr("Move calendar up")
-                            Accessible.name: qsTr("Move ")
-                                + String(calendarCard.modelData.name
-                                         || qsTr("calendar"))
-                                + qsTr(" up")
+                            Accessible.name: qsTr("Move %1 up")
+                                .arg(String(calendarCard.modelData.name
+                                            || qsTr("calendar")))
                             onClicked: tab.drawer.moveCalendarByOffset(
                                            calendarCard.calendarId, -1)
                         }
@@ -379,10 +378,9 @@ ScrollView {
                                      && calendarCard.orderIndex
                                         < tab.drawer.calendars.length - 1
                             toolTipText: qsTr("Move calendar down")
-                            Accessible.name: qsTr("Move ")
-                                + String(calendarCard.modelData.name
-                                         || qsTr("calendar"))
-                                + qsTr(" down")
+                            Accessible.name: qsTr("Move %1 down")
+                                .arg(String(calendarCard.modelData.name
+                                            || qsTr("calendar")))
                             onClicked: tab.drawer.moveCalendarByOffset(
                                            calendarCard.calendarId, 1)
                         }

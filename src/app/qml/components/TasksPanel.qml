@@ -58,7 +58,7 @@ Drawer {
                                   today.getDate() + 1)
         if (due === TaskGroups.dayKey(tomorrow))
             return qsTr("Tomorrow")
-        return Qt.formatDate(new Date(due + "T00:00:00"), "ddd d MMM")
+        return Theme.shortDate(new Date(due + "T00:00:00"))
     }
 
     // The list new tasks go into: the one shown, else the first writable one.
