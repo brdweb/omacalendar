@@ -173,6 +173,65 @@ jobs:
             ctest --test-dir build-sanitized --output-on-failure -LE performance
           fi
 
+  fuzz:
+    name: Fuzz smoke
+    runs-on: ubuntu-24.04
+    container: archlinux:base-devel
+    steps:
+      - name: Install current Arch dependencies
+        run: |
+          pacman -Syu --noconfirm --needed \
+            clang cmake compiler-rt git libical libsecret ninja pkgconf qt6-base \
+            qt6-declarative qt6-networkauth systemd
+
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Configure fuzzing build
+        env:
+          CC: clang
+          CXX: clang++
+        run: |
+          cmake -S . -B build-fuzz -G Ninja \
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            -DOMACALENDAR_BUILD_APP=OFF \
+            -DOMACALENDAR_BUILD_FUZZERS=ON
+
+      - name: Build fuzz targets
+        run: |
+          cmake --build build-fuzz --parallel --target \
+            omacalendar-fuzz-icalendar omacalendar-fuzz-caldav_multistatus \
+            omacalendar-fuzz-google_event omacalendar-fuzz-ipc_request \
+            omacalendar-fuzz-quickadd
+
+      - name: Fuzz each target
+        env:
+          ASAN_OPTIONS: detect_leaks=0:halt_on_error=1
+          UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1
+          QT_NO_GLIB: '1'
+          # Scheduled and extended runs fuzz longer; pull requests use a fixed
+          # seed and run count so the result is reproducible.
+          RUNS: ${{ (github.event_name == 'schedule' || inputs.run_extended == true) && '500000' || '20000' }}
+        run: |
+          mkdir -p fuzz-artifacts
+          for target in icalendar caldav_multistatus google_event ipc_request quickadd; do
+            work="$(mktemp -d)"
+            cp -a "tests/fuzz/corpus/${target}/." "${work}/"
+            echo "::group::${target}"
+            "build-fuzz/tests/fuzz/omacalendar-fuzz-${target}" "${work}" \
+              -runs="${RUNS}" -seed=1 -timeout=10 -rss_limit_mb=2048 -max_len=65536 \
+              -artifact_prefix="fuzz-artifacts/${target}-"
+            echo "::endgroup::"
+          done
+
+      - name: Upload crash inputs
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: fuzz-artifacts
+          path: fuzz-artifacts/
+          if-no-files-found: ignore
+
   arch-current:
     name: Current Arch package baseline
     runs-on: ubuntu-24.04

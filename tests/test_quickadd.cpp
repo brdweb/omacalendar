@@ -10,6 +10,7 @@ class QuickAddTest final : public QObject {
  private slots:
   void parsesEverydayPhrases_data();
   void parsesEverydayPhrases();
+  void hugeDurationsAreIgnored();
 };
 
 void QuickAddTest::parsesEverydayPhrases_data() {
@@ -101,6 +102,17 @@ void QuickAddTest::parsesEverydayPhrases() {
   QCOMPARE(draft.endDate, endDate);
   QCOMPARE(draft.recurrenceRule, rule);
   QCOMPARE(draft.location, location);
+}
+
+// Found by fuzz_quickadd: converting 7e10 minutes to int was undefined
+// behaviour.
+void QuickAddTest::hugeDurationsAreIgnored() {
+  const QDate today(2026, 9, 28);
+  QCOMPARE(parseQuickAdd(QStringLiteral("Nap 69999999999m"), today).durationMinutes, 0);
+  QCOMPARE(parseQuickAdd(QStringLiteral("Trip 99999999 hours"), today).durationMinutes,
+           0);
+  QCOMPARE(parseQuickAdd(QStringLiteral("Retreat 8784 h"), today).durationMinutes,
+           527040);
 }
 
 QTEST_GUILESS_MAIN(QuickAddTest)
