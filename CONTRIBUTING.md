@@ -28,6 +28,12 @@ Use `-DOMACALENDAR_ENABLE_SANITIZERS=ON` for a local ASan/UBSan build. Do not ru
 live-provider tests against a personal or production calendar; use isolated test
 accounts and synthetic events.
 
+To try a development build next to an installed OmaCalendar, run it in a
+sandbox. `scripts/dev-sandbox.sh build -- omacalendarctl system.info` starts the
+built daemon with private XDG directories and a private D-Bus session, runs the
+command against it and stops it. Without a command it opens a shell. The live
+database, socket, keyring and service are never touched.
+
 ## Design and implementation rules
 
 - Keep provider networking, credentials, writable storage, and reminders in the

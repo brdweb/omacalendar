@@ -32,3 +32,6 @@ google-oauth*.json
 # Personal agent notes
 AGENTS.local.md
 CLAUDE.local.md
+
+# Local host notes
+.hermes.md
