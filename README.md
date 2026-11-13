@@ -48,8 +48,9 @@ See [getting started](docs/GETTING_STARTED.md), [backup and recovery](docs/BACKU
 
 ## Development
 
-Build dependencies on Arch: CMake, Ninja, a C++ compiler, Qt 6 Base,
-Declarative and NetworkAuth, libical, libsecret, pkgconf and systemd.
+Build dependencies on Arch: CMake, Ninja, a C++20 compiler, Qt 6.9 or newer
+(Base, Declarative and NetworkAuth), libical 4.0 or newer, libsecret, pkgconf
+and systemd. Distributions that still ship libical 3 cannot build OmaCalendar.
 
 ```bash
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug

@@ -41,6 +41,11 @@ Successful operation is separate from Google's scope-review status. Current
 expanded-scope approval has not been independently confirmed: check **Google
 Auth Platform → Data Access / Verification Center** in the production project.
 
+**Open item (maintainer):** confirm in the Google console that the expanded
+scope set (`calendar.freebusy`, `tasks`) is approved, and record the date here.
+Until then, users may see Google's unverified-app warning; the user-facing
+explanation is in [Google sign-in](GOOGLE_SIGN_IN.md).
+
 ## 1. Project configuration
 
 In a disposable Google Cloud project, enable the Google Calendar API and Google Tasks API and
