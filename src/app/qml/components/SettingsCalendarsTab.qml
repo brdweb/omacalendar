@@ -465,7 +465,36 @@ ScrollView {
                                            calendarCard.modelData.id,
                                            "ignoreAlerts", checked)
                         }
-                        Item { Layout.fillWidth: true }
+                        // Fills the space between the check boxes and the
+                        // color, so the card keeps its height.
+                        Item {
+                            Layout.fillWidth: true
+                            visible: calendarCard.modelData.readOnly === true
+                        }
+                        AppComboBox {
+                            objectName: "calendarDefaultReminder-"
+                                        + calendarCard.calendarId
+                            readonly property var storedValue:
+                                (tab.drawer.preferences.calendarDefaultReminders
+                                 || ({}))[calendarCard.calendarId]
+                            visible: calendarCard.modelData.readOnly !== true
+                            Layout.fillWidth: true
+                            Layout.minimumWidth: 0
+                            model: tab.drawer.reminderOptions(
+                                       "", storedValue, qsTr("Default reminder"))
+                            textRole: "text"
+                            valueRole: "value"
+                            currentIndex: tab.drawer.reminderOptionIndex(
+                                              model, storedValue, "default")
+                            Accessible.name: qsTr("Default reminder for new events in ")
+                                             + String(calendarCard.modelData.name
+                                                      || qsTr("calendar"))
+                            ToolTip.visible: hovered && !reorderMouse.drag.active
+                            ToolTip.delay: 450
+                            ToolTip.text: qsTr("The reminder new events in this calendar start with, timed or all-day. \"Default reminder\" uses the ones in Preferences.")
+                            onActivated: tab.drawer.setCalendarDefaultReminder(
+                                             calendarCard.calendarId, currentValue)
+                        }
                         AppColorPicker {
                             objectName: "calendarColorPicker-"
                                         + calendarCard.calendarId

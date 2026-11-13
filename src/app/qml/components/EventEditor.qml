@@ -5,6 +5,7 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 import OmaCalendar
+import "../ReminderDefaults.js" as ReminderDefaults
 
 Dialog {
     id: editor
@@ -43,6 +44,12 @@ Dialog {
                                              && Date.parse(App.freeBusy.start)
                                                 === Date.parse(freeBusyWindowStart)
     property string defaultCalendarId: ""
+    // The preferences ReminderDefaults.resolve reads: defaultReminderMinutes,
+    // defaultAllDayReminderMinutes and calendarDefaultReminders.
+    property var reminderPreferences: ({})
+    // The reminder list as the default left it on a new event; while the list
+    // still matches, changing all-day or the calendar swaps in that default.
+    property string defaultReminderSnapshot: ""
     readonly property var sourceCalendar: calendarForId(eventData.calendarId || "")
     readonly property bool readOnly: Boolean(eventData && eventData.readOnly)
                                      || sourceCalendar.readOnly === true
@@ -104,12 +111,44 @@ Dialog {
             scopeBox.currentIndex = 0
     }
 
-    function formSnapshot() {
+    function reminderSnapshot() {
         const reminders = []
         for (let index = 0; index < reminderModel.count; ++index) {
             const row = reminderModel.get(index)
             reminders.push([row.kind, row.minutes, row.method, row.absoluteAt])
         }
+        return reminders
+    }
+
+    function selectedCalendarId() {
+        return calendarBox.currentIndex >= 0
+                && calendarBox.currentIndex < writableCalendars.length
+                ? String(writableCalendars[calendarBox.currentIndex].id) : ""
+    }
+
+    // Replaces the reminders with the default for the chosen calendar and
+    // all-day setting.
+    function applyDefaultReminder() {
+        reminderModel.clear()
+        const minutes = ReminderDefaults.resolve(reminderPreferences, selectedCalendarId(),
+                                                 allDay.checked)
+        if (minutes !== ReminderDefaults.kNone)
+            reminderModel.append({"kind": "relative", "minutes": minutes,
+                                  "method": "popup", "providerDefault": false,
+                                  "absoluteAt": "", "sourceIndex": -1,
+                                  "edited": true})
+        defaultReminderSnapshot = JSON.stringify(reminderSnapshot())
+    }
+
+    function refreshDefaultReminder() {
+        if (editing || defaultReminderSnapshot.length === 0
+                || JSON.stringify(reminderSnapshot()) !== defaultReminderSnapshot)
+            return
+        applyDefaultReminder()
+    }
+
+    function formSnapshot() {
+        const reminders = reminderSnapshot()
         return JSON.stringify([
             titleField.text, locationField.text, urlField.text, notesField.text,
             meetBox.checked, allDay.checked, timeKindBox.currentIndex,
@@ -152,6 +191,7 @@ Dialog {
     }
 
     function openNew(dateValue, startMinute, durationMinutes) {
+        defaultReminderSnapshot = ""
         eventData = ({})
         editing = false
         deleteArmed = false
@@ -185,11 +225,7 @@ Dialog {
         recurrenceEditor.load("")
         scopeBox.currentIndex = 0
         notificationBox.currentIndex = 0
-        reminderModel.clear()
-        reminderModel.append({"kind": "relative", "minutes": 15,
-                              "method": "popup", "providerDefault": false,
-                              "absoluteAt": "", "sourceIndex": -1,
-                              "edited": true})
+        applyDefaultReminder()
         markClean()
         open()
         titleField.forceActiveFocus()
@@ -296,9 +332,15 @@ Dialog {
     Connections {
         target: allDay
         function onToggled() { freeBusyDelay.restart() }
+        function onCheckedChanged() { editor.refreshDefaultReminder() }
+    }
+    Connections {
+        target: calendarBox
+        function onCurrentIndexChanged() { editor.refreshDefaultReminder() }
     }
 
     function openExisting(value) {
+        defaultReminderSnapshot = ""
         eventData = value || ({})
         editing = Boolean(eventData.id)
         deleteArmed = false
@@ -784,6 +826,7 @@ Dialog {
                     }
                     AppCheckBox {
                         id: allDay
+                        objectName: "eventAllDay"
                         text: qsTr("All day")
                         enabled: !editor.readOnly
                         Accessible.name: qsTr("All-day event")

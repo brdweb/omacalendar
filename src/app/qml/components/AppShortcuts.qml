@@ -6,12 +6,17 @@ import QtQuick
 Item {
     id: shortcuts
 
-    // Single-key navigation (T, [, ], arrows, Q, Return, Delete) is allowed:
+    // Single-key navigation (T, [, ], arrows, Q, Return, Delete) and event
+    // copy and paste (Ctrl+C, Ctrl+X, Ctrl+V) are allowed:
     // no text field, editor or drawer has focus.
     property bool navigationEnabled: false
     // The selected event is a timed event that can be moved or resized.
     property bool nudgeEnabled: false
     property bool hasSelectedEvent: false
+    // The selected event can be deleted, so cutting it is allowed.
+    property bool canCutSelection: false
+    // An event has been copied and can be pasted.
+    property bool hasClipboardEvent: false
     property bool tasksAvailable: false
     property bool editorOpen: false
     property bool settingsOpen: false
@@ -30,6 +35,9 @@ Item {
     // Minutes to move the start, minutes to move the end, days to move both.
     signal nudgeRequested(int startMinutes, int endMinutes, int days)
     signal deleteSelectionRequested()
+    signal copyRequested()
+    signal cutRequested()
+    signal pasteRequested()
     signal undoRequested()
     signal redoRequested()
     signal settingsRequested()
@@ -60,6 +68,9 @@ Item {
         {"section": qsTr("Events"), "keys": "Up, Down", "action": qsTr("Select previous or next event")},
         {"section": qsTr("Events"), "keys": "Enter", "action": qsTr("Open the selected event")},
         {"section": qsTr("Events"), "keys": "Delete", "action": qsTr("Delete the selected event")},
+        {"section": qsTr("Events"), "keys": "Ctrl+C", "action": qsTr("Copy the selected event")},
+        {"section": qsTr("Events"), "keys": "Ctrl+X", "action": qsTr("Cut the selected event")},
+        {"section": qsTr("Events"), "keys": "Ctrl+V", "action": qsTr("Paste the copied event on the selected day")},
         {"section": qsTr("Events"), "keys": "Alt+Up, Alt+Down", "action": qsTr("Move the selected event 15 minutes")},
         {"section": qsTr("Events"), "keys": "Alt+Shift+Up, Alt+Shift+Down", "action": qsTr("Change the selected event's end by 15 minutes")},
         {"section": qsTr("Events"), "keys": "Alt+Left, Alt+Right", "action": qsTr("Move the selected event a day")},
@@ -197,6 +208,26 @@ Item {
         enabled: shortcuts.navigationEnabled && shortcuts.hasSelectedEvent
         context: Qt.ApplicationShortcut
         onActivated: shortcuts.deleteSelectionRequested()
+    }
+    // Event copy and paste, only while navigating: a text field keeps its
+    // own Ctrl+C, Ctrl+X and Ctrl+V.
+    Shortcut {
+        sequence: "Ctrl+C"
+        enabled: shortcuts.navigationEnabled && shortcuts.hasSelectedEvent
+        context: Qt.ApplicationShortcut
+        onActivated: shortcuts.copyRequested()
+    }
+    Shortcut {
+        sequence: "Ctrl+X"
+        enabled: shortcuts.navigationEnabled && shortcuts.canCutSelection
+        context: Qt.ApplicationShortcut
+        onActivated: shortcuts.cutRequested()
+    }
+    Shortcut {
+        sequence: "Ctrl+V"
+        enabled: shortcuts.navigationEnabled && shortcuts.hasClipboardEvent
+        context: Qt.ApplicationShortcut
+        onActivated: shortcuts.pasteRequested()
     }
     Shortcut {
         sequence: "Ctrl+Z"

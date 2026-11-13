@@ -11,6 +11,7 @@ import "views"
 import "CalendarVisibility.js" as CalendarVisibility
 import "DateRange.js" as DateRange
 import "EventIndex.js" as EventIndex
+import "EventClipboard.js" as EventClipboard
 import "TaskGroups.js" as TaskGroups
 
 ApplicationWindow {
@@ -63,6 +64,8 @@ ApplicationWindow {
     property var pendingMoveEvent: ({})
     property var pendingMoveOptions: ({})
     property var pendingExportScope: ({})
+    // The copied event, already stripped by EventClipboard.copy, or null.
+    property var eventClipboard: null
     property var pendingPdfOptions: ({})
     readonly property bool tasksAvailable: App.connected && App.tasksSupported === true
     readonly property var taskItems: appList("tasks")
@@ -666,6 +669,7 @@ ApplicationWindow {
         id: editor
         defaultDurationMinutes: Number(window.preferences.defaultDuration || 60)
         defaultCalendarId: String(window.preferences.defaultCalendarId || "")
+        reminderPreferences: window.preferences
         workDayStart: Number(window.preferences.workDayStart || 8)
         workDayEnd: Number(window.preferences.workDayEnd || 18)
         timeFormat: String(window.preferences.timeFormat || "system")
@@ -967,6 +971,9 @@ ApplicationWindow {
         navigationEnabled: window.navigationShortcutsEnabled()
         nudgeEnabled: window.canNudgeSelection()
         hasSelectedEvent: Boolean(window.selectedEvent.id)
+        canCutSelection: Boolean(window.selectedEvent.id)
+                         && window.eventEditable(window.selectedEvent)
+        hasClipboardEvent: window.eventClipboard !== null
         tasksAvailable: window.tasksAvailable
         editorOpen: editor.opened
         settingsOpen: settingsDrawer.opened
@@ -984,6 +991,9 @@ ApplicationWindow {
         onNudgeRequested: (startMinutes, endMinutes, days) =>
                           window.nudgeSelectedEvent(startMinutes, endMinutes, days)
         onDeleteSelectionRequested: window.requestKeyboardDelete()
+        onCopyRequested: window.copySelectedEvent()
+        onCutRequested: window.cutSelectedEvent()
+        onPasteRequested: window.pasteEvent()
         onUndoRequested: {
             undoToast.dismiss()
             window.callApp("undo", [])
@@ -1729,6 +1739,59 @@ ApplicationWindow {
             return
         }
         removeEvent(String(value.id), options)
+    }
+
+    function copySelectedEvent() {
+        const clip = EventClipboard.copy(selectedEvent && selectedEvent.id ? selectedEvent : null)
+        if (!clip)
+            return false
+        eventClipboard = clip
+        announce(qsTr("Copied %1").arg(clip.summary || qsTr("Untitled event")))
+        return true
+    }
+
+    // Copy, then delete through the same path as the Delete key, with its
+    // recurrence prompt and undo.
+    function cutSelectedEvent() {
+        if (!selectedEvent || !selectedEvent.id || !eventEditable(selectedEvent))
+            return
+        if (copySelectedEvent())
+            requestKeyboardDelete()
+    }
+
+    // The calendar a pasted event goes to: the original's when it can be
+    // written, otherwise the default calendar, otherwise the first writable.
+    function pasteCalendarId(clip) {
+        const candidates = [String(clip.sourceCalendarId || ""),
+                            String(preferences.defaultCalendarId || "")]
+        for (const candidate of candidates) {
+            for (let index = 0; index < writableCalendars.length; ++index) {
+                if (candidate && String(writableCalendars[index].id) === candidate)
+                    return candidate
+            }
+        }
+        return writableCalendars.length > 0 ? String(writableCalendars[0].id) : ""
+    }
+
+    // Creates a new event from the clipboard on the selected day at the
+    // copied time, through the normal create path, so undo removes it.
+    function pasteEvent() {
+        if (!eventClipboard)
+            return
+        const calendarId = pasteCalendarId(eventClipboard)
+        const draft = EventClipboard.paste(eventClipboard, App.selectedDate, calendarId,
+                                           (dateValue, timeKind) =>
+                                               utcForDisplayedWall(dateValue, timeKind))
+        if (!draft) {
+            announce(qsTr("The event cannot be pasted on this day."))
+            return
+        }
+        const capabilities = calendarFor(calendarId).capabilities || ({})
+        if (capabilities.recurringEvents === false || capabilities.recurrence === false)
+            draft.recurrenceRule = ""
+        saveEvent(draft, {"recurrenceScope": "series", "guestNotificationPolicy": "none"})
+        announce(qsTr("Pasted %1 on %2").arg(draft.summary || qsTr("Untitled event"))
+                 .arg(Qt.formatDate(App.selectedDate, "dddd, MMMM d")))
     }
 
     function futureScopeSupportedForEvent(value) {
