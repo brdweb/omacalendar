@@ -90,6 +90,7 @@ class ProviderTest final : public QObject {
   void googleResponseClassificationTable_data();
   void googleResponseClassificationTable();
   void googleMutationIdentityAndRsvpPatch();
+  void googleUpdateClearsRemovedSeriesRecurrence();
   void googleFullSyncReplacementIsAtomic();
   void googleOAuthLoopbackConfiguration();
   void calDavICalendarParsing();
@@ -1327,6 +1328,62 @@ void ProviderTest::googleMutationIdentityAndRsvpPatch() {
 
   invitation.summary = QStringLiteral("Changed locally too");
   QVERIFY(google::rsvpPatchForGoogleEvent(invitation).isEmpty());
+}
+
+void ProviderTest::googleUpdateClearsRemovedSeriesRecurrence() {
+  const QJsonObject resource{
+      {QStringLiteral("id"), QStringLiteral("series")},
+      {QStringLiteral("etag"), QStringLiteral("\"1\"")},
+      {QStringLiteral("summary"), QStringLiteral("Standup")},
+      {QStringLiteral("start"), QJsonObject{{QStringLiteral("dateTime"),
+                                             QStringLiteral("2026-08-28T13:00:00Z")}}},
+      {QStringLiteral("end"), QJsonObject{{QStringLiteral("dateTime"),
+                                           QStringLiteral("2026-08-28T14:00:00Z")}}},
+      {QStringLiteral("recurrence"),
+       QJsonArray{QStringLiteral("RRULE:FREQ=WEEKLY;COUNT=5")}},
+  };
+  const Event series =
+      google::eventFromGoogleJson(resource, QStringLiteral("calendar"));
+  QVERIFY(!series.recurrenceRule.isEmpty());
+  QVERIFY(series.recurrenceId.isEmpty());
+
+  // An unchanged series keeps sending its rule.
+  const QJsonObject unchanged = google::eventToGoogleUpdateJson(series, false);
+  QCOMPARE(unchanged.value(QStringLiteral("recurrence")).toArray(),
+           QJsonArray{QStringLiteral("RRULE:FREQ=WEEKLY;COUNT=5")});
+
+  // Turning the series into a single event must clear Google's rule: a PATCH
+  // that omits recurrence leaves the series repeating.
+  Event single = series;
+  single.recurrenceRule.clear();
+  const QJsonObject cleared = google::eventToGoogleUpdateJson(single, false);
+  QVERIFY(cleared.contains(QStringLiteral("recurrence")));
+  QVERIFY(cleared.value(QStringLiteral("recurrence")).isArray());
+  QVERIFY(cleared.value(QStringLiteral("recurrence")).toArray().isEmpty());
+
+  // An occurrence-scoped update never carries the series recurrence.
+  const QJsonObject occurrence = google::eventToGoogleUpdateJson(single, true);
+  QVERIFY(!occurrence.contains(QStringLiteral("recurrence")));
+  const QJsonObject occurrenceOfSeries = google::eventToGoogleUpdateJson(series, true);
+  QVERIFY(!occurrenceOfSeries.contains(QStringLiteral("recurrence")));
+
+  // A materialized instance (recurrenceId set) with no rule of its own does
+  // not clear anything either.
+  Event instance = single;
+  instance.recurrenceId = QStringLiteral("2026-09-04T13:00:00.000Z");
+  QVERIFY(!google::eventToGoogleUpdateJson(instance, false)
+               .contains(QStringLiteral("recurrence")));
+
+  // An event that never recurred sends no recurrence key, and create bodies
+  // are unchanged.
+  QJsonObject plainResource = resource;
+  plainResource.remove(QStringLiteral("recurrence"));
+  const Event plain =
+      google::eventFromGoogleJson(plainResource, QStringLiteral("calendar"));
+  QVERIFY(!google::eventToGoogleUpdateJson(plain, false)
+               .contains(QStringLiteral("recurrence")));
+  QVERIFY(!google::eventToGoogleCreateJson(single, QStringLiteral("mutation"))
+               .contains(QStringLiteral("recurrence")));
 }
 
 void ProviderTest::calDavICalendarParsing() {

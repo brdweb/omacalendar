@@ -26,6 +26,13 @@ namespace omacalendar::google {
 // are never copied into the request.
 [[nodiscard]] QJsonObject eventToGoogleJson(const Event& event);
 
+// Produces an Events PATCH body. Occurrence-scoped updates never carry the
+// series recurrence. A series master whose provider snapshot recurred but
+// which no longer has a rule sends an explicit empty recurrence, because a
+// PATCH that omits the field leaves Google's rule in place.
+[[nodiscard]] QJsonObject eventToGoogleUpdateJson(const Event& event,
+                                                  bool occurrenceScope);
+
 // Builds an idempotent insert body. Google accepts caller-supplied event ids;
 // deriving one from the durable client mutation id makes a repeated POST safe
 // to reconcile after a lost response.
