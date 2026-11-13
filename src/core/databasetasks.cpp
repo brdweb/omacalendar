@@ -10,28 +10,15 @@
 #include <algorithm>
 
 #include "core/database.h"
+#include "core/database_p.h"
 
 namespace omacalendar {
+
+using namespace detail;
+
 namespace {
 
 constexpr int kMaximumTaskQueryLimit = 5000;
-
-QString sqlError(const QSqlQuery& query, const QString& context) {
-  return QStringLiteral("%1: %2").arg(context, query.lastError().text());
-}
-
-QString nonNull(const QString& value) {
-  return value.isNull() ? QStringLiteral("") : value;
-}
-
-QString compactJson(const QJsonObject& value) {
-  return QString::fromUtf8(QJsonDocument(value).toJson(QJsonDocument::Compact));
-}
-
-QJsonObject parseObject(const QString& value) {
-  return value.isEmpty() ? QJsonObject{}
-                         : QJsonDocument::fromJson(value.toUtf8()).object();
-}
 
 void setError(QString* errorMessage, const QString& message) {
   if (errorMessage != nullptr) {
