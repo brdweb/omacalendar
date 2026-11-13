@@ -21,33 +21,6 @@ constexpr int kDefaultInvitationPageLimit = 500;
 constexpr int kMaxInvitationPageLimit = 500;
 constexpr int kWidgetInvitationLimit = 100;
 
-QString normalizedInvitationResponse(QString response) {
-  response = response.trimmed().toLower();
-  response.remove(QLatin1Char('-'));
-  response.remove(QLatin1Char('_'));
-  return response;
-}
-
-bool invitationNeedsResponse(const omacalendar::Event& event,
-                             const QString& accountPrincipal) {
-  for (const QJsonValue& value : event.attendees) {
-    const QJsonObject attendee = value.toObject();
-    const QString email = attendee.value(QStringLiteral("email")).toString();
-    if (!attendee.value(QStringLiteral("self")).toBool() &&
-        (accountPrincipal.isEmpty() ||
-         email.compare(accountPrincipal, Qt::CaseInsensitive) != 0)) {
-      continue;
-    }
-    QString response = attendee.value(QStringLiteral("responseStatus")).toString();
-    if (response.isEmpty()) {
-      response = attendee.value(QStringLiteral("partstat")).toString();
-    }
-    const QString normalized = normalizedInvitationResponse(response);
-    return normalized.isEmpty() || normalized == QStringLiteral("needsaction");
-  }
-  return false;
-}
-
 QJsonArray subscriptionTopics(const QJsonObject& params,
                               omacalendar::ipc::Error* error) {
   const QJsonValue value = params.value(QStringLiteral("topics"));

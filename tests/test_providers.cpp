@@ -87,6 +87,8 @@ class ProviderTest final : public QObject {
   void googleRequestConstructionAndHydrationBounds();
   void googleRequestsNeverFollowCrossOriginRedirects();
   void googleResponseClassification();
+  void googleResponseClassificationTable_data();
+  void googleResponseClassificationTable();
   void googleMutationIdentityAndRsvpPatch();
   void googleFullSyncReplacementIsAtomic();
   void googleOAuthLoopbackConfiguration();
@@ -1112,6 +1114,153 @@ void ProviderTest::googleResponseClassification() {
       {}, {}, received);
   QVERIFY(!response.errorMessage.contains(QStringLiteral("secret")));
   QVERIFY(!response.errorMessage.contains(QLatin1Char('\n')));
+}
+
+namespace {
+
+// Expected ApiResponse flags, as a bit set for a compact table.
+enum GoogleFlag : int {
+  kAuth = 1 << 0,
+  kScope = 1 << 1,
+  kRetry = 1 << 2,
+  kNotFound = 1 << 3,
+  kConflict = 1 << 4,
+  kExpired = 1 << 5,
+};
+
+QByteArray googleErrorBody(const QString& reason, const QString& message,
+                           const QString& status = {}) {
+  QJsonObject error{{QStringLiteral("message"), message}};
+  if (!reason.isEmpty()) {
+    error.insert(QStringLiteral("errors"),
+                 QJsonArray{QJsonObject{{QStringLiteral("reason"), reason}}});
+  }
+  if (!status.isEmpty()) {
+    error.insert(QStringLiteral("status"), status);
+  }
+  return QJsonDocument(QJsonObject{{QStringLiteral("error"), error}})
+      .toJson(QJsonDocument::Compact);
+}
+
+}  // namespace
+
+void ProviderTest::googleResponseClassificationTable_data() {
+  QTest::addColumn<int>("status");
+  QTest::addColumn<int>("networkError");
+  QTest::addColumn<QByteArray>("body");
+  QTest::addColumn<QByteArray>("retryAfter");
+  QTest::addColumn<int>("flags");
+  QTest::addColumn<QString>("errorCode");
+  QTest::addColumn<qint64>("retryAfterMs");
+
+  const auto row = [](const char* name, const int status,
+                      const QNetworkReply::NetworkError networkError,
+                      const QByteArray& body, const QByteArray& retryAfter,
+                      const int flags, const QString& errorCode,
+                      const qint64 retryAfterMs) {
+    QTest::newRow(name) << status << static_cast<int>(networkError) << body
+                        << retryAfter << flags << errorCode << retryAfterMs;
+  };
+  const QByteArray none;
+
+  row("401 authError", 401, QNetworkReply::AuthenticationRequiredError,
+      googleErrorBody(QStringLiteral("authError"),
+                      QStringLiteral("Invalid Credentials")),
+      none, kAuth, QStringLiteral("authError"), -1);
+  row("401 without a body", 401, QNetworkReply::AuthenticationRequiredError, none, none,
+      kAuth, QStringLiteral("http_401"), -1);
+  row("403 insufficientPermissions", 403, QNetworkReply::ContentAccessDenied,
+      googleErrorBody(QStringLiteral("insufficientPermissions"),
+                      QStringLiteral("Insufficient Permission")),
+      none, kScope, QStringLiteral("insufficientPermissions"), -1);
+  row("403 insufficient scope by message", 403, QNetworkReply::ContentAccessDenied,
+      googleErrorBody({},
+                      QStringLiteral("Request had insufficient authentication scopes."),
+                      QStringLiteral("PERMISSION_DENIED")),
+      none, kScope, QStringLiteral("PERMISSION_DENIED"), -1);
+  row("403 forbidden", 403, QNetworkReply::ContentAccessDenied,
+      googleErrorBody(QStringLiteral("forbidden"), QStringLiteral("Forbidden")), none,
+      0, QStringLiteral("forbidden"), -1);
+  row("403 userRateLimitExceeded", 403, QNetworkReply::ContentAccessDenied,
+      googleErrorBody(QStringLiteral("userRateLimitExceeded"), QStringLiteral("Slow")),
+      QByteArrayLiteral("12"), kRetry, QStringLiteral("userRateLimitExceeded"), 12000);
+  row("403 quotaExceeded", 403, QNetworkReply::ContentAccessDenied,
+      googleErrorBody(QStringLiteral("quotaExceeded"), QStringLiteral("Quota")), none,
+      kRetry, QStringLiteral("quotaExceeded"), -1);
+  row("404 notFound", 404, QNetworkReply::ContentNotFoundError,
+      googleErrorBody(QStringLiteral("notFound"), QStringLiteral("Not Found")), none,
+      kNotFound, QStringLiteral("notFound"), -1);
+  row("408 timeout", 408, QNetworkReply::UnknownContentError, none, none, kRetry,
+      QStringLiteral("http_408"), -1);
+  row("409 duplicate", 409, QNetworkReply::ContentConflictError,
+      googleErrorBody(QStringLiteral("duplicate"), QStringLiteral("Exists")), none,
+      kConflict, QStringLiteral("duplicate"), -1);
+  row("410 fullSyncRequired", 410, QNetworkReply::ContentGoneError,
+      googleErrorBody(QStringLiteral("fullSyncRequired"), QStringLiteral("Sync token")),
+      none, kNotFound | kExpired, QStringLiteral("fullSyncRequired"), -1);
+  row("410 deleted", 410, QNetworkReply::ContentGoneError,
+      googleErrorBody(QStringLiteral("deleted"), QStringLiteral("Resource deleted")),
+      none, kNotFound | kExpired, QStringLiteral("deleted"), -1);
+  row("412 conditionNotMet", 412, QNetworkReply::UnknownContentError,
+      googleErrorBody(QStringLiteral("conditionNotMet"),
+                      QStringLiteral("Precondition")),
+      none, kConflict, QStringLiteral("conditionNotMet"), -1);
+  row("429 Retry-After seconds", 429, QNetworkReply::UnknownContentError,
+      googleErrorBody(QStringLiteral("rateLimitExceeded"), QStringLiteral("Later")),
+      QByteArrayLiteral("3"), kRetry, QStringLiteral("rateLimitExceeded"), 3000);
+  row("429 Retry-After date", 429, QNetworkReply::UnknownContentError, none,
+      QByteArrayLiteral("Fri, 28 Aug 2026 16:00:30 GMT"), kRetry,
+      QStringLiteral("http_429"), 30000);
+  row("429 Retry-After in the past", 429, QNetworkReply::UnknownContentError, none,
+      QByteArrayLiteral("Fri, 28 Aug 2026 15:59:00 GMT"), kRetry,
+      QStringLiteral("http_429"), 0);
+  row("429 Retry-After negative", 429, QNetworkReply::UnknownContentError, none,
+      QByteArrayLiteral("-5"), kRetry, QStringLiteral("http_429"), 0);
+  row("429 Retry-After unparseable", 429, QNetworkReply::UnknownContentError, none,
+      QByteArrayLiteral("soon"), kRetry, QStringLiteral("http_429"), -1);
+  row("500 backendError", 500, QNetworkReply::InternalServerError,
+      googleErrorBody(QStringLiteral("backendError"), QStringLiteral("Backend")), none,
+      kRetry, QStringLiteral("backendError"), -1);
+  row("503 unavailable", 503, QNetworkReply::ServiceUnavailableError, none,
+      QByteArrayLiteral("1"), kRetry, QStringLiteral("http_503"), 1000);
+  row("400 badRequest", 400, QNetworkReply::ProtocolInvalidOperationError,
+      googleErrorBody(QStringLiteral("badRequest"), QStringLiteral("Bad Request")),
+      none, 0, QStringLiteral("badRequest"), -1);
+  row("connection refused", 0, QNetworkReply::ConnectionRefusedError, none, none,
+      kRetry, QStringLiteral("http_0"), -1);
+  row("host not found", 0, QNetworkReply::HostNotFoundError, none, none, kRetry,
+      QStringLiteral("http_0"), -1);
+  row("remote closed", 0, QNetworkReply::RemoteHostClosedError, none, none, kRetry,
+      QStringLiteral("http_0"), -1);
+  row("transfer timeout", 0, QNetworkReply::OperationCanceledError, none, none, kRetry,
+      QStringLiteral("http_0"), -1);
+  row("network session failed", 0, QNetworkReply::TemporaryNetworkFailureError, none,
+      none, kRetry, QStringLiteral("http_0"), -1);
+}
+
+void ProviderTest::googleResponseClassificationTable() {
+  QFETCH(int, status);
+  QFETCH(int, networkError);
+  QFETCH(QByteArray, body);
+  QFETCH(QByteArray, retryAfter);
+  QFETCH(int, flags);
+  QFETCH(QString, errorCode);
+  QFETCH(qint64, retryAfterMs);
+
+  const google::ApiResponse response = google::parseGoogleApiResponse(
+      status, networkError, body, {}, retryAfter, utc(2026, 8, 28, 16));
+  QVERIFY(!response.ok);
+  QCOMPARE(response.httpStatus, status);
+  QCOMPARE(response.networkError, networkError);
+  QCOMPARE(response.errorCode, errorCode);
+  QVERIFY(!response.errorMessage.isEmpty());
+  QCOMPARE(response.authenticationRequired, (flags & kAuth) != 0);
+  QCOMPARE(response.insufficientScope, (flags & kScope) != 0);
+  QCOMPARE(response.retryable, (flags & kRetry) != 0);
+  QCOMPARE(response.notFound, (flags & kNotFound) != 0);
+  QCOMPARE(response.conflict, (flags & kConflict) != 0);
+  QCOMPARE(response.syncTokenExpired, (flags & kExpired) != 0);
+  QCOMPARE(response.retryAfterMs, retryAfterMs);
 }
 
 void ProviderTest::googleMutationIdentityAndRsvpPatch() {

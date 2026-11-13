@@ -1,10 +1,41 @@
 #include "invitationclassification.h"
 
+#include <QJsonObject>
+#include <QJsonValue>
 #include <QTime>
 #include <QTimeZone>
 #include <algorithm>
 
 namespace omacalendar {
+namespace {
+
+QString normalizedInvitationResponse(QString response) {
+  response = response.trimmed().toLower();
+  response.remove(QLatin1Char('-'));
+  response.remove(QLatin1Char('_'));
+  return response;
+}
+
+}  // namespace
+
+bool invitationNeedsResponse(const Event& event, const QString& accountPrincipal) {
+  for (const QJsonValue& value : event.attendees) {
+    const QJsonObject attendee = value.toObject();
+    const QString email = attendee.value(QStringLiteral("email")).toString();
+    if (!attendee.value(QStringLiteral("self")).toBool() &&
+        (accountPrincipal.isEmpty() ||
+         email.compare(accountPrincipal, Qt::CaseInsensitive) != 0)) {
+      continue;
+    }
+    QString response = attendee.value(QStringLiteral("responseStatus")).toString();
+    if (response.isEmpty()) {
+      response = attendee.value(QStringLiteral("partstat")).toString();
+    }
+    const QString normalized = normalizedInvitationResponse(response);
+    return normalized.isEmpty() || normalized == QStringLiteral("needsaction");
+  }
+  return false;
+}
 
 QDateTime invitationStartBoundary(const Event& event) {
   return event.allDay ? QDateTime(event.startDate, QTime(0, 0), QTimeZone::LocalTime)

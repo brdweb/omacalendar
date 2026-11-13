@@ -69,6 +69,28 @@ target_link_libraries(omacalendar-providers-test
 )
 add_test(NAME providers_test COMMAND omacalendar-providers-test)
 
+add_executable(omacalendar-googlemapper-test
+  test_googlemapper.cpp
+)
+target_link_libraries(omacalendar-googlemapper-test
+  PRIVATE
+    Qt6::Test
+    Qt6::Core
+    omacalendar_sync
+)
+add_test(NAME googlemapper_test COMMAND omacalendar-googlemapper-test)
+
+add_executable(omacalendar-googletasks-test
+  test_googletasks.cpp
+)
+target_link_libraries(omacalendar-googletasks-test
+  PRIVATE
+    Qt6::Test
+    Qt6::Core
+    omacalendar_sync
+)
+add_test(NAME googletasks_test COMMAND omacalendar-googletasks-test)
+
 add_executable(omacalendar-sync-activity-test
   test_syncactivity.cpp
 )
