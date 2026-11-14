@@ -1069,17 +1069,12 @@ bool Database::migrateEventColor(QString* errorMessage) {
     return false;
   }
   // This step takes schema 3 to exactly 4. A later schema adds its own step
-  // after this one and updates migrate() to chain them. Until the release
-  // that moves kDatabaseSchemaVersion to 4, the step adds its column and
-  // index without stamping the version, so a released schema-3 build can
-  // still open the file.
-  static_assert(kDatabaseSchemaVersion == 3 || kDatabaseSchemaVersion == 4,
+  // after this one and updates migrate() to chain them.
+  static_assert(kDatabaseSchemaVersion == 4,
                 "chain a migration step from schema 4 to the new version");
-  if constexpr (kDatabaseSchemaVersion == 4) {
-    if (!execute(QStringLiteral("PRAGMA user_version = 4"), errorMessage)) {
-      m_database.rollback();
-      return false;
-    }
+  if (!execute(QStringLiteral("PRAGMA user_version = 4"), errorMessage)) {
+    m_database.rollback();
+    return false;
   }
   if (!m_database.commit()) {
     if (errorMessage != nullptr) {

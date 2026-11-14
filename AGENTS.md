@@ -6,7 +6,7 @@ Personal or machine-specific notes never go in tracked files. Claude Code auto-l
 
 ## Project
 
-OmaCalendar (`omacalendar`, v2.0.2, MIT) is a local-first Qt 6.9 / C++20 calendar for current Arch and Omarchy. The supported installable binary is the native x86-64 Arch package. It ships `omacalendar` (Qt Quick desktop), `omacalendard` (daemon), `omacalendarctl` (CLI), and `scripts/omacalendar-widgetctl`. The daemon owns the SQLite database, provider network access, Secret Service credentials, reminders, and the user-local IPC server. The desktop app and the separate Omarchy widget consume presentation data over IPC. Providers are Google Calendar, CalDAV, local calendars, and read-only ICS.
+OmaCalendar (`omacalendar`, v2.1.0, MIT) is a local-first Qt 6.9 / C++20 calendar for current Arch and Omarchy. The supported installable binary is the native x86-64 Arch package. It ships `omacalendar` (Qt Quick desktop), `omacalendard` (daemon), `omacalendarctl` (CLI), and `scripts/omacalendar-widgetctl`. The daemon owns the SQLite database, provider network access, Secret Service credentials, reminders, and the user-local IPC server. The desktop app and the separate Omarchy widget consume presentation data over IPC. Providers are Google Calendar, CalDAV, local calendars, and read-only ICS.
 
 - `src/app/` — Qt Quick desktop UI (`omacalendar`).
 - `src/daemon/` — `omacalendard`.

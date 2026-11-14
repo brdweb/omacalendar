@@ -1,4 +1,4 @@
-# Local IPC protocol 2.2
+# Local IPC protocol 2.3
 
 ## Transport and trust boundary
 
@@ -7,7 +7,7 @@ OmaCalendar uses newline-delimited UTF-8 JSON on the user-only local socket
 created with owner-only permissions. Both peers enforce a 1 MiB frame limit;
 large event collections are bounded and paginated. A client must keep reading
 its socket: the daemon disconnects a client once more than 8 MiB of responses
-and notifications are queued for it (IPC 2.3, not yet released). The client reconnects and
+and notifications are queued for it (IPC 2.3). The client reconnects and
 re-queries as after any other disconnect.
 
 In packaged installations, `omacalendard.socket` owns this endpoint and passes
@@ -27,7 +27,7 @@ Every request carries `protocolMajor: 2`. `protocolMinor` is optional request
 metadata and does not participate in routing: requests that omit it, send `0`,
 or send an unknown value remain compatible when the major is `2`. A different
 major is rejected with `incompatible_protocol`. The daemon advertises
-`protocolMinor: 2` through `system.info`; clients discover additive fields and
+`protocolMinor: 3` through `system.info`; clients discover additive fields and
 methods from that response rather than requiring an exact minor match.
 
 ```json
@@ -71,7 +71,7 @@ replaces the connection's prior list and may contain `*`, a family such as
 ### System
 
 - `system.ping`, `system.info`, `system.health`, `system.subscribe`
-- `system.backup` (added in IPC 2.3, not yet released)
+- `system.backup` (added in IPC 2.3)
 
 `system.backup` takes no params. It writes a consistent copy of the database
 with SQLite `VACUUM INTO` to
@@ -362,13 +362,13 @@ the daemon syncs right away (at most once a minute) after resuming from sleep
 or when NetworkManager reports full connectivity again.
 
 `accounts.addIcs` results and each `ics.status` subscription additively return
-`privateNetwork` (added in IPC 2.3, not yet released): `true` when the feed host is `localhost` or
+`privateNetwork` (added in IPC 2.3): `true` when the feed host is `localhost` or
 an IP literal in loopback, private-use, link-local, unique-local or shared
 (100.64.0.0/10) address space. Such feeds remain allowed; clients may tell the
 user the feed is only reachable on their own network. Host names are not
 resolved, so `false` is not a guarantee. A feed that redirects to another
 origin fails with `cross_origin_redirect_blocked` (or
-`credential_redirect_blocked` when it has credentials); since IPC 2.3 (not yet released) a
+`credential_redirect_blocked` when it has credentials); since IPC 2.3 a
 redirect from another origin onto a private address fails with
 `private_network_redirect_blocked`.
 

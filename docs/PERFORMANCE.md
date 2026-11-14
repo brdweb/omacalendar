@@ -1,6 +1,6 @@
 # Release performance gate
 
-OmaCalendar's release harness creates a disposable schema-3 database through the
+OmaCalendar's release harness creates a disposable schema-4 database through the
 built daemon, stops the daemon, inserts 100,000 deterministic events in one SQLite
 transaction, and restarts the daemon for warm IPC measurements. It then adds
 20,000 finished historical recurring series, restarts the daemon, and repeats the
@@ -10,7 +10,7 @@ socket, accounts, keyring, notification bus, or XDG paths.
 The base dataset spans 2018–2034 across eight calendars and includes timed,
 all-day, multi-day, floating, zoned, recurring, invitation, pending, conflict,
 read-only, and deleted records. The additional historical series ended between
-2000 and 2011; their COUNT-based UTC/date bounds are stored just as schema 3
+2000 and 2011; their COUNT-based UTC/date bounds are stored just as schema 4
 stores them for daemon writes and upgrades. FTS5 receives all rows through the
 production triggers. The report verifies database integrity, event/FTS row
 counts, and that SQLite selects the bounded-series indexes.

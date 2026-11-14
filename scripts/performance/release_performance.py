@@ -29,7 +29,7 @@ from datetime import UTC, date, datetime, timedelta
 from typing import Any, Iterable
 
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 PROTOCOL_MAJOR = 2
 AGENDA_GATE_MS = 200.0
 DAILY_COUNTS_GATE_MS = 250.0
@@ -400,7 +400,7 @@ def seed_database(database_path: Path, event_count: int) -> dict[str, Any]:
     connection.execute("PRAGMA synchronous=OFF")
     connection.execute("PRAGMA temp_store=MEMORY")
     schema_version = int(connection.execute("PRAGMA user_version").fetchone()[0])
-    require(schema_version == SCHEMA_VERSION, f"expected schema 3, found {schema_version}")
+    require(schema_version == SCHEMA_VERSION, f"expected schema {SCHEMA_VERSION}, found {schema_version}")
 
     event_columns = [
         "id", "calendar_id", "remote_id", "uid", "etag", "summary",
@@ -663,7 +663,7 @@ def benchmark(args: argparse.Namespace, root: Path) -> dict[str, Any]:
     daemon = IsolatedDaemon(args.daemon, root)
     daemon.start()
     daemon.stop()
-    require(daemon.database_path.is_file(), "daemon did not initialize schema 3")
+    require(daemon.database_path.is_file(), f"daemon did not initialize schema {SCHEMA_VERSION}")
 
     seed = seed_database(daemon.database_path, args.events)
     calendar_ids = ["local-default"] + [f"perf-calendar-{index}" for index in range(1, 8)]
@@ -698,7 +698,7 @@ def benchmark(args: argparse.Namespace, root: Path) -> dict[str, Any]:
         require(
             isinstance(system_info, dict)
             and system_info.get("schemaVersion") == SCHEMA_VERSION,
-            "benchmark daemon does not report schema 3",
+            f"benchmark daemon does not report schema {SCHEMA_VERSION}",
         )
         search_params = {
             "query": SEARCH_MARKER,

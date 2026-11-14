@@ -6,22 +6,109 @@ Versioning once public releases begin.
 
 ## [Unreleased]
 
+## [2.1.0] - 2026-11-13
+
+A feature and hardening release. It moves the local IPC to 2.3 (additive) and
+the calendar database to schema 4.
+
+### Upgrade notes
+
+- The calendar database migrates from schema 3 to 4 the first time the 2.1.0
+  daemon opens it. The migration is one-way: back up first if you may need to
+  return to 2.0.x (`omacalendarctl backup`, or see
+  docs/BACKUP_AND_RECOVERY.md).
+- New ICS subscriptions start with alerts muted; existing subscriptions keep
+  their setting.
+- IPC 2.3 is additive. The widget and other 2.x clients keep working.
+
+### Added
+
+- Per-event colours: choose one in the event editor next to the calendar, or
+  keep the calendar's. Google calendars offer Google's 11 event colours, CalDAV
+  stores the RFC 7986 `COLOR` property, and subscriptions show a feed's colours.
+- Plain-language errors with the next step: the error banner says what went
+  wrong (sign in again, check the password, unlock the keyring, check the
+  connection), offers the matching button, keeps the technical text under
+  Details and can be dismissed. Connection failures tell a missing server, a
+  TLS problem, a timeout and being offline apart.
+- A clearer account setup: setup errors stay until dismissed; Google sign-in
+  shows that it is waiting for the browser, can be cancelled and reports a
+  timeout; the CalDAV form has labels, a show-password toggle and server
+  addresses for Fastmail, iCloud, Nextcloud and Radicale.
+- A date picker for event, task and search dates that starts on your first day
+  of the week and works from the keyboard (Alt+Down), and time entry that
+  follows your 12/24-hour preference and accepts `9`, `9:30`, `9am`, `9:30 pm`.
+- Configurable default reminders for timed and all-day events, with a
+  per-calendar override.
+- Copy, cut and paste events with Ctrl+C, Ctrl+X and Ctrl+V.
+- View preferences: Saturday as the first day of the week, hide weekends, hide
+  events you declined, and a week view of 2 to 6 days.
+- A first-run welcome card, and a separate card with Reconnect when the
+  calendar service is not running.
+- `webcal://` and `webcals://` links open the subscription form pre-filled
+  (nothing is subscribed until you confirm), and `.ics` files can be dropped
+  onto the window to import them.
+- Back up while running: Settings → Preferences → Back up now, or
+  `omacalendarctl backup [--copy-to PATH]`. Backups are owner-only and the
+  newest 5 are kept; keyring credentials are not included.
+- Keyboard shortcuts for settings (Ctrl+,), sync (Ctrl+R, F5), import (Ctrl+O)
+  and quit (Ctrl+Q), Ctrl+Enter or Ctrl+S to save in the editors, and a
+  shortcut sheet (?). Closing an editor with unsaved changes asks first.
+- `omacalendarctl today`, `agenda`, `add`, `sync`, `backup` and `methods`, with
+  `--json`, `--timeout`, `--watch` and `--version`, a man page, and bash, zsh
+  and fish completions.
+- Translations are compiled in and loaded for the system locale; counts use
+  real plural forms and dates follow the locale's order and names.
+- The calendar colour palette follows the active Omarchy theme.
+- User guides for troubleshooting (keyring and service), Google sign-in,
+  CalDAV setup, keyboard shortcuts and per-provider features.
+- IPC 2.3: `system.backup`; event `color`; `privateNetwork` in
+  `accounts.addIcs` and `ics.status`; error codes `authorization_timeout`,
+  `private_network_redirect_blocked`, `host_not_found`, `tls_error`,
+  `timeout`, `network_unavailable` and `connection_refused`.
+
 ### Fixed
 
 - Recurring events from Outlook and Exchange that name a Windows time zone
   (such as `Pacific Standard Time`) or a zone defined only by the calendar's
-  own VTIMEZONE now keep deleted occurrences deleted and place extra dates
-  at the right time, instead of reading those dates as UTC. Edited series
-  and ICS subscriptions keep their wall-clock time across daylight-saving
-  changes, and occurrence edits addressed with such a zone match their
-  occurrence. Windows zone names are stored as their IANA zone.
+  own VTIMEZONE keep deleted occurrences deleted and place extra dates at the
+  right time; edited series keep their wall-clock time across daylight-saving
+  changes.
+- Editing a Google recurring event no longer brings back occurrences excluded
+  with a time zone or as all-day dates, and turning a Google series into a
+  single event now removes the repeat rule on Google too.
+- Meetings you organize no longer appear in your invitations.
+- All-day reminders move to the new local midnight when the system time zone
+  changes, without repeating reminders already shown, and recurring events
+  without an end keep reminding instead of stopping about two years after
+  their last edit.
+- An event schedules at most 10 distinct alarms, offsets are limited to a year
+  (fixing an integer overflow) and each calendar to 20,000 pending reminders,
+  so a hostile feed cannot flood the database.
+- Notification titles show event names literally ("Tom & Jerry", not
+  "Tom &amp; Jerry"), and notification actions open the browser outside the
+  service's sandbox.
+- Quick add no longer misreads absurdly long durations.
+- Screen readers announce URL fields, colour swatches, Year view month headers
+  and check, spin and combo boxes by name.
 
 ### Security
 
-- The app opens a Google sign-in link from the background service only when it
-  is an HTTPS page on `accounts.google.com`.
-- Notes fields in the event editor, task editor and conflict merge dialog are
-  explicitly plain text, so provider-supplied notes can never render as markup.
+- The background service runs with a system-call filter, W^X memory
+  protection and a read-only `/usr` and `/etc`.
+- CalDAV requests have an overall time limit; Google API requests no longer
+  follow redirects to other hosts; an unfinished Google sign-in closes its
+  local callback port after 10 minutes; a client that stops reading the
+  daemon socket is disconnected once 8 MiB is queued for it.
+- ICS feeds on local-network addresses are flagged, and a feed that redirects
+  from another host onto such an address is refused.
+- The app opens a Google sign-in link only when it is an HTTPS page on
+  `accounts.google.com`, and notes fields are always plain text.
+- `omacalendarctl` reads parameters from stdin (`-` or `--params-stdin`), so
+  passwords no longer have to appear in the process list or shell history.
+- Every pull request now runs the AddressSanitizer/UndefinedBehaviorSanitizer
+  suite and libFuzzer targets for the iCalendar, CalDAV XML, Google, IPC and
+  quick-add parsers.
 
 ## [2.0.2] - 2026-10-12
 
