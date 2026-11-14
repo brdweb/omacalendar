@@ -27,18 +27,19 @@ if pacman -Q omacalendar >/dev/null 2>&1; then
   exit 2
 fi
 
-# The minimal official image excludes /usr/share/doc. Use a temporary config
-# that restores only this application's manuals, without changing host/image
-# configuration or allowing unrelated documentation to mask dependencies.
+# The minimal official image excludes /usr/share/doc and /usr/share/man. Use a
+# temporary config that restores only this application's manuals and man page,
+# without changing host/image configuration or allowing unrelated documentation
+# to mask dependencies.
 pacman_config=$(mktemp /tmp/omacalendar-pacman-config.XXXXXX)
 trap 'rm -f -- "${pacman_config}"' EXIT
 awk '
   /^\[/ {
-    if (in_options) print "NoExtract = !usr/share/doc/OmaCalendar*"
+    if (in_options) print "NoExtract = !usr/share/doc/OmaCalendar* !usr/share/man/ !usr/share/man/man1/ !usr/share/man/man1/omacalendarctl.1*"
     in_options = $0 == "[options]"
   }
   { print }
-  END { if (in_options) print "NoExtract = !usr/share/doc/OmaCalendar*" }
+  END { if (in_options) print "NoExtract = !usr/share/doc/OmaCalendar* !usr/share/man/ !usr/share/man/man1/ !usr/share/man/man1/omacalendarctl.1*" }
 ' /etc/pacman.conf >"${pacman_config}"
 
 # Install only the package and its declared dependencies after updating the
