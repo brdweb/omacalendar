@@ -531,7 +531,6 @@ Drawer {
         property var setData: ({})
         property var selectedIds: []
         property string defaultCalendarId: ""
-        property int selectionRevision: 0
         anchors.centerIn: Overlay.overlay
         width: Math.min(460, Overlay.overlay ? Overlay.overlay.width - 48 : 460)
         modal: true
@@ -543,7 +542,6 @@ Drawer {
             setName.text = ""
             selectedIds = []
             defaultCalendarId = ""
-            ++selectionRevision
             open()
         }
 
@@ -552,17 +550,14 @@ Drawer {
             setName.text = setData.name || ""
             selectedIds = (setData.calendarIds || []).slice()
             defaultCalendarId = String(setData.defaultCalendarId || "")
-            ++selectionRevision
             open()
         }
 
         function selectionIndex(calendarId) {
-            selectionRevision
             return selectedIds.indexOf(String(calendarId))
         }
 
         function selectedCalendars() {
-            selectionRevision
             const values = []
             for (let selectedIndex = 0; selectedIndex < selectedIds.length;
                  ++selectedIndex) {
@@ -579,7 +574,6 @@ Drawer {
         }
 
         function orderedCalendars() {
-            selectionRevision
             const values = selectedCalendars()
             for (let calendarIndex = 0; calendarIndex < root.calendars.length;
                  ++calendarIndex) {
@@ -604,7 +598,6 @@ Drawer {
             selectedIds = values
             if (values.indexOf(defaultCalendarId) < 0)
                 defaultCalendarId = values.length > 0 ? values[0] : ""
-            ++selectionRevision
         }
 
         function moveCalendar(calendarId, direction) {
@@ -617,7 +610,6 @@ Drawer {
             values[index] = values[target]
             values[target] = moved
             selectedIds = values
-            ++selectionRevision
         }
 
         contentItem: ColumnLayout {

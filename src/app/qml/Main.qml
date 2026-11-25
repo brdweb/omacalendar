@@ -70,11 +70,8 @@ ApplicationWindow {
     readonly property bool tasksAvailable: App.connected && App.tasksSupported === true
     readonly property var taskItems: appList("tasks")
     readonly property var taskLists: appList("taskLists")
-    // Re-evaluated every minute through clockTick so it rolls over at midnight.
-    readonly property date todayDate: {
-        window.clockTick
-        return new Date()
-    }
+    // Refreshed every minute so the date rolls over at midnight.
+    property date todayDate: new Date()
     readonly property string todayKey: TaskGroups.dayKey(todayDate)
     property string pendingGoogleDisplayName: ""
     // Timeline scroll positions survive switching away from a view; negative
@@ -155,7 +152,10 @@ ApplicationWindow {
         interval: 60000
         running: true
         repeat: true
-        onTriggered: window.clockTick = window.clockTick + 1
+        onTriggered: {
+            window.todayDate = new Date()
+            window.clockTick = window.clockTick + 1
+        }
     }
 
     header: Rectangle {
