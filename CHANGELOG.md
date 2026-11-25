@@ -6,6 +6,13 @@ Versioning once public releases begin.
 
 ## [Unreleased]
 
+### Changed
+
+- Pin the desktop installer and `omacalendar-widgetctl` to companion widget
+  v1.0.0 at commit `631312a96da2a81b3e147b368f1b0b981a939629`. Existing managed
+  installs can be updated by following the
+  [manual restore and reinstall steps](docs/INSTALL.md#optional-widget).
+
 ## [2.1.0] - 2026-11-13
 
 A feature and hardening release. It moves the local IPC to 2.3 (additive) and

@@ -3061,6 +3061,12 @@ Item {
                     "calendar-read-only")
             compare(calendarSetDialog.orderedCalendars()[1].id,
                     "calendar-writable")
+            tryVerify(function () {
+                const moveWritableEarlier = findChild(
+                            scene.Window.window.contentItem,
+                            "calendarSetMoveEarlier-calendar-writable")
+                return moveWritableEarlier !== null && moveWritableEarlier.enabled
+            })
             calendarSetDialog.close()
             tryCompare(calendarSetDialog, "opened", false)
 
