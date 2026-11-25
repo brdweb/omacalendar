@@ -44,6 +44,19 @@ Install the native app first, then follow the
 [widget instructions](https://github.com/brdweb/omacalendar-widget#install-a-verified-release-archive).
 The app can close while the widget continues using the background service.
 
+To update a widget installed by `omacalendar-widgetctl`, use the version of
+the helper that pins v1.0.0. Restore the Omarchy clock first, then install the
+new widget. Wait for a successful restore before running the install.
+
+```sh
+omacalendar-widgetctl restore
+omacalendar-widgetctl install --source https://github.com/brdweb/omacalendar-widget.git \
+  --source-ref v1.0.0 --source-commit 631312a96da2a81b3e147b368f1b0b981a939629
+```
+
+For widgets installed directly from an archive or through Omarchy, see the
+[widget's update instructions](https://github.com/brdweb/omacalendar-widget/blob/v1.0.0/README.md#update-or-remove).
+
 ## Update
 
 Back up your data using [backup and recovery](BACKUP_AND_RECOVERY.md).

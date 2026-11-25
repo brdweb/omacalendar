@@ -18,8 +18,8 @@ WIDGETCTL = REPOSITORY / "scripts" / "omacalendar-widgetctl"
 PLUGIN_ID = "org.omacalendar.widget"
 CLOCK_ID = "omarchy.clock"
 OFFICIAL_SOURCE = "https://github.com/brdweb/omacalendar-widget.git"
-OFFICIAL_REF = "v0.2.0"
-VERIFIED_COMMIT = "a" * 40
+OFFICIAL_REF = "v1.0.0"
+VERIFIED_COMMIT = "631312a96da2a81b3e147b368f1b0b981a939629"
 
 
 FAKE_COMMAND = r'''#!/usr/bin/env python3
@@ -107,7 +107,7 @@ elif name == "git":
             source_ref = arguments[arguments.index("--branch") + 1]
         except (ValueError, IndexError):
             fail("clone did not specify an explicit branch or tag")
-        if source_ref != "v0.2.0":
+        if source_ref != os.environ["FAKE_WIDGET_REF"]:
             fail("unexpected source ref: " + source_ref)
         source = Path(os.environ["FAKE_WIDGET_SOURCE"])
         destination = Path(arguments[-1])
@@ -116,7 +116,7 @@ elif name == "git":
     elif len(arguments) == 4 and arguments[0] == "-C" and arguments[2:] == [
         "rev-parse", "HEAD^{commit}"
     ]:
-        print(os.environ.get("FAKE_GIT_COMMIT", "a" * 40))
+        print(os.environ["FAKE_GIT_COMMIT"])
     else:
         fail("unexpected git arguments: " + repr(arguments))
 else:
@@ -211,6 +211,7 @@ class Fixture:
             OMARCHY_PATH=str(self.omarchy_path),
             PATH=str(self.bin) + os.pathsep + self.environment.get("PATH", ""),
             FAKE_WIDGET_SOURCE=str(self.source),
+            FAKE_WIDGET_REF=OFFICIAL_REF,
             FAKE_GIT_COMMIT=VERIFIED_COMMIT,
         )
         self.environment.pop("XDG_STATE_HOME", None)
@@ -480,6 +481,29 @@ class WidgetCtlTest(unittest.TestCase):
         repeated = fixture.install_network()
         self.assertEqual(repeated["status"], "already_installed")
         self.assertEqual(repeated["resolvedCommit"], VERIFIED_COMMIT)
+
+    def test_previous_widget_pin_requires_explicit_restore(self) -> None:
+        fixture = Fixture()
+        self.addCleanup(fixture.close)
+        fixture.install_network()
+        old_commit = "ba251899695f880b4750e1309f38d522a1b86aeb"
+        marker_path = fixture.plugin / ".omacalendar-widgetctl.json"
+        state_path = fixture.state / "state.json"
+        for path in (marker_path, state_path):
+            record = json.loads(path.read_text())
+            record.update(
+                sourceRef="v0.2.0", sourceCommit=old_commit, resolvedCommit=old_commit
+            )
+            path.write_text(json.dumps(record) + "\n")
+        paths = (marker_path, state_path, fixture.shell, fixture.bindings)
+        before = [path.read_bytes() for path in paths]
+
+        payload = fixture.install_network(expected=5)
+        self.assertEqual(payload["error"]["code"], "installed_source_unverified")
+        self.assertEqual([path.read_bytes() for path in paths], before)
+
+        fixture.restore()
+        self.assertEqual(fixture.install_network()["resolvedCommit"], VERIFIED_COMMIT)
 
     def test_network_source_rejects_commit_mismatch_before_activation(self) -> None:
         fixture = Fixture()
